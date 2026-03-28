@@ -30,15 +30,19 @@ function cacheSet(key, value) {
 }
 
 function clearOldCache() {
-    var keys = [];
+    var entries = [];
     for (var i = 0; i < localStorage.length; i++) {
         var k = localStorage.key(i);
-        if (k && k.indexOf(CACHE_PREFIX) === 0) keys.push(k);
+        if (k && k.indexOf(CACHE_PREFIX) === 0) {
+            var ts = 0;
+            try { ts = JSON.parse(localStorage.getItem(k)).ts || 0; } catch (e) {}
+            entries.push({ key: k, ts: ts });
+        }
     }
-    // Remove oldest half
-    keys.sort();
-    for (var i = 0; i < Math.floor(keys.length / 2); i++) {
-        localStorage.removeItem(keys[i]);
+    // Remove oldest half by timestamp
+    entries.sort(function (a, b) { return a.ts - b.ts; });
+    for (var i = 0; i < Math.floor(entries.length / 2); i++) {
+        localStorage.removeItem(entries[i].key);
     }
 }
 
@@ -62,6 +66,7 @@ var state = {
     totalDistMetres: 0,
     midpointMarkers: [],  // draggable midpoints for inserting waypoints
     useMiles: false,
+    lastElevationData: [], // cached elevation results for GPX export
 };
 
 // ── Routing graph ──────────────────────────────────────
@@ -90,18 +95,48 @@ function buildGraph(geojson) {
     return adj;
 }
 
+// ── Binary min-heap for Dijkstra ──────────────────────
+function MinHeap() {
+    this.data = [];
+}
+MinHeap.prototype.push = function (item) {
+    this.data.push(item);
+    var i = this.data.length - 1;
+    while (i > 0) {
+        var parent = (i - 1) >> 1;
+        if (this.data[parent].d <= this.data[i].d) break;
+        var tmp = this.data[parent]; this.data[parent] = this.data[i]; this.data[i] = tmp;
+        i = parent;
+    }
+};
+MinHeap.prototype.pop = function () {
+    var top = this.data[0];
+    var last = this.data.pop();
+    if (this.data.length > 0) {
+        this.data[0] = last;
+        var i = 0, len = this.data.length;
+        while (true) {
+            var left = 2 * i + 1, right = 2 * i + 2, smallest = i;
+            if (left < len && this.data[left].d < this.data[smallest].d) smallest = left;
+            if (right < len && this.data[right].d < this.data[smallest].d) smallest = right;
+            if (smallest === i) break;
+            var tmp = this.data[smallest]; this.data[smallest] = this.data[i]; this.data[i] = tmp;
+            i = smallest;
+        }
+    }
+    return top;
+};
+MinHeap.prototype.size = function () { return this.data.length; };
+
 function dijkstra(graph, startKey, endKey) {
     if (!graph[startKey] || !graph[endKey]) return null;
     if (startKey === endKey) return { dist: 0, path: [startKey] };
-    var dist = {}, prev = {}, visited = {}, queue = [];
+    var dist = {}, prev = {}, visited = {};
+    var heap = new MinHeap();
     dist[startKey] = 0;
-    queue.push({ key: startKey, d: 0 });
-    while (queue.length > 0) {
-        var minIdx = 0;
-        for (var q = 1; q < queue.length; q++) {
-            if (queue[q].d < queue[minIdx].d) minIdx = q;
-        }
-        var current = queue.splice(minIdx, 1)[0];
+    heap.push({ key: startKey, d: 0 });
+    while (heap.size() > 0) {
+        var current = heap.pop();
         if (visited[current.key]) continue;
         visited[current.key] = true;
         if (current.key === endKey) break;
@@ -113,7 +148,7 @@ function dijkstra(graph, startKey, endKey) {
             if (dist[nb.key] === undefined || newDist < dist[nb.key]) {
                 dist[nb.key] = newDist;
                 prev[nb.key] = current.key;
-                queue.push({ key: nb.key, d: newDist });
+                heap.push({ key: nb.key, d: newDist });
             }
         }
     }
@@ -124,13 +159,44 @@ function dijkstra(graph, startKey, endKey) {
     return { dist: dist[endKey], path: path };
 }
 
+// ── Spatial grid for fast nearest-node lookup ─────────
+var GRID_CELL = 0.005; // ~500m cells
+var spatialGrid = {};
+
+function gridKey(lat, lon) {
+    return (Math.floor(lat / GRID_CELL) * GRID_CELL).toFixed(4) + ":" + (Math.floor(lon / GRID_CELL) * GRID_CELL).toFixed(4);
+}
+
+function gridInsert(nk, lat, lon) {
+    var gk = gridKey(lat, lon);
+    if (!spatialGrid[gk]) spatialGrid[gk] = [];
+    spatialGrid[gk].push({ key: nk, lat: lat, lon: lon });
+}
+
 function closestNode(graph, lat, lon) {
     var bestKey = null, bestDist = Infinity;
-    var keys = Object.keys(graph);
-    for (var i = 0; i < keys.length; i++) {
-        var parts = keys[i].split(",");
-        var d = haversine(lat, lon, parseFloat(parts[0]), parseFloat(parts[1]));
-        if (d < bestDist) { bestDist = d; bestKey = keys[i]; }
+    var cLat = Math.floor(lat / GRID_CELL) * GRID_CELL;
+    var cLon = Math.floor(lon / GRID_CELL) * GRID_CELL;
+    // Search 3x3 neighborhood of grid cells
+    for (var dLat = -1; dLat <= 1; dLat++) {
+        for (var dLon = -1; dLon <= 1; dLon++) {
+            var gk = (cLat + dLat * GRID_CELL).toFixed(4) + ":" + (cLon + dLon * GRID_CELL).toFixed(4);
+            var bucket = spatialGrid[gk];
+            if (!bucket) continue;
+            for (var i = 0; i < bucket.length; i++) {
+                var d = haversine(lat, lon, bucket[i].lat, bucket[i].lon);
+                if (d < bestDist) { bestDist = d; bestKey = bucket[i].key; }
+            }
+        }
+    }
+    // Fallback to full scan if grid miss (shouldn't happen often)
+    if (!bestKey) {
+        var keys = Object.keys(graph);
+        for (var i = 0; i < keys.length; i++) {
+            var parts = keys[i].split(",");
+            var d = haversine(lat, lon, parseFloat(parts[0]), parseFloat(parts[1]));
+            if (d < bestDist) { bestDist = d; bestKey = keys[i]; }
+        }
     }
     return bestKey;
 }
@@ -220,21 +286,58 @@ function updateMarkerNumber(marker, num) {
 // ── Autocomplete (Photon) ──────────────────────────────
 var autocompleteTimer = null;
 
+function setAutocompleteOpen(open) {
+    var wrapper = document.querySelector(".address-wrapper");
+    var list = document.getElementById("autocomplete-list");
+    list.style.display = open ? "block" : "none";
+    if (wrapper) wrapper.setAttribute("aria-expanded", open ? "true" : "false");
+}
+
 function setupAutocomplete() {
     var input = document.getElementById("address-input");
     var list = document.getElementById("autocomplete-list");
+    var activeIdx = -1;
+
     input.addEventListener("input", function () {
         clearTimeout(autocompleteTimer);
+        activeIdx = -1;
         var q = input.value.trim();
-        if (q.length < 3) { list.style.display = "none"; return; }
+        if (q.length < 3) { setAutocompleteOpen(false); return; }
         autocompleteTimer = setTimeout(function () { fetchSuggestions(q); }, 300);
     });
     input.addEventListener("blur", function () {
-        setTimeout(function () { list.style.display = "none"; }, 200);
+        setTimeout(function () { setAutocompleteOpen(false); }, 200);
     });
     input.addEventListener("keydown", function (e) {
-        if (e.key === "Escape") list.style.display = "none";
+        var items = list.querySelectorAll("[role='option']");
+        if (e.key === "Escape") { setAutocompleteOpen(false); return; }
+        if (e.key === "ArrowDown") {
+            e.preventDefault();
+            activeIdx = Math.min(activeIdx + 1, items.length - 1);
+            updateActiveItem(items, activeIdx, input);
+        } else if (e.key === "ArrowUp") {
+            e.preventDefault();
+            activeIdx = Math.max(activeIdx - 1, 0);
+            updateActiveItem(items, activeIdx, input);
+        } else if (e.key === "Enter" && activeIdx >= 0 && items[activeIdx]) {
+            e.preventDefault();
+            items[activeIdx].dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+        }
     });
+}
+
+function updateActiveItem(items, idx, input) {
+    for (var i = 0; i < items.length; i++) {
+        items[i].classList.remove("active");
+        items[i].setAttribute("aria-selected", "false");
+    }
+    if (items[idx]) {
+        items[idx].classList.add("active");
+        items[idx].setAttribute("aria-selected", "true");
+        input.setAttribute("aria-activedescendant", items[idx].id);
+    } else {
+        input.removeAttribute("aria-activedescendant");
+    }
 }
 
 async function fetchSuggestions(query) {
@@ -249,10 +352,10 @@ async function fetchSuggestions(query) {
         var data = await resp.json();
         var features = data.features || [];
         while (list.firstChild) list.removeChild(list.firstChild);
-        if (features.length === 0) { list.style.display = "none"; return; }
+        if (features.length === 0) { setAutocompleteOpen(false); return; }
 
         for (var i = 0; i < features.length; i++) {
-            (function (feat) {
+            (function (feat, idx) {
                 var props = feat.properties;
                 var parts = [];
                 if (props.name) parts.push(props.name);
@@ -263,18 +366,21 @@ async function fetchSuggestions(query) {
                 var label = parts.join(", ");
                 var item = document.createElement("div");
                 item.className = "autocomplete-item";
+                item.id = "ac-option-" + idx;
+                item.setAttribute("role", "option");
+                item.setAttribute("aria-selected", "false");
                 item.textContent = label;
                 item.addEventListener("mousedown", function (e) {
                     e.preventDefault();
                     document.getElementById("address-input").value = label;
-                    list.style.display = "none";
+                    setAutocompleteOpen(false);
                     var coords = feat.geometry.coordinates;
                     goToLocation(coords[1], coords[0]);
                 });
                 list.appendChild(item);
-            })(features[i]);
+            })(features[i], i);
         }
-        list.style.display = "block";
+        setAutocompleteOpen(true);
     } catch (e) { console.warn("Autocomplete failed:", e.message); }
 }
 
@@ -282,7 +388,7 @@ async function fetchSuggestions(query) {
 async function geocodeAddress(opts) {
     var q = document.getElementById("address-input").value.trim();
     if (!q) return;
-    document.getElementById("autocomplete-list").style.display = "none";
+    setAutocompleteOpen(false);
     try {
         var center = state.map ? state.map.getCenter() : { lat: -31.95, lng: 115.86 };
         var resp = await fetch(
@@ -348,20 +454,36 @@ async function loadPaths(lat, lon) {
         '  way["highway"="steps"](around:' + radius + ',' + lat + ',' + lon + ');\n' +
         ');\nout body;\n>;\nout skel qt;';
 
-    try {
-        var resp = await fetch("https://overpass-api.de/api/interpreter", {
-            method: "POST",
-            body: "data=" + encodeURIComponent(query),
-            headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        });
-        if (!resp.ok) throw new Error("HTTP " + resp.status);
-        var raw = await resp.json();
-        var geojson = osmToGeoJSON(raw);
-        cacheSet(cacheKey, geojson);
-        applyPaths(geojson);
-        showBanner("");
-    } catch (e) {
-        showBanner("Failed to load paths: " + e.message);
+    var maxRetries = 3, delay = 2000;
+    for (var attempt = 0; attempt <= maxRetries; attempt++) {
+        try {
+            var resp = await fetch("https://overpass-api.de/api/interpreter", {
+                method: "POST",
+                body: "data=" + encodeURIComponent(query),
+                headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            });
+            if (resp.status === 429 || resp.status >= 500) {
+                if (attempt < maxRetries) {
+                    showBanner("Path server busy, retrying...", "loading");
+                    await new Promise(function (r) { setTimeout(r, delay * Math.pow(2, attempt)); });
+                    continue;
+                }
+            }
+            if (!resp.ok) throw new Error("HTTP " + resp.status);
+            var raw = await resp.json();
+            var geojson = osmToGeoJSON(raw);
+            cacheSet(cacheKey, geojson);
+            applyPaths(geojson);
+            showBanner("");
+            return;
+        } catch (e) {
+            if (attempt < maxRetries) {
+                showBanner("Retrying path load...", "loading");
+                await new Promise(function (r) { setTimeout(r, delay * Math.pow(2, attempt)); });
+                continue;
+            }
+            showBanner("Failed to load paths: " + e.message);
+        }
     }
 }
 
@@ -440,6 +562,7 @@ function applyPaths(geojson) {
 
     // Extend the routing graph (don't rebuild — just add new edges)
     if (!state.graph) state.graph = {};
+    if (!state.edgeSet) state.edgeSet = {};
     var adj = state.graph;
     for (var f = 0; f < newFeatures.length; f++) {
         var coords = newFeatures[f].geometry.coordinates;
@@ -447,9 +570,13 @@ function applyPaths(geojson) {
             var lat1 = coords[c-1][1], lon1 = coords[c-1][0];
             var lat2 = coords[c][1], lon2 = coords[c][0];
             var k1 = nodeKey(lat1, lon1), k2 = nodeKey(lat2, lon2);
+            // Deduplicate edges
+            var edgeId = k1 < k2 ? k1 + "|" + k2 : k2 + "|" + k1;
+            if (state.edgeSet[edgeId]) continue;
+            state.edgeSet[edgeId] = true;
             var d = haversine(lat1, lon1, lat2, lon2);
-            if (!adj[k1]) adj[k1] = [];
-            if (!adj[k2]) adj[k2] = [];
+            if (!adj[k1]) { adj[k1] = []; gridInsert(k1, lat1, lon1); }
+            if (!adj[k2]) { adj[k2] = []; gridInsert(k2, lat2, lon2); }
             adj[k1].push({ key: k2, lat: lat2, lon: lon2, dist: d });
             adj[k2].push({ key: k1, lat: lat1, lon: lon1, dist: d });
         }
@@ -499,6 +626,32 @@ async function fetchElevation(points) {
 }
 
 // ── Waypoints ──────────────────────────────────────────
+function wireMarkerEvents(marker) {
+    marker.on("click", function (ev) {
+        L.DomEvent.stopPropagation(ev);
+        var idx = -1;
+        for (var w = 0; w < state.waypoints.length; w++) { if (state.waypoints[w].marker === marker) { idx = w; break; } }
+        removeWaypoint(idx);
+    });
+    marker.on("dragend", function () {
+        var pos = marker.getLatLng();
+        var newKey = closestNode(state.graph, pos.lat, pos.lng);
+        if (newKey) {
+            var p = newKey.split(",");
+            marker.setLatLng([parseFloat(p[0]), parseFloat(p[1])]);
+            for (var w = 0; w < state.waypoints.length; w++) {
+                if (state.waypoints[w].marker === marker) {
+                    state.waypoints[w].lat = parseFloat(p[0]);
+                    state.waypoints[w].lon = parseFloat(p[1]);
+                    state.waypoints[w].nodeKey = newKey;
+                    break;
+                }
+            }
+        }
+        updateRoute();
+    });
+}
+
 function onMapClick(e) { addWaypointAt(e.latlng.lat, e.latlng.lng); }
 
 async function addWaypointAt(lat, lon, opts) {
@@ -523,30 +676,7 @@ async function addWaypointAt(lat, lon, opts) {
     var displayLon = (opts && opts.exactPosition) ? lon : snapLon;
     var num = state.waypoints.length + 1;
     var marker = createNumberedMarker(displayLat, displayLon, num);
-
-    marker.on("click", function (ev) {
-        L.DomEvent.stopPropagation(ev);
-        var idx = -1;
-        for (var w = 0; w < state.waypoints.length; w++) { if (state.waypoints[w].marker === marker) { idx = w; break; } }
-        removeWaypoint(idx);
-    });
-    marker.on("dragend", function () {
-        var pos = marker.getLatLng();
-        var newKey = closestNode(state.graph, pos.lat, pos.lng);
-        if (newKey) {
-            var p = newKey.split(",");
-            marker.setLatLng([parseFloat(p[0]), parseFloat(p[1])]);
-            for (var w = 0; w < state.waypoints.length; w++) {
-                if (state.waypoints[w].marker === marker) {
-                    state.waypoints[w].lat = parseFloat(p[0]);
-                    state.waypoints[w].lon = parseFloat(p[1]);
-                    state.waypoints[w].nodeKey = newKey;
-                    break;
-                }
-            }
-        }
-        updateRoute();
-    });
+    wireMarkerEvents(marker);
 
     state.waypoints.push({ lat: displayLat, lon: displayLon, marker: marker, nodeKey: nk });
     updateRoute();
@@ -665,7 +795,14 @@ async function updateRoute() {
 
     addMidpointMarkers();
     updateDistance();
-    fetchRouteElevation(allRouteCoords);
+    debouncedFetchElevation(allRouteCoords);
+    updateShareHash();
+}
+
+var _elevationTimer = null;
+function debouncedFetchElevation(coords) {
+    clearTimeout(_elevationTimer);
+    _elevationTimer = setTimeout(function () { fetchRouteElevation(coords); }, 400);
 }
 
 // ── Midpoint markers (drag to insert waypoint) ─────────
@@ -731,32 +868,7 @@ function addMidpointMarkers() {
 
                 var num = insertIdx + 1;
                 var marker = createNumberedMarker(snapLat, snapLon, num);
-
-                marker.on("click", function (ev) {
-                    L.DomEvent.stopPropagation(ev);
-                    var idx = -1;
-                    for (var w = 0; w < state.waypoints.length; w++) {
-                        if (state.waypoints[w].marker === marker) { idx = w; break; }
-                    }
-                    removeWaypoint(idx);
-                });
-                marker.on("dragend", function () {
-                    var p2 = marker.getLatLng();
-                    var newKey = state.graph ? closestNode(state.graph, p2.lat, p2.lng) : null;
-                    if (newKey) {
-                        var pp = newKey.split(",");
-                        marker.setLatLng([parseFloat(pp[0]), parseFloat(pp[1])]);
-                        for (var w = 0; w < state.waypoints.length; w++) {
-                            if (state.waypoints[w].marker === marker) {
-                                state.waypoints[w].lat = parseFloat(pp[0]);
-                                state.waypoints[w].lon = parseFloat(pp[1]);
-                                state.waypoints[w].nodeKey = newKey;
-                                break;
-                            }
-                        }
-                    }
-                    updateRoute();
-                });
+                wireMarkerEvents(marker);
 
                 var wp = { lat: snapLat, lon: snapLon, marker: marker, nodeKey: nk || nodeKey(snapLat, snapLon) };
                 state.waypoints.splice(insertIdx, 0, wp);
@@ -817,7 +929,9 @@ function updateEstimatedTime() {
 function updateDistanceMarkers() {
     for (var m = 0; m < state.distanceMarkers.length; m++) state.map.removeLayer(state.distanceMarkers[m]);
     state.distanceMarkers = [];
-    if (state.totalDistMetres < 1000) return;
+    var interval = state.useMiles ? 1609.344 : 1000; // 1 mile or 1 km
+    var suffix = state.useMiles ? "mi" : "k";
+    if (state.totalDistMetres < interval) return;
 
     var coords = [];
     for (var s = 0; s < state.routeSegments.length; s++) {
@@ -831,23 +945,24 @@ function updateDistanceMarkers() {
     }
     if (coords.length < 2) return;
 
-    var accumulated = 0, nextKm = 1000;
+    var accumulated = 0, nextMark = interval, markNum = 1;
     for (var i = 1; i < coords.length; i++) {
         var d = haversine(coords[i-1][0], coords[i-1][1], coords[i][0], coords[i][1]);
         accumulated += d;
-        while (accumulated >= nextKm) {
-            var ratio = 1 - (accumulated - nextKm) / d;
+        while (accumulated >= nextMark) {
+            var ratio = 1 - (accumulated - nextMark) / d;
             var lat = coords[i-1][0] + ratio * (coords[i][0] - coords[i-1][0]);
             var lon = coords[i-1][1] + ratio * (coords[i][1] - coords[i-1][1]);
             var el = document.createElement("div");
             el.style.cssText = "background:#fff;color:#1a1d28;border-radius:8px;padding:1px 5px;font-size:10px;font-weight:700;box-shadow:0 1px 4px rgba(0,0,0,0.5);";
-            el.textContent = (nextKm/1000) + "k";
+            el.textContent = markNum + suffix;
             var mkr = L.marker([lat, lon], {
                 icon: L.divIcon({ html: el.outerHTML, className: "", iconSize: [30,16], iconAnchor: [15,8] }),
                 interactive: false, zIndexOffset: -100,
             }).addTo(state.map);
             state.distanceMarkers.push(mkr);
-            nextKm += 1000;
+            markNum++;
+            nextMark += interval;
         }
     }
 }
@@ -861,10 +976,12 @@ async function fetchRouteElevation(coords) {
 
     try {
         var results = await fetchElevation(locations);
+        state.lastElevationData = results;
         updateElevation(results);
         colourRouteByGradient(results);
     } catch (e) {
         console.warn("Elevation fetch failed:", e.message);
+        state.lastElevationData = [];
         updateElevation([]);
     }
 }
@@ -972,8 +1089,28 @@ function exportGPX() {
     var km = (state.totalDistMetres / 1000).toFixed(1);
     var date = new Date().toISOString().split("T")[0];
     var name = "legwork-" + date + "-" + km + "km";
+    // Build elevation lookup from cached data
+    var elevLookup = {};
+    for (var e = 0; e < state.lastElevationData.length; e++) {
+        var ed = state.lastElevationData[e];
+        if (ed) elevLookup[ed.lat.toFixed(5) + "," + ed.lon.toFixed(5)] = ed.elevation;
+    }
+
     var gpx = ['<?xml version="1.0" encoding="UTF-8"?>','<gpx version="1.1" creator="Legwork" xmlns="http://www.topografix.com/GPX/1/1">','  <trk>','    <name>'+name+'</name>','    <trkseg>'];
-    for (var i = 0; i < coords.length; i++) gpx.push('      <trkpt lat="'+coords[i][0]+'" lon="'+coords[i][1]+'"></trkpt>');
+    for (var i = 0; i < coords.length; i++) {
+        var elevKey = coords[i][0].toFixed(5) + "," + coords[i][1].toFixed(5);
+        var elev = elevLookup[elevKey];
+        // Also check localStorage elevation cache
+        if (elev === undefined) {
+            var cached = cacheGet("elev2:" + coords[i][0].toFixed(5) + ":" + coords[i][1].toFixed(5));
+            if (cached) elev = cached.elevation;
+        }
+        if (elev !== undefined) {
+            gpx.push('      <trkpt lat="'+coords[i][0]+'" lon="'+coords[i][1]+'"><ele>'+elev.toFixed(1)+'</ele></trkpt>');
+        } else {
+            gpx.push('      <trkpt lat="'+coords[i][0]+'" lon="'+coords[i][1]+'"></trkpt>');
+        }
+    }
     gpx.push('    </trkseg>','  </trk>','</gpx>');
     var blob = new Blob([gpx.join("\n")], { type: "application/gpx+xml" });
     var url = URL.createObjectURL(blob);
@@ -1002,6 +1139,7 @@ document.getElementById("address-input").addEventListener("keydown", function (e
 document.getElementById("mode-btn").addEventListener("click", function () {
     state.mode = state.mode === "loop" ? "outback" : "loop";
     this.textContent = state.mode === "loop" ? "\u21BB Loop" : "\u21C4 Out & Back";
+    this.setAttribute("aria-label", "Route mode: " + (state.mode === "loop" ? "loop" : "out and back"));
     updateRoute();
 });
 document.getElementById("pace-input").addEventListener("input", updateEstimatedTime);
@@ -1058,9 +1196,6 @@ function loadFromHash() {
     return points;
 }
 
-var _origUpdateRoute = updateRoute;
-updateRoute = function () { _origUpdateRoute(); updateShareHash(); };
-
 // ── Welcome modal ──────────────────────────────────────
 function showWelcome() {
     var modal = document.getElementById("welcome-modal");
@@ -1079,10 +1214,31 @@ function showWelcome() {
     });
 }
 
+// ── Offline indicator ──────────────────────────────────
+function updateOnlineStatus() {
+    if (!navigator.onLine) {
+        showBanner("You're offline — cached routes and tiles still work", "loading");
+    } else {
+        // Only clear if it's showing the offline message
+        var banner = document.getElementById("info-banner");
+        if (banner.textContent.indexOf("offline") !== -1) showBanner("");
+    }
+}
+window.addEventListener("online", updateOnlineStatus);
+window.addEventListener("offline", updateOnlineStatus);
+
+// ── Service worker ────────────────────────────────────
+if ("serviceWorker" in navigator) {
+    navigator.serviceWorker.register("./sw.js").catch(function (e) {
+        console.warn("SW registration failed:", e.message);
+    });
+}
+
 // ── Boot ───────────────────────────────────────────────
 initMap();
 setupAutocomplete();
 showWelcome();
+updateOnlineStatus();
 
 var sharedPoints = loadFromHash();
 if (sharedPoints) {
