@@ -343,6 +343,7 @@ async function loadPaths(lat, lon) {
         '  way["highway"="tertiary"](around:' + radius + ',' + lat + ',' + lon + ');\n' +
         '  way["highway"="secondary"](around:' + radius + ',' + lat + ',' + lon + ');\n' +
         '  way["highway"="primary"](around:' + radius + ',' + lat + ',' + lon + ');\n' +
+        '  way["highway"="trunk"](around:' + radius + ',' + lat + ',' + lon + ');\n' +
         '  way["highway"="crossing"](around:' + radius + ',' + lat + ',' + lon + ');\n' +
         '  way["highway"="steps"](around:' + radius + ',' + lat + ',' + lon + ');\n' +
         ');\nout body;\n>;\nout skel qt;';
