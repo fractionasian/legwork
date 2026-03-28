@@ -411,10 +411,11 @@ async function fetchElevation(points) {
     }
 
     for (var b = 0; b < uncached.length; b += 100) {
+        if (b > 0) await new Promise(function (r) { setTimeout(r, 1100); }); // rate limit: 1 req/sec
         var batch = uncached.slice(b, b + 100);
         var locStr = batch.map(function (p) { return p.lat + "," + p.lon; }).join("|");
         try {
-            var resp = await fetch("https://api.opentopodata.org/v1/srtm30m?locations=" + encodeURIComponent(locStr));
+            var resp = await fetch("https://api.opentopodata.org/v1/srtm30m?locations=" + locStr);
             if (!resp.ok) throw new Error("HTTP " + resp.status);
             var data = await resp.json();
             for (var j = 0; j < (data.results || []).length; j++) {
