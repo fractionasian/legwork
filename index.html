@@ -21,16 +21,11 @@
             <div class="autocomplete-list" id="autocomplete-list"></div>
         </div>
         <button id="geocode-btn">Go</button>
-        <select id="radius-select" title="How far to load paths from your start point">
-            <option value="1000">Paths: 1 km</option>
-            <option value="2000" selected>Paths: 2 km</option>
-            <option value="5000">Paths: 5 km</option>
-            <option value="10000">Paths: 10 km</option>
-        </select>
-        <select id="mode-select">
-            <option value="loop" selected>&#8635; Loop</option>
-            <option value="outback">&#8644; Out &amp; Back</option>
-        </select>
+        <label class="toggle" title="Switch between loop and out-and-back">
+            <input type="checkbox" id="mode-toggle" />
+            <span class="toggle-slider"></span>
+            <span class="toggle-label" id="mode-label">Loop</span>
+        </label>
         <span class="distance-display" id="distance-display">0.0 km</span>
         <span class="time-display" id="time-display"></span>
         <input type="text" id="pace-input" placeholder="Pace min/km" style="width:90px;flex:none" />

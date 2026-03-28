@@ -304,8 +304,17 @@ function goToLocation(lat, lon) {
 }
 
 // ── Load paths (direct Overpass API) ───────────────────
+function radiusFromZoom() {
+    if (!state.map) return 2000;
+    var z = state.map.getZoom();
+    if (z >= 16) return 1000;
+    if (z >= 14) return 2000;
+    if (z >= 12) return 5000;
+    return 10000;
+}
+
 async function loadPaths(lat, lon) {
-    var radius = document.getElementById("radius-select").value;
+    var radius = radiusFromZoom();
     var cacheKey = "paths:" + lat.toFixed(3) + ":" + lon.toFixed(3) + ":" + radius;
 
     showBanner("Loading paths...", "loading");
@@ -441,10 +450,22 @@ async function fetchElevation(points) {
 // ── Waypoints ──────────────────────────────────────────
 function onMapClick(e) { addWaypointAt(e.latlng.lat, e.latlng.lng); }
 
-function addWaypointAt(lat, lon, opts) {
-    if (!state.graph) { showBanner("Paths not loaded yet — click Go first"); return; }
+async function addWaypointAt(lat, lon, opts) {
+    // Auto-load paths if we don't have coverage here
+    if (!state.graph) {
+        await loadPaths(lat, lon);
+        if (!state.graph) { showBanner("Could not load paths for this area"); return; }
+    }
     var nk = closestNode(state.graph, lat, lon);
     if (!nk) return;
+    // If closest node is >200m away, we probably need more paths
+    var nkParts = nk.split(",");
+    var snapDist = haversine(lat, lon, parseFloat(nkParts[0]), parseFloat(nkParts[1]));
+    if (snapDist > 200) {
+        await loadPaths(lat, lon);
+        nk = closestNode(state.graph, lat, lon);
+        if (!nk) return;
+    }
     var parts = nk.split(",");
     var snapLat = parseFloat(parts[0]), snapLon = parseFloat(parts[1]);
     var displayLat = (opts && opts.exactPosition) ? lat : snapLat;
@@ -768,10 +789,11 @@ function showBanner(msg, type) {
 // ── Event bindings ─────────────────────────────────────
 document.getElementById("geocode-btn").addEventListener("click", function () { geocodeAddress(); });
 document.getElementById("address-input").addEventListener("keydown", function (e) { if (e.key === "Enter") geocodeAddress(); });
-document.getElementById("radius-select").addEventListener("change", function () {
-    var c = state.map.getCenter(); loadPaths(c.lat, c.lng);
+document.getElementById("mode-toggle").addEventListener("change", function (e) {
+    state.mode = e.target.checked ? "outback" : "loop";
+    document.getElementById("mode-label").textContent = e.target.checked ? "Out & Back" : "Loop";
+    updateRoute();
 });
-document.getElementById("mode-select").addEventListener("change", function (e) { state.mode = e.target.value; updateRoute(); });
 document.getElementById("pace-input").addEventListener("input", updateEstimatedTime);
 document.getElementById("reverse-btn").addEventListener("click", function () {
     if (state.waypoints.length < 2) return;
@@ -810,7 +832,13 @@ function loadFromHash() {
         return { lat: parseFloat(parts[0]), lon: parseFloat(parts[1]) };
     });
     if (points.length < 2) return false;
-    if (params.m === "outback" || params.m === "loop") { state.mode = params.m; document.getElementById("mode-select").value = params.m; }
+    if (params.m === "outback" || params.m === "loop") {
+        state.mode = params.m;
+        if (params.m === "outback") {
+            document.getElementById("mode-toggle").checked = true;
+            document.getElementById("mode-label").textContent = "Out & Back";
+        }
+    }
     return points;
 }
 

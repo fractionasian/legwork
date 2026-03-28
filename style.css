@@ -113,6 +113,52 @@ body {
     font-variant-numeric: tabular-nums;
 }
 
+/* ── Mode toggle ──────────────────────────────────── */
+.toggle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.toggle input { display: none; }
+
+.toggle-slider {
+    position: relative;
+    width: 36px;
+    height: 20px;
+    background: #2d6a4f;
+    border-radius: 10px;
+    transition: background 0.2s;
+}
+
+.toggle-slider::after {
+    content: "";
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 16px;
+    height: 16px;
+    background: #fff;
+    border-radius: 50%;
+    transition: transform 0.2s;
+}
+
+.toggle input:checked + .toggle-slider {
+    background: #2e86de;
+}
+
+.toggle input:checked + .toggle-slider::after {
+    transform: translateX(16px);
+}
+
+.toggle-label {
+    font-size: 13px;
+    color: #d0d0d0;
+    min-width: 70px;
+}
+
 /* ── Autocomplete ─────────────────────────────────── */
 .autocomplete-list {
     position: absolute;
