@@ -10,27 +10,31 @@
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://fractionasian.github.io/legwork/" />
     <link rel="icon" href="data:image/svg+xml,&lt;svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'&gt;&lt;text y='.9em' font-size='90'&gt;&#129461;&lt;/text&gt;&lt;/svg&gt;" />
+    <link rel="manifest" href="manifest.json" />
+    <meta name="theme-color" content="#1a1d28" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
     <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-    <div class="controls">
-        <span class="app-title">&#129461; Legwork</span>
-        <div class="address-wrapper">
-            <input type="text" id="address-input" placeholder="Enter address..." autocomplete="off" />
-            <div class="autocomplete-list" id="autocomplete-list"></div>
+    <nav class="controls" aria-label="Route controls">
+        <span class="app-title" aria-hidden="true">&#129461; Legwork</span>
+        <div class="address-wrapper" role="combobox" aria-expanded="false" aria-haspopup="listbox" aria-owns="autocomplete-list">
+            <input type="text" id="address-input" placeholder="Enter address..." autocomplete="off" aria-label="Search address" aria-autocomplete="list" aria-controls="autocomplete-list" />
+            <div class="autocomplete-list" id="autocomplete-list" role="listbox" aria-label="Address suggestions"></div>
         </div>
-        <button id="geocode-btn">Go</button>
-        <button id="mode-btn" title="Click to toggle between loop and out-and-back">&#8635; Loop</button>
-        <span class="distance-display" id="distance-display">0.0 km</span>
-        <span class="time-display" id="time-display"></span>
-        <input type="text" id="pace-input" placeholder="Pace min/km" style="width:90px;flex:none" />
-        <button id="reverse-btn" title="Reverse route direction">Reverse</button>
-        <button id="clear-btn">Clear</button>
-        <button id="export-btn">Export GPX</button>
-    </div>
-    <div class="info-banner" id="info-banner"></div>
-    <div id="map"></div>
+        <button id="geocode-btn" aria-label="Go to address">Go</button>
+        <button id="mode-btn" title="Click to toggle between loop and out-and-back" aria-label="Route mode: loop">&#8635; Loop</button>
+        <span class="distance-display" id="distance-display" role="status" aria-live="polite" tabindex="0">0.0 km</span>
+        <span class="time-display" id="time-display" role="status" aria-live="polite"></span>
+        <input type="text" id="pace-input" placeholder="Pace min/km" aria-label="Running pace in minutes per kilometre" style="width:90px;flex:none" />
+        <button id="reverse-btn" title="Reverse route direction" aria-label="Reverse route direction">Reverse</button>
+        <button id="clear-btn" aria-label="Clear all waypoints">Clear</button>
+        <button id="export-btn" aria-label="Export route as GPX file">Export GPX</button>
+    </nav>
+    <div class="info-banner" id="info-banner" role="alert" aria-live="assertive"></div>
+    <div id="map" role="application" aria-label="Route planning map"></div>
     <div class="elevation-stats" id="elevation-stats">
         Ascent: <span id="stat-ascent">&#8212;</span> &nbsp;
         Descent: <span id="stat-descent">&#8212;</span> &nbsp;
@@ -47,7 +51,7 @@
                 <li><strong>Click the map</strong> to add waypoints — routes follow footpaths automatically</li>
                 <li><strong>Click a waypoint</strong> to remove it, or <strong>drag</strong> to reposition</li>
                 <li><strong>&#8984;Z</strong> to undo the last waypoint</li>
-                <li>Routes are coloured by gradient: <span style="color:#6ee7b7">green</span> (flat), <span style="color:#fbbf24">yellow</span> (uphill), <span style="color:#ef4444">red</span> (steep)</li>
+                <li>Routes are coloured by gradient: <span style="color:#6ee7b7">green</span> (flat), <span style="color:#fbbf24">yellow</span> (uphill), <span style="color:#f87171">red</span> (steep), <span style="color:#60a5fa">blue</span> (downhill)</li>
                 <li><strong>Export GPX</strong> to save your route for your watch or phone</li>
             </ul>
             <button id="welcome-dismiss">Got it</button>
