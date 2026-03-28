@@ -410,26 +410,26 @@ async function fetchElevation(points) {
         if (cached) { results.push(cached); } else { results.push(null); uncached.push(points[i]); uncachedIdx.push(i); }
     }
 
+    // Open-Meteo elevation API — free, CORS-enabled, no key needed
     for (var b = 0; b < uncached.length; b += 100) {
-        if (b > 0) await new Promise(function (r) { setTimeout(r, 1100); }); // rate limit: 1 req/sec
         var batch = uncached.slice(b, b + 100);
-        var locStr = batch.map(function (p) { return p.lat + "," + p.lon; }).join("|");
+        var lats = batch.map(function (p) { return p.lat.toFixed(5); }).join(",");
+        var lons = batch.map(function (p) { return p.lon.toFixed(5); }).join(",");
         try {
-            var resp = await fetch("https://api.opentopodata.org/v1/srtm30m?locations=" + locStr);
+            var resp = await fetch("https://api.open-meteo.com/v1/elevation?latitude=" + lats + "&longitude=" + lons);
             if (!resp.ok) throw new Error("HTTP " + resp.status);
             var data = await resp.json();
-            for (var j = 0; j < (data.results || []).length; j++) {
-                var r = data.results[j];
-                var elev = r.elevation != null ? r.elevation : 0;
-                var entry = { lat: r.location.lat, lon: r.location.lng, elevation: elev };
+            var elevArr = data.elevation || [];
+            for (var j = 0; j < elevArr.length; j++) {
+                var elev = elevArr[j] != null ? elevArr[j] : 0;
+                var entry = { lat: batch[j].lat, lon: batch[j].lon, elevation: elev };
                 results[uncachedIdx[b + j]] = entry;
-                if (r.elevation != null) {
+                if (elevArr[j] != null) {
                     cacheSet("elev2:" + entry.lat.toFixed(5) + ":" + entry.lon.toFixed(5), entry);
                 }
             }
         } catch (e) {
             console.warn("Elevation batch failed:", e.message);
-            // Fill with zeros so we don't break
             for (var j = 0; j < batch.length; j++) {
                 if (!results[uncachedIdx[b + j]]) results[uncachedIdx[b + j]] = { lat: batch[j].lat, lon: batch[j].lon, elevation: 0 };
             }
