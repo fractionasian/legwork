@@ -337,6 +337,8 @@ async function loadPaths(lat, lon) {
         '  way["highway"="service"](around:' + radius + ',' + lat + ',' + lon + ');\n' +
         '  way["highway"="unclassified"](around:' + radius + ',' + lat + ',' + lon + ');\n' +
         '  way["highway"="tertiary"](around:' + radius + ',' + lat + ',' + lon + ');\n' +
+        '  way["highway"="secondary"](around:' + radius + ',' + lat + ',' + lon + ');\n' +
+        '  way["highway"="primary"](around:' + radius + ',' + lat + ',' + lon + ');\n' +
         '  way["highway"="crossing"](around:' + radius + ',' + lat + ',' + lon + ');\n' +
         '  way["highway"="steps"](around:' + radius + ',' + lat + ',' + lon + ');\n' +
         ');\nout body;\n>;\nout skel qt;';
@@ -553,8 +555,34 @@ function removeWaypoint(idx) {
     updateRoute();
 }
 
+// ── Gap filling ────────────────────────────────────────
+async function fillGapAndRetry(fromWp, toWp) {
+    // Load paths at intermediate points between two waypoints
+    var dist = haversine(fromWp.lat, fromWp.lon, toWp.lat, toWp.lon);
+    var steps = Math.max(1, Math.ceil(dist / 1500)); // one load every ~1.5km
+    var loaded = false;
+
+    for (var s = 0; s <= steps; s++) {
+        var t = steps === 0 ? 0.5 : s / steps;
+        var midLat = fromWp.lat + t * (toWp.lat - fromWp.lat);
+        var midLon = fromWp.lon + t * (toWp.lon - fromWp.lon);
+        await loadPaths(midLat, midLon);
+        loaded = true;
+    }
+
+    if (!loaded) return null;
+
+    // Re-snap waypoints to potentially closer nodes in expanded graph
+    var newFromKey = closestNode(state.graph, fromWp.lat, fromWp.lon);
+    var newToKey = closestNode(state.graph, toWp.lat, toWp.lon);
+    if (newFromKey) fromWp.nodeKey = newFromKey;
+    if (newToKey) toWp.nodeKey = newToKey;
+
+    return dijkstra(state.graph, fromWp.nodeKey, toWp.nodeKey);
+}
+
 // ── Route drawing ──────────────────────────────────────
-function updateRoute() {
+async function updateRoute() {
     for (var r = 0; r < state.routeLines.length; r++) state.map.removeLayer(state.routeLines[r]);
     state.routeLines = [];
     state.routeSegments = [];
@@ -569,7 +597,14 @@ function updateRoute() {
     var routeOk = true;
 
     for (var i = 1; i < state.waypoints.length; i++) {
-        var result = dijkstra(state.graph, state.waypoints[i-1].nodeKey, state.waypoints[i].nodeKey);
+        var fromWp = state.waypoints[i-1], toWp = state.waypoints[i];
+        var result = dijkstra(state.graph, fromWp.nodeKey, toWp.nodeKey);
+
+        // If no path, try filling the gap with intermediate path loads
+        if (!result || result.path.length < 2) {
+            result = await fillGapAndRetry(fromWp, toWp);
+        }
+
         if (result && result.path.length > 1) {
             var segCoords = pathToCoords(result.path);
             state.routeSegments.push(segCoords);
@@ -578,8 +613,7 @@ function updateRoute() {
             if (allRouteCoords.length === 0) allRouteCoords.push.apply(allRouteCoords, segCoords);
             else allRouteCoords.push.apply(allRouteCoords, segCoords.slice(1));
         } else {
-            var from = state.waypoints[i-1], to = state.waypoints[i];
-            var fallback = [[from.lat, from.lon], [to.lat, to.lon]];
+            var fallback = [[fromWp.lat, fromWp.lon], [toWp.lat, toWp.lon]];
             state.routeSegments.push(fallback);
             var line = L.polyline(fallback, { color: "#ef4444", weight: 3, opacity: 0.7, dashArray: "8 8" }).addTo(state.map);
             state.routeLines.push(line);
@@ -590,14 +624,17 @@ function updateRoute() {
     }
 
     if (state.mode === "loop" && state.waypoints.length >= 2) {
-        var closeResult = dijkstra(state.graph, state.waypoints[state.waypoints.length-1].nodeKey, state.waypoints[0].nodeKey);
+        var lastWp = state.waypoints[state.waypoints.length-1], firstWp = state.waypoints[0];
+        var closeResult = dijkstra(state.graph, lastWp.nodeKey, firstWp.nodeKey);
+        if (!closeResult || closeResult.path.length < 2) {
+            closeResult = await fillGapAndRetry(lastWp, firstWp);
+        }
         if (closeResult && closeResult.path.length > 1) {
             var closeCoords = pathToCoords(closeResult.path);
             state.closingLine = L.polyline(closeCoords, { color: "#2e86de", weight: 5, opacity: 0.6, dashArray: "10 6" }).addTo(state.map);
             allRouteCoords.push.apply(allRouteCoords, closeCoords.slice(1));
         } else {
-            var last = state.waypoints[state.waypoints.length-1], first = state.waypoints[0];
-            state.closingLine = L.polyline([[last.lat,last.lon],[first.lat,first.lon]], { color: "#ef4444", weight: 3, opacity: 0.5, dashArray: "8 8" }).addTo(state.map);
+            state.closingLine = L.polyline([[lastWp.lat,lastWp.lon],[firstWp.lat,firstWp.lon]], { color: "#ef4444", weight: 3, opacity: 0.5, dashArray: "8 8" }).addTo(state.map);
         }
     }
 
