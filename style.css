@@ -185,7 +185,8 @@ body {
     transition: background 0.1s;
 }
 
-.autocomplete-item:hover {
+.autocomplete-item:hover,
+.autocomplete-item.active {
     background: #252836;
     color: #f0f0f0;
 }
@@ -196,6 +197,11 @@ body {
 #map {
     flex: 1;
     min-height: 0;
+}
+
+/* Greyscale base tiles so coloured route stands out */
+.leaflet-tile-pane {
+    filter: grayscale(1) brightness(0.7) contrast(1.1);
 }
 
 /* ── Elevation ────────────────────────────────────── */
