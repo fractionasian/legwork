@@ -184,12 +184,21 @@ body {
 /* ── Info banner ──────────────────────────────────── */
 .info-banner {
     padding: 8px 16px;
-    background: #3a2020;
-    color: #f5a0a0;
     text-align: center;
     font-size: 13px;
     display: none;
-    border-bottom: 1px solid #4a2a2a;
+    border-bottom: 1px solid #2a2d3a;
+}
+
+.info-banner.error {
+    background: #3a2020;
+    color: #f5a0a0;
+    border-bottom-color: #4a2a2a;
+}
+
+.info-banner.loading {
+    background: #1a1d28;
+    color: #808390;
 }
 
 /* ── Gradient legend ──────────────────────────────── */
