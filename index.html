@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Legwork</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+    <div class="controls">
+        <span class="app-title">&#129470; Legwork</span>
+        <div class="address-wrapper">
+            <input type="text" id="address-input" placeholder="Enter address..." autocomplete="off" />
+            <div class="autocomplete-list" id="autocomplete-list"></div>
+        </div>
+        <button id="geocode-btn">Go</button>
+        <select id="radius-select" title="How far to load paths from your start point">
+            <option value="1000">Paths: 1 km</option>
+            <option value="2000" selected>Paths: 2 km</option>
+            <option value="5000">Paths: 5 km</option>
+            <option value="10000">Paths: 10 km</option>
+        </select>
+        <select id="mode-select">
+            <option value="loop" selected>&#8635; Loop</option>
+            <option value="outback">&#8644; Out &amp; Back</option>
+        </select>
+        <span class="distance-display" id="distance-display">0.0 km</span>
+        <span class="time-display" id="time-display"></span>
+        <input type="text" id="pace-input" placeholder="Pace min/km" style="width:90px;flex:none" />
+        <button id="reverse-btn" title="Reverse route direction">Reverse</button>
+        <button id="clear-btn">Clear</button>
+        <button id="export-btn">Export GPX</button>
+    </div>
+    <div class="info-banner" id="info-banner"></div>
+    <div id="map"></div>
+    <div class="elevation-stats" id="elevation-stats">
+        Ascent: <span id="stat-ascent">&#8212;</span> &nbsp;
+        Descent: <span id="stat-descent">&#8212;</span> &nbsp;
+        Max gradient: <span id="stat-gradient">&#8212;</span>
+    </div>
+    <div id="elevation-container">
+        <canvas id="elevation-canvas"></canvas>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+    <script src="app.js"></script>
+</body>
+</html>
