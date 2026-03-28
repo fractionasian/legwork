@@ -3,8 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Legwork</title>
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <title>Legwork — Running Route Planner</title>
+    <meta name="description" content="Plan running routes with elevation-coloured paths, distance markers, and GPX export. Free, no account needed." />
+    <meta property="og:title" content="Legwork — Running Route Planner" />
+    <meta property="og:description" content="Plan running routes with elevation-coloured paths, Dijkstra routing on OpenStreetMap, and GPX export." />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://fractionasian.github.io/legwork/" />
+    <link rel="icon" href="data:image/svg+xml,&lt;svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'&gt;&lt;text y='.9em' font-size='90'&gt;&#129470;&lt;/text&gt;&lt;/svg&gt;" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
     <link rel="stylesheet" href="style.css" />
 </head>
 <body>
@@ -43,8 +49,8 @@
         <canvas id="elevation-canvas"></canvas>
     </div>
 
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4" crossorigin=""></script>
     <script src="app.js"></script>
 </body>
 </html>

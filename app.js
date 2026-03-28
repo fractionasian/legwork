@@ -308,7 +308,7 @@ async function loadPaths(lat, lon) {
     var radius = document.getElementById("radius-select").value;
     var cacheKey = "paths:" + lat.toFixed(3) + ":" + lon.toFixed(3) + ":" + radius;
 
-    showBanner("Loading paths...");
+    showBanner("Loading paths...", "loading");
 
     // Check cache
     var cached = cacheGet(cacheKey, PATHS_TTL);
@@ -754,9 +754,10 @@ function haversine(lat1, lon1, lat2, lon2) {
     return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
 }
 
-function showBanner(msg) {
+function showBanner(msg, type) {
     var el = document.getElementById("info-banner");
     el.textContent = msg;
+    el.className = "info-banner" + (type ? " " + type : " error");
     el.style.display = msg ? "block" : "none";
 }
 
@@ -775,10 +776,8 @@ document.getElementById("reverse-btn").addEventListener("click", function () {
     updateRoute();
 });
 document.getElementById("clear-btn").addEventListener("click", function () {
-    for (var i = state.waypoints.length - 1; i >= 1; i--) {
-        state.map.removeLayer(state.waypoints[i].marker);
-        state.waypoints.splice(i, 1);
-    }
+    for (var i = 0; i < state.waypoints.length; i++) state.map.removeLayer(state.waypoints[i].marker);
+    state.waypoints = [];
     updateRoute();
 });
 document.getElementById("export-btn").addEventListener("click", exportGPX);
@@ -807,7 +806,7 @@ function loadFromHash() {
         return { lat: parseFloat(parts[0]), lon: parseFloat(parts[1]) };
     });
     if (points.length < 2) return false;
-    if (params.m === "outback") { state.mode = "outback"; document.getElementById("mode-select").value = "outback"; }
+    if (params.m === "outback" || params.m === "loop") { state.mode = params.m; document.getElementById("mode-select").value = params.m; }
     return points;
 }
 
