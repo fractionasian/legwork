@@ -239,13 +239,13 @@ function initMap() {
         div.appendChild(title);
         div.appendChild(document.createElement("br"));
         var levels = [
-            { color: "#1e3a5f", label: "Very steep down (>10%)" },
-            { color: "#3b82f6", label: "Steep downhill (5-10%)" },
+            { color: "#3b82f6", label: "Very steep down (>10%)" },
+            { color: "#60a5fa", label: "Steep downhill (5-10%)" },
             { color: "#93c5fd", label: "Downhill (2-5%)" },
             { color: "#6ee7b7", label: "Flat (<2%)" },
             { color: "#fbbf24", label: "Uphill (2-5%)" },
-            { color: "#ef4444", label: "Steep uphill (5-10%)" },
-            { color: "#991b1b", label: "Very steep up (>10%)" },
+            { color: "#f87171", label: "Steep uphill (5-10%)" },
+            { color: "#dc2626", label: "Very steep up (>10%)" },
         ];
         for (var k = 0; k < levels.length; k++) {
             var icon = document.createElement("i");
@@ -514,8 +514,8 @@ function osmToGeoJSON(data) {
 var pathStyles = {
     run: ["footway", "cycleway", "path", "pedestrian", "steps"],
     style: function (feature) {
-        if (pathStyles.run.indexOf(feature.properties.highway) !== -1) return { color: "#6ee7b7", weight: 3, opacity: 0.7 };
-        return { color: "#6ee7b7", weight: 1, opacity: 0.15 };
+        if (pathStyles.run.indexOf(feature.properties.highway) !== -1) return { color: "#6ee7b7", weight: 2, opacity: 0.35 };
+        return { color: "#6ee7b7", weight: 1, opacity: 0.08 };
     },
     tooltip: function (feature, layer) {
         var p = feature.properties;
@@ -749,7 +749,7 @@ async function updateRoute() {
         if (result && result.path.length > 1) {
             var segCoords = pathToCoords(result.path);
             state.routeSegments.push(segCoords);
-            var line = L.polyline(segCoords, { color: "#2e86de", weight: 5, opacity: 0.9 }).addTo(state.map);
+            var line = L.polyline(segCoords, { color: "#6ee7b7", weight: 4, opacity: 0.9 }).addTo(state.map);
             state.routeLines.push(line);
             if (allRouteCoords.length === 0) allRouteCoords.push.apply(allRouteCoords, segCoords);
             else allRouteCoords.push.apply(allRouteCoords, segCoords.slice(1));
@@ -775,19 +775,11 @@ async function updateRoute() {
         }
         if (closeResult && closeResult.path.length > 1) {
             var closeCoords = pathToCoords(closeResult.path);
-            state.closingLine = L.polyline(closeCoords, { color: "#2e86de", weight: 5, opacity: 0.6, dashArray: "10 6" }).addTo(state.map);
+            state.closingLine = L.polyline(closeCoords, { color: "#6ee7b7", weight: 4, opacity: 0.6, dashArray: "10 6" }).addTo(state.map);
             allRouteCoords.push.apply(allRouteCoords, closeCoords.slice(1));
         } else {
             state.closingLine = L.polyline([[lastWp.lat,lastWp.lon],[firstWp.lat,firstWp.lon]], { color: "#ef4444", weight: 3, opacity: 0.5, dashArray: "8 8" }).addTo(state.map);
         }
-    }
-
-    // Dark outline
-    if (allRouteCoords.length >= 2) {
-        state.routeOutline = L.polyline(allRouteCoords, { color: "#1a1a2e", weight: 9, opacity: 0.85, lineCap: "round", lineJoin: "round" }).addTo(state.map);
-        state.routeOutline.bringToBack();
-        for (var rl = 0; rl < state.routeLines.length; rl++) state.routeLines[rl].bringToFront();
-        if (state.closingLine) state.closingLine.bringToFront();
     }
 
     if (!routeOk) showBanner("Some segments have no footpath connection (shown in red)");
@@ -1004,9 +996,7 @@ function colourRouteByGradient(elevData) {
     state.routeLines = [];
     if (state.closingLine) { state.map.removeLayer(state.closingLine); state.closingLine = null; }
 
-    var outlineCoords = elevData.map(function (e) { return [e.lat, e.lon]; });
-    if (state.routeOutline) state.map.removeLayer(state.routeOutline);
-    state.routeOutline = L.polyline(outlineCoords, { color: "#1a1a2e", weight: 9, opacity: 0.85, lineCap: "round", lineJoin: "round" }).addTo(state.map);
+    if (state.routeOutline) { state.map.removeLayer(state.routeOutline); state.routeOutline = null; }
 
     for (var i = 1; i < elevData.length; i++) {
         var prev = elevData[i-1], curr = elevData[i];
@@ -1014,14 +1004,14 @@ function colourRouteByGradient(elevData) {
         var color = "#6ee7b7";
         if (dist > 0) {
             var gradePct = ((curr.elevation - prev.elevation) / dist) * 100;
-            if (gradePct > 10) color = "#991b1b";       // very steep uphill
-            else if (gradePct > 5) color = "#ef4444";    // steep uphill
+            if (gradePct > 10) color = "#dc2626";       // very steep uphill
+            else if (gradePct > 5) color = "#f87171";    // steep uphill
             else if (gradePct > 2) color = "#fbbf24";    // moderate uphill
-            else if (gradePct < -10) color = "#1e3a5f";  // very steep downhill
-            else if (gradePct < -5) color = "#3b82f6";   // steep downhill
+            else if (gradePct < -10) color = "#3b82f6";  // very steep downhill
+            else if (gradePct < -5) color = "#60a5fa";   // steep downhill
             else if (gradePct < -2) color = "#93c5fd";   // moderate downhill
         }
-        var seg = L.polyline([[prev.lat,prev.lon],[curr.lat,curr.lon]], { color: color, weight: 5, opacity: 1, lineCap: "round", lineJoin: "round" }).addTo(state.map);
+        var seg = L.polyline([[prev.lat,prev.lon],[curr.lat,curr.lon]], { color: color, weight: 4, opacity: 1, lineCap: "round", lineJoin: "round" }).addTo(state.map);
         state.gradientLines.push(seg);
     }
 }
