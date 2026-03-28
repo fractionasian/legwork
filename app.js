@@ -60,6 +60,8 @@ var state = {
     routeOutline: null,
     distanceMarkers: [],
     totalDistMetres: 0,
+    midpointMarkers: [],  // draggable midpoints for inserting waypoints
+    useMiles: false,
 };
 
 // ── Routing graph ──────────────────────────────────────
@@ -171,11 +173,13 @@ function initMap() {
         div.appendChild(title);
         div.appendChild(document.createElement("br"));
         var levels = [
-            { color: "#60a5fa", label: "Steep downhill (>5%)" },
+            { color: "#1e3a5f", label: "Very steep down (>10%)" },
+            { color: "#3b82f6", label: "Steep downhill (5-10%)" },
             { color: "#93c5fd", label: "Downhill (2-5%)" },
             { color: "#6ee7b7", label: "Flat (<2%)" },
             { color: "#fbbf24", label: "Uphill (2-5%)" },
-            { color: "#ef4444", label: "Steep uphill (>5%)" },
+            { color: "#ef4444", label: "Steep uphill (5-10%)" },
+            { color: "#991b1b", label: "Very steep up (>10%)" },
         ];
         for (var k = 0; k < levels.length; k++) {
             var icon = document.createElement("i");
@@ -590,6 +594,8 @@ async function updateRoute() {
     for (var g = 0; g < state.gradientLines.length; g++) state.map.removeLayer(state.gradientLines[g]);
     state.gradientLines = [];
     if (state.routeOutline) { state.map.removeLayer(state.routeOutline); state.routeOutline = null; }
+    for (var mp = 0; mp < state.midpointMarkers.length; mp++) state.map.removeLayer(state.midpointMarkers[mp]);
+    state.midpointMarkers = [];
 
     if (state.waypoints.length < 2) { updateDistance(); updateElevation([]); return; }
 
@@ -649,8 +655,115 @@ async function updateRoute() {
     if (!routeOk) showBanner("Some segments have no footpath connection (shown in red)");
     else showBanner("");
 
+    addMidpointMarkers();
     updateDistance();
     fetchRouteElevation(allRouteCoords);
+}
+
+// ── Midpoint markers (drag to insert waypoint) ─────────
+function addMidpointMarkers() {
+    // Clear old midpoints
+    for (var m = 0; m < state.midpointMarkers.length; m++) {
+        state.map.removeLayer(state.midpointMarkers[m]);
+    }
+    state.midpointMarkers = [];
+
+    if (state.waypoints.length < 2) return;
+
+    // Add midpoint between each consecutive pair
+    var pairs = [];
+    for (var i = 0; i < state.waypoints.length - 1; i++) {
+        pairs.push({ afterIdx: i });
+    }
+    // Loop closing midpoint
+    if (state.mode === "loop" && state.waypoints.length >= 2) {
+        pairs.push({ afterIdx: state.waypoints.length - 1, closing: true });
+    }
+
+    for (var p = 0; p < pairs.length; p++) {
+        (function (pair) {
+            var fromIdx = pair.afterIdx;
+            var toIdx = pair.closing ? 0 : fromIdx + 1;
+            var from = state.waypoints[fromIdx];
+            var to = state.waypoints[toIdx];
+            var midLat = (from.lat + to.lat) / 2;
+            var midLon = (from.lon + to.lon) / 2;
+
+            var el = document.createElement("div");
+            el.style.cssText =
+                "background:rgba(110,231,183,0.4);border:2px dashed #6ee7b7;border-radius:50%;" +
+                "width:18px;height:18px;cursor:grab;";
+
+            var icon = L.divIcon({
+                html: el.outerHTML,
+                className: "",
+                iconSize: [18, 18],
+                iconAnchor: [9, 9],
+            });
+
+            var mid = L.marker([midLat, midLon], {
+                icon: icon,
+                draggable: true,
+                zIndexOffset: -50,
+            }).addTo(state.map);
+
+            mid.on("dragend", function () {
+                var pos = mid.getLatLng();
+                // Insert a new waypoint after fromIdx
+                var insertIdx = pair.closing ? state.waypoints.length : fromIdx + 1;
+
+                // Snap to graph
+                var nk = state.graph ? closestNode(state.graph, pos.lat, pos.lng) : null;
+                var snapLat = pos.lat, snapLon = pos.lng;
+                if (nk) {
+                    var parts = nk.split(",");
+                    snapLat = parseFloat(parts[0]);
+                    snapLon = parseFloat(parts[1]);
+                }
+
+                var num = insertIdx + 1;
+                var marker = createNumberedMarker(snapLat, snapLon, num);
+
+                marker.on("click", function (ev) {
+                    L.DomEvent.stopPropagation(ev);
+                    var idx = -1;
+                    for (var w = 0; w < state.waypoints.length; w++) {
+                        if (state.waypoints[w].marker === marker) { idx = w; break; }
+                    }
+                    removeWaypoint(idx);
+                });
+                marker.on("dragend", function () {
+                    var p2 = marker.getLatLng();
+                    var newKey = state.graph ? closestNode(state.graph, p2.lat, p2.lng) : null;
+                    if (newKey) {
+                        var pp = newKey.split(",");
+                        marker.setLatLng([parseFloat(pp[0]), parseFloat(pp[1])]);
+                        for (var w = 0; w < state.waypoints.length; w++) {
+                            if (state.waypoints[w].marker === marker) {
+                                state.waypoints[w].lat = parseFloat(pp[0]);
+                                state.waypoints[w].lon = parseFloat(pp[1]);
+                                state.waypoints[w].nodeKey = newKey;
+                                break;
+                            }
+                        }
+                    }
+                    updateRoute();
+                });
+
+                var wp = { lat: snapLat, lon: snapLon, marker: marker, nodeKey: nk || nodeKey(snapLat, snapLon) };
+                state.waypoints.splice(insertIdx, 0, wp);
+
+                // Renumber all markers
+                for (var i = 0; i < state.waypoints.length; i++) {
+                    updateMarkerNumber(state.waypoints[i].marker, i + 1);
+                }
+
+                updateRoute();
+            });
+
+            state.midpointMarkers.push(mid);
+        })(pairs[p]);
+    }
 }
 
 // ── Distance ───────────────────────────────────────────
@@ -666,7 +779,13 @@ function updateDistance() {
     } else if (state.mode === "outback") { total *= 2; }
 
     state.totalDistMetres = total;
-    document.getElementById("distance-display").textContent = (total / 1000).toFixed(1) + " km";
+    var distText;
+    if (state.useMiles) {
+        distText = (total / 1609.344).toFixed(1) + " mi";
+    } else {
+        distText = (total / 1000).toFixed(1) + " km";
+    }
+    document.getElementById("distance-display").textContent = distText;
     updateEstimatedTime();
     updateDistanceMarkers();
 }
@@ -770,10 +889,12 @@ function colourRouteByGradient(elevData) {
         var color = "#6ee7b7";
         if (dist > 0) {
             var gradePct = ((curr.elevation - prev.elevation) / dist) * 100;
-            if (gradePct > 5) color = "#ef4444";
-            else if (gradePct > 2) color = "#fbbf24";
-            else if (gradePct < -5) color = "#60a5fa";
-            else if (gradePct < -2) color = "#93c5fd";
+            if (gradePct > 10) color = "#991b1b";       // very steep uphill
+            else if (gradePct > 5) color = "#ef4444";    // steep uphill
+            else if (gradePct > 2) color = "#fbbf24";    // moderate uphill
+            else if (gradePct < -10) color = "#1e3a5f";  // very steep downhill
+            else if (gradePct < -5) color = "#3b82f6";   // steep downhill
+            else if (gradePct < -2) color = "#93c5fd";   // moderate downhill
         }
         var seg = L.polyline([[prev.lat,prev.lon],[curr.lat,curr.lon]], { color: color, weight: 5, opacity: 1, lineCap: "round", lineJoin: "round" }).addTo(state.map);
         state.gradientLines.push(seg);
@@ -840,7 +961,7 @@ function exportGPX() {
     if (state.mode === "outback" && coords.length > 1) {
         coords = coords.concat(coords.slice().reverse().slice(1));
     }
-    var km = document.getElementById("distance-display").textContent.replace(" km","");
+    var km = (state.totalDistMetres / 1000).toFixed(1);
     var date = new Date().toISOString().split("T")[0];
     var name = "legwork-" + date + "-" + km + "km";
     var gpx = ['<?xml version="1.0" encoding="UTF-8"?>','<gpx version="1.1" creator="Legwork" xmlns="http://www.topografix.com/GPX/1/1">','  <trk>','    <name>'+name+'</name>','    <trkseg>'];
@@ -887,6 +1008,13 @@ document.getElementById("clear-btn").addEventListener("click", function () {
     state.waypoints = [];
     updateRoute();
 });
+document.getElementById("distance-display").addEventListener("click", function () {
+    state.useMiles = !state.useMiles;
+    this.title = state.useMiles ? "Click for km" : "Click for miles";
+    updateDistance();
+});
+document.getElementById("distance-display").title = "Click for miles";
+document.getElementById("distance-display").style.cursor = "pointer";
 document.getElementById("export-btn").addEventListener("click", exportGPX);
 document.addEventListener("keydown", function (e) {
     if ((e.ctrlKey || e.metaKey) && e.key === "z") {
