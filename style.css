@@ -199,6 +199,11 @@ body {
     min-height: 0;
 }
 
+/* Greyscale base tiles so coloured route stands out */
+.leaflet-tile-pane {
+    filter: grayscale(1) brightness(0.7) contrast(1.1);
+}
+
 /* ── Elevation ────────────────────────────────────── */
 .elevation-stats {
     display: flex;
