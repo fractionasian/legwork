@@ -789,9 +789,9 @@ function showBanner(msg, type) {
 // ── Event bindings ─────────────────────────────────────
 document.getElementById("geocode-btn").addEventListener("click", function () { geocodeAddress(); });
 document.getElementById("address-input").addEventListener("keydown", function (e) { if (e.key === "Enter") geocodeAddress(); });
-document.getElementById("mode-toggle").addEventListener("change", function (e) {
-    state.mode = e.target.checked ? "outback" : "loop";
-    document.getElementById("mode-label").textContent = e.target.checked ? "Out & Back" : "Loop";
+document.getElementById("mode-btn").addEventListener("click", function () {
+    state.mode = state.mode === "loop" ? "outback" : "loop";
+    this.textContent = state.mode === "loop" ? "\u21BB Loop" : "\u21C4 Out & Back";
     updateRoute();
 });
 document.getElementById("pace-input").addEventListener("input", updateEstimatedTime);
@@ -835,8 +835,7 @@ function loadFromHash() {
     if (params.m === "outback" || params.m === "loop") {
         state.mode = params.m;
         if (params.m === "outback") {
-            document.getElementById("mode-toggle").checked = true;
-            document.getElementById("mode-label").textContent = "Out & Back";
+            document.getElementById("mode-btn").textContent = "\u21C4 Out & Back";
         }
     }
     return points;
