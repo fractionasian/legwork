@@ -405,7 +405,7 @@ async function fetchElevation(points) {
     var uncachedIdx = [];
 
     for (var i = 0; i < points.length; i++) {
-        var ck = "elev:" + points[i].lat.toFixed(5) + ":" + points[i].lon.toFixed(5);
+        var ck = "elev2:" + points[i].lat.toFixed(5) + ":" + points[i].lon.toFixed(5);
         var cached = cacheGet(ck);
         if (cached) { results.push(cached); } else { results.push(null); uncached.push(points[i]); uncachedIdx.push(i); }
     }
@@ -420,9 +420,12 @@ async function fetchElevation(points) {
             var data = await resp.json();
             for (var j = 0; j < (data.results || []).length; j++) {
                 var r = data.results[j];
-                var entry = { lat: r.location.lat, lon: r.location.lng, elevation: r.elevation || 0 };
+                var elev = r.elevation != null ? r.elevation : 0;
+                var entry = { lat: r.location.lat, lon: r.location.lng, elevation: elev };
                 results[uncachedIdx[b + j]] = entry;
-                cacheSet("elev:" + entry.lat.toFixed(5) + ":" + entry.lon.toFixed(5), entry);
+                if (r.elevation != null) {
+                    cacheSet("elev2:" + entry.lat.toFixed(5) + ":" + entry.lon.toFixed(5), entry);
+                }
             }
         } catch (e) {
             console.warn("Elevation batch failed:", e.message);
