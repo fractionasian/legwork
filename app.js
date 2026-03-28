@@ -817,9 +817,23 @@ function loadFromHash() {
 var _origUpdateRoute = updateRoute;
 updateRoute = function () { _origUpdateRoute(); updateShareHash(); };
 
+// ── Welcome modal ──────────────────────────────────────
+function showWelcome() {
+    var modal = document.getElementById("welcome-modal");
+    if (localStorage.getItem("lw:welcomed")) {
+        modal.classList.add("hidden");
+        return;
+    }
+    document.getElementById("welcome-dismiss").addEventListener("click", function () {
+        modal.classList.add("hidden");
+        localStorage.setItem("lw:welcomed", "1");
+    });
+}
+
 // ── Boot ───────────────────────────────────────────────
 initMap();
 setupAutocomplete();
+showWelcome();
 
 var sharedPoints = loadFromHash();
 if (sharedPoints) {
