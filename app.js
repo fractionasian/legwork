@@ -382,29 +382,73 @@ function osmToGeoJSON(data) {
     return { type: "FeatureCollection", features: features };
 }
 
+var pathStyles = {
+    run: ["footway", "cycleway", "path", "pedestrian", "steps"],
+    style: function (feature) {
+        if (pathStyles.run.indexOf(feature.properties.highway) !== -1) return { color: "#6ee7b7", weight: 3, opacity: 0.7 };
+        return { color: "#6ee7b7", weight: 1, opacity: 0.15 };
+    },
+    tooltip: function (feature, layer) {
+        var p = feature.properties;
+        var parts = [];
+        if (p.name) parts.push(p.name);
+        else parts.push(p.highway || "path");
+        if (p.surface) parts.push(p.surface);
+        layer.bindTooltip(parts.join(" · "), { sticky: true });
+    },
+};
+
 function applyPaths(geojson) {
-    state.pathFeatures = geojson;
-    if (state.pathLayer) state.map.removeLayer(state.pathLayer);
+    // Track seen feature IDs to avoid duplicates
+    if (!state.seenIds) state.seenIds = {};
 
-    var runPaths = ["footway", "cycleway", "path", "pedestrian", "steps"];
-    state.pathLayer = L.geoJSON(geojson, {
-        style: function (feature) {
-            var hw = feature.properties.highway;
-            if (runPaths.indexOf(hw) !== -1) return { color: "#6ee7b7", weight: 3, opacity: 0.7 };
-            return { color: "#6ee7b7", weight: 1, opacity: 0.15 };
-        },
-        onEachFeature: function (feature, layer) {
-            var p = feature.properties;
-            var parts = [];
-            if (p.name) parts.push(p.name);
-            else parts.push(p.highway || "path");
-            if (p.surface) parts.push(p.surface);
-            layer.bindTooltip(parts.join(" · "), { sticky: true });
-        },
-    }).addTo(state.map);
+    var newFeatures = [];
+    for (var i = 0; i < geojson.features.length; i++) {
+        var id = geojson.features[i].properties.id;
+        if (!state.seenIds[id]) {
+            state.seenIds[id] = true;
+            newFeatures.push(geojson.features[i]);
+        }
+    }
 
-    state.graph = buildGraph(geojson);
-    console.log("Graph built: " + Object.keys(state.graph).length + " nodes");
+    if (newFeatures.length === 0) return;
+
+    // Merge into pathFeatures
+    if (!state.pathFeatures) {
+        state.pathFeatures = { type: "FeatureCollection", features: newFeatures };
+    } else {
+        state.pathFeatures.features.push.apply(state.pathFeatures.features, newFeatures);
+    }
+
+    // Add new features to existing map layer (don't remove old ones)
+    if (!state.pathLayer) {
+        state.pathLayer = L.geoJSON(null, {
+            style: pathStyles.style,
+            onEachFeature: pathStyles.tooltip,
+        }).addTo(state.map);
+    }
+
+    var newGeo = { type: "FeatureCollection", features: newFeatures };
+    state.pathLayer.addData(newGeo);
+
+    // Extend the routing graph (don't rebuild — just add new edges)
+    if (!state.graph) state.graph = {};
+    var adj = state.graph;
+    for (var f = 0; f < newFeatures.length; f++) {
+        var coords = newFeatures[f].geometry.coordinates;
+        for (var c = 1; c < coords.length; c++) {
+            var lat1 = coords[c-1][1], lon1 = coords[c-1][0];
+            var lat2 = coords[c][1], lon2 = coords[c][0];
+            var k1 = nodeKey(lat1, lon1), k2 = nodeKey(lat2, lon2);
+            var d = haversine(lat1, lon1, lat2, lon2);
+            if (!adj[k1]) adj[k1] = [];
+            if (!adj[k2]) adj[k2] = [];
+            adj[k1].push({ key: k2, lat: lat2, lon: lon2, dist: d });
+            adj[k2].push({ key: k1, lat: lat1, lon: lon1, dist: d });
+        }
+    }
+
+    console.log("Graph: " + Object.keys(adj).length + " nodes (+" + newFeatures.length + " ways)");
 }
 
 // ── Elevation (direct Open-Topo-Data API) ──────────────
