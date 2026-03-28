@@ -185,7 +185,8 @@ body {
     transition: background 0.1s;
 }
 
-.autocomplete-item:hover {
+.autocomplete-item:hover,
+.autocomplete-item.active {
     background: #252836;
     color: #f0f0f0;
 }
