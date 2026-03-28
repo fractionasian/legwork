@@ -851,9 +851,14 @@ function showWelcome() {
         modal.classList.add("hidden");
         return;
     }
-    document.getElementById("welcome-dismiss").addEventListener("click", function () {
+    function dismiss() {
         modal.classList.add("hidden");
         localStorage.setItem("lw:welcomed", "1");
+    }
+    document.getElementById("welcome-dismiss").addEventListener("click", dismiss);
+    // Also dismiss when clicking the overlay background
+    modal.addEventListener("click", function (e) {
+        if (e.target === modal) dismiss();
     });
 }
 
@@ -872,13 +877,21 @@ if (sharedPoints) {
 } else if (navigator.geolocation) {
     navigator.geolocation.getCurrentPosition(
         function (pos) {
-            state.map.setView([pos.coords.latitude, pos.coords.longitude], 15);
-            document.getElementById("address-input").placeholder = "Current location — or type an address";
-            loadPaths(pos.coords.latitude, pos.coords.longitude).then(function () {
-                if (state.graph) addWaypointAt(pos.coords.latitude, pos.coords.longitude, { exactPosition: true });
-            });
+            var lat = pos.coords.latitude;
+            var lon = pos.coords.longitude;
+            state.startLat = lat;
+            state.startLon = lon;
+            // Set view twice — once immediately, once after a tick (some browsers need this)
+            state.map.setView([lat, lon], 15);
+            setTimeout(function () {
+                state.map.setView([lat, lon], 15);
+                document.getElementById("address-input").placeholder = "Current location — or type an address";
+                loadPaths(lat, lon).then(function () {
+                    if (state.graph) addWaypointAt(lat, lon, { exactPosition: true });
+                });
+            }, 100);
         },
         function () { /* no location — user types address */ },
-        { enableHighAccuracy: true, timeout: 5000 }
+        { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
     );
 }
