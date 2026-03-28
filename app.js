@@ -606,8 +606,12 @@ async function updateRoute() {
         var fromWp = state.waypoints[i-1], toWp = state.waypoints[i];
         var result = dijkstra(state.graph, fromWp.nodeKey, toWp.nodeKey);
 
-        // If no path, try filling the gap with intermediate path loads
-        if (!result || result.path.length < 2) {
+        // Check if path is missing OR unreasonably indirect (>3x straight-line distance)
+        var straightDist = haversine(fromWp.lat, fromWp.lon, toWp.lat, toWp.lon);
+        var needsGapFill = !result || result.path.length < 2 ||
+            (result.dist > straightDist * 3 && straightDist > 200);
+
+        if (needsGapFill) {
             result = await fillGapAndRetry(fromWp, toWp);
         }
 
@@ -632,7 +636,10 @@ async function updateRoute() {
     if (state.mode === "loop" && state.waypoints.length >= 2) {
         var lastWp = state.waypoints[state.waypoints.length-1], firstWp = state.waypoints[0];
         var closeResult = dijkstra(state.graph, lastWp.nodeKey, firstWp.nodeKey);
-        if (!closeResult || closeResult.path.length < 2) {
+        var closeStraight = haversine(lastWp.lat, lastWp.lon, firstWp.lat, firstWp.lon);
+        var closeNeedsGap = !closeResult || closeResult.path.length < 2 ||
+            (closeResult.dist > closeStraight * 3 && closeStraight > 200);
+        if (closeNeedsGap) {
             closeResult = await fillGapAndRetry(lastWp, firstWp);
         }
         if (closeResult && closeResult.path.length > 1) {
