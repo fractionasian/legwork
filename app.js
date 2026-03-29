@@ -230,35 +230,32 @@ function initMap() {
     osm.addTo(state.map);
     L.control.layers({ "Street": osm, "Satellite": satellite, "Terrain": terrain }, null, { position: "topright" }).addTo(state.map);
 
-    // Gradient legend
-    var legend = L.control({ position: "bottomright" });
-    legend.onAdd = function () {
-        var div = L.DomUtil.create("div", "gradient-legend");
-        var title = document.createElement("strong");
-        title.textContent = "Gradient";
-        div.appendChild(title);
-        div.appendChild(document.createElement("br"));
-        var levels = [
-            { color: "#3b82f6", label: "Very steep down (>10%)" },
-            { color: "#60a5fa", label: "Steep downhill (5-10%)" },
-            { color: "#93c5fd", label: "Downhill (2-5%)" },
-            { color: "#6ee7b7", label: "Flat (<2%)" },
-            { color: "#fbbf24", label: "Uphill (2-5%)" },
-            { color: "#f87171", label: "Steep uphill (5-10%)" },
-            { color: "#dc2626", label: "Very steep up (>10%)" },
-        ];
-        for (var k = 0; k < levels.length; k++) {
-            var icon = document.createElement("i");
-            icon.style.background = levels[k].color;
-            div.appendChild(icon);
-            div.appendChild(document.createTextNode(" " + levels[k].label));
-            div.appendChild(document.createElement("br"));
-        }
-        return div;
-    };
-    legend.addTo(state.map);
-
     state.map.on("click", onMapClick);
+}
+
+// ── Build gradient legend in side menu ────────────────
+function buildMenuLegend() {
+    var container = document.getElementById("menu-legend");
+    var title = document.createElement("strong");
+    title.textContent = "Gradient";
+    container.appendChild(title);
+    container.appendChild(document.createElement("br"));
+    var levels = [
+        { color: "#3b82f6", label: "Very steep down (>10%)" },
+        { color: "#60a5fa", label: "Steep downhill (5-10%)" },
+        { color: "#93c5fd", label: "Downhill (2-5%)" },
+        { color: "#6ee7b7", label: "Flat (<2%)" },
+        { color: "#fbbf24", label: "Uphill (2-5%)" },
+        { color: "#f87171", label: "Steep uphill (5-10%)" },
+        { color: "#dc2626", label: "Very steep up (>10%)" },
+    ];
+    for (var k = 0; k < levels.length; k++) {
+        var icon = document.createElement("i");
+        icon.style.background = levels[k].color;
+        container.appendChild(icon);
+        container.appendChild(document.createTextNode(" " + levels[k].label));
+        container.appendChild(document.createElement("br"));
+    }
 }
 
 // ── Numbered markers ───────────────────────────────────
@@ -898,23 +895,7 @@ function updateDistance() {
         distText = (total / 1000).toFixed(1) + " km";
     }
     document.getElementById("distance-display").textContent = distText;
-    updateEstimatedTime();
     updateDistanceMarkers();
-}
-
-function updateEstimatedTime() {
-    var paceStr = document.getElementById("pace-input").value.trim();
-    var timeEl = document.getElementById("time-display");
-    if (!paceStr || state.totalDistMetres < 100) { timeEl.textContent = ""; return; }
-    var pace;
-    if (paceStr.indexOf(":") !== -1) {
-        var p = paceStr.split(":");
-        pace = parseInt(p[0]) + parseInt(p[1] || 0) / 60;
-    } else { pace = parseFloat(paceStr); }
-    if (isNaN(pace) || pace <= 0) { timeEl.textContent = ""; return; }
-    var totalMin = (state.totalDistMetres / 1000) * pace;
-    var hrs = Math.floor(totalMin / 60), mins = Math.round(totalMin % 60);
-    timeEl.textContent = hrs > 0 ? "~" + hrs + "h " + (mins < 10 ? "0" : "") + mins + "m" : "~" + mins + "m";
 }
 
 // ── Distance markers ───────────────────────────────────
@@ -1126,13 +1107,19 @@ function showBanner(msg, type) {
 // ── Event bindings ─────────────────────────────────────
 document.getElementById("geocode-btn").addEventListener("click", function () { geocodeAddress(); });
 document.getElementById("address-input").addEventListener("keydown", function (e) { if (e.key === "Enter") geocodeAddress(); });
+// ── Reverse button visibility ─────────────────────────
+function updateReverseVisibility() {
+    var btn = document.getElementById("reverse-btn");
+    btn.style.display = state.mode === "loop" ? "" : "none";
+}
+
 document.getElementById("mode-btn").addEventListener("click", function () {
     state.mode = state.mode === "loop" ? "outback" : "loop";
     this.textContent = state.mode === "loop" ? "\u21BB Loop" : "\u21C4 Out & Back";
     this.setAttribute("aria-label", "Route mode: " + (state.mode === "loop" ? "loop" : "out and back"));
+    updateReverseVisibility();
     updateRoute();
 });
-document.getElementById("pace-input").addEventListener("input", updateEstimatedTime);
 document.getElementById("reverse-btn").addEventListener("click", function () {
     if (state.waypoints.length < 2) return;
     state.waypoints.reverse();
@@ -1144,20 +1131,57 @@ document.getElementById("clear-btn").addEventListener("click", function () {
     state.waypoints = [];
     updateRoute();
 });
-document.getElementById("distance-display").addEventListener("click", function () {
-    state.useMiles = !state.useMiles;
-    this.title = state.useMiles ? "Click for km" : "Click for miles";
-    updateDistance();
+document.getElementById("export-btn").addEventListener("click", function () {
+    closeMenu();
+    exportGPX();
 });
-document.getElementById("distance-display").title = "Click for miles";
-document.getElementById("distance-display").style.cursor = "pointer";
-document.getElementById("export-btn").addEventListener("click", exportGPX);
 document.addEventListener("keydown", function (e) {
     if ((e.ctrlKey || e.metaKey) && e.key === "z") {
         e.preventDefault();
         if (state.waypoints.length > 1) removeWaypoint(state.waypoints.length - 1);
     }
 });
+
+// ── Hamburger menu ────────────────────────────────────
+function openMenu() {
+    document.getElementById("side-menu").classList.add("open");
+    document.getElementById("menu-overlay").classList.remove("hidden");
+    document.getElementById("menu-btn").setAttribute("aria-expanded", "true");
+}
+function closeMenu() {
+    document.getElementById("side-menu").classList.remove("open");
+    document.getElementById("menu-overlay").classList.add("hidden");
+    document.getElementById("menu-btn").setAttribute("aria-expanded", "false");
+}
+document.getElementById("menu-btn").addEventListener("click", openMenu);
+document.getElementById("menu-close").addEventListener("click", closeMenu);
+document.getElementById("menu-overlay").addEventListener("click", closeMenu);
+
+// ── Unit toggle (in menu) ─────────────────────────────
+document.getElementById("unit-toggle").addEventListener("click", function () {
+    state.useMiles = !state.useMiles;
+    document.getElementById("unit-label").textContent = state.useMiles ? "mi" : "km";
+    updateDistance();
+});
+
+// ── Auto-detect miles for US/UK/MM/LR ─────────────────
+var MILES_COUNTRIES = ["US", "GB", "MM", "LR"];
+function autoDetectUnits(lat, lon) {
+    fetch("https://photon.komoot.io/reverse?lat=" + lat + "&lon=" + lon + "&limit=1")
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+            var feat = (data.features || [])[0];
+            if (feat && feat.properties && feat.properties.countrycode) {
+                var code = feat.properties.countrycode.toUpperCase();
+                if (MILES_COUNTRIES.indexOf(code) !== -1) {
+                    state.useMiles = true;
+                    document.getElementById("unit-label").textContent = "mi";
+                    updateDistance();
+                }
+            }
+        })
+        .catch(function () {});
+}
 
 // ── Share link ─────────────────────────────────────────
 function updateShareHash() {
@@ -1182,6 +1206,7 @@ function loadFromHash() {
         if (params.m === "outback") {
             document.getElementById("mode-btn").textContent = "\u21C4 Out & Back";
         }
+        updateReverseVisibility();
     }
     return points;
 }
@@ -1227,6 +1252,8 @@ if ("serviceWorker" in navigator) {
 // ── Boot ───────────────────────────────────────────────
 initMap();
 setupAutocomplete();
+buildMenuLegend();
+updateReverseVisibility();
 showWelcome();
 updateOnlineStatus();
 
@@ -1234,6 +1261,7 @@ var sharedPoints = loadFromHash();
 if (sharedPoints) {
     var center = sharedPoints[0];
     state.map.setView([center.lat, center.lon], 14);
+    autoDetectUnits(center.lat, center.lon);
     loadPaths(center.lat, center.lon).then(function () {
         for (var i = 0; i < sharedPoints.length; i++) addWaypointAt(sharedPoints[i].lat, sharedPoints[i].lon, { exactPosition: i === 0 });
     });
@@ -1244,7 +1272,7 @@ if (sharedPoints) {
             var lon = pos.coords.longitude;
             state.startLat = lat;
             state.startLon = lon;
-            // Set view twice — once immediately, once after a tick (some browsers need this)
+            autoDetectUnits(lat, lon);
             state.map.setView([lat, lon], 15);
             setTimeout(function () {
                 state.map.setView([lat, lon], 15);
