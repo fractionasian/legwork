@@ -117,6 +117,20 @@ function tilesInRadius(city, lat, lon, radiusKm) {
     return selected;
 }
 
+function compactToGeoJSON(compact) {
+    // Convert compact [id, highway, name, [[lon,lat],...]] to GeoJSON FeatureCollection
+    var features = [];
+    for (var i = 0; i < compact.length; i++) {
+        var c = compact[i];
+        features.push({
+            type: "Feature",
+            properties: { id: c[0], highway: c[1], surface: "", name: c[2] },
+            geometry: { type: "LineString", coordinates: c[3] },
+        });
+    }
+    return { type: "FeatureCollection", features: features };
+}
+
 async function loadTilesForLocation(lat, lon) {
     var manifest = await fetchManifest();
     if (!manifest) return false;
@@ -163,7 +177,9 @@ async function loadTilesForLocation(lat, lon) {
         return fetch(url).then(function (resp) {
             if (!resp.ok) throw new Error("HTTP " + resp.status);
             return resp.json();
-        }).then(function (geojson) {
+        }).then(function (data) {
+            // Convert compact tile format to GeoJSON
+            var geojson = Array.isArray(data) ? compactToGeoJSON(data) : data;
             applyPaths(geojson);
             var cacheKey = "tile:" + cityId + ":" + tile.file + ":" + manifest.version;
             cacheSet(cacheKey, geojson);
@@ -1512,6 +1528,10 @@ function loadFromHash() {
 // ── Welcome modal ──────────────────────────────────────
 function showWelcome() {
     var modal = document.getElementById("welcome-modal");
+    // Show correct modifier key per platform
+    var isMac = /Mac|iPhone|iPad|iPod/.test(navigator.platform);
+    var undoKey = document.getElementById("undo-key");
+    if (undoKey && isMac) undoKey.textContent = "\u2318";
     if (localStorage.getItem("lw:welcomed")) {
         modal.classList.add("hidden");
         return;
