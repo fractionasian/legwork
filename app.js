@@ -1013,7 +1013,7 @@ function sampleRoute(coords, intervalMetres) {
 
 function smoothElevations(elevData) {
     if (elevData.length < 2) return elevData;
-    var alpha = 0.3;
+    var alpha = 0.6;
     var smoothed = [elevData[0]];
     for (var i = 1; i < elevData.length; i++) {
         var prev = smoothed[i-1].elevation;
