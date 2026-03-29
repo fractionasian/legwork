@@ -37,6 +37,18 @@ body {
     flex-shrink: 0;
 }
 
+.mode-group {
+    display: flex;
+    gap: 4px;
+    min-width: 112px;
+    flex-shrink: 0;
+}
+
+.mode-group button {
+    flex: 1;
+    text-align: center;
+}
+
 .controls button:hover {
     background: #2f3344;
     border-color: #5a5d6a;
