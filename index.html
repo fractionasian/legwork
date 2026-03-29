@@ -21,7 +21,7 @@
     <nav class="controls" aria-label="Route controls">
         <button id="menu-btn" class="menu-btn" aria-label="Open menu" aria-expanded="false" aria-controls="side-menu">&#9776;</button>
         <div class="address-wrapper" role="combobox" aria-expanded="false" aria-haspopup="listbox" aria-owns="autocomplete-list">
-            <input type="text" id="address-input" placeholder="Enter address..." autocomplete="off" aria-label="Search address" aria-autocomplete="list" aria-controls="autocomplete-list" />
+            <input type="text" id="address-input" placeholder="Search address" autocomplete="off" aria-label="Search address" aria-autocomplete="list" aria-controls="autocomplete-list" />
             <div class="autocomplete-list" id="autocomplete-list" role="listbox" aria-label="Address suggestions"></div>
         </div>
         <button id="geocode-btn" aria-label="Go to address">Go</button>
@@ -68,9 +68,9 @@
             <ul>
                 <li><strong>Click the map</strong> to add waypoints — routes follow footpaths automatically</li>
                 <li><strong>Click a waypoint</strong> to remove it, or <strong>drag</strong> to reposition</li>
+                <li><strong>Drag the green circles</strong> between waypoints to insert a new one</li>
                 <li><strong>&#8984;Z</strong> to undo the last waypoint</li>
                 <li>Routes are coloured by gradient: <span style="color:#6ee7b7">green</span> (flat), <span style="color:#fbbf24">yellow</span> (uphill), <span style="color:#f87171">red</span> (steep), <span style="color:#60a5fa">blue</span> (downhill)</li>
-                <li><strong>Export GPX</strong> to save your route for your watch or phone</li>
             </ul>
             <button id="welcome-dismiss">Got it</button>
         </div>

@@ -818,10 +818,43 @@ function addMidpointMarkers() {
         (function (pair) {
             var fromIdx = pair.afterIdx;
             var toIdx = pair.closing ? 0 : fromIdx + 1;
-            var from = state.waypoints[fromIdx];
-            var to = state.waypoints[toIdx];
-            var midLat = (from.lat + to.lat) / 2;
-            var midLon = (from.lon + to.lon) / 2;
+
+            // Find midpoint along the actual routed segment
+            var segCoords;
+            if (pair.closing && state.closingLine) {
+                var cls = state.closingLine.getLatLngs();
+                segCoords = cls.map(function (ll) { return [ll.lat, ll.lng]; });
+            } else if (!pair.closing && state.routeSegments[fromIdx]) {
+                segCoords = state.routeSegments[fromIdx];
+            }
+
+            var midLat, midLon;
+            if (segCoords && segCoords.length >= 2) {
+                // Walk along segment to find the geographic midpoint
+                var totalDist = 0;
+                for (var s = 1; s < segCoords.length; s++) {
+                    totalDist += haversine(segCoords[s-1][0], segCoords[s-1][1], segCoords[s][0], segCoords[s][1]);
+                }
+                var halfDist = totalDist / 2, acc = 0;
+                midLat = segCoords[0][0];
+                midLon = segCoords[0][1];
+                for (var s = 1; s < segCoords.length; s++) {
+                    var d = haversine(segCoords[s-1][0], segCoords[s-1][1], segCoords[s][0], segCoords[s][1]);
+                    if (acc + d >= halfDist) {
+                        var ratio = (halfDist - acc) / d;
+                        midLat = segCoords[s-1][0] + ratio * (segCoords[s][0] - segCoords[s-1][0]);
+                        midLon = segCoords[s-1][1] + ratio * (segCoords[s][1] - segCoords[s-1][1]);
+                        break;
+                    }
+                    acc += d;
+                }
+            } else {
+                // Fallback to straight-line midpoint
+                var from = state.waypoints[fromIdx];
+                var to = state.waypoints[toIdx];
+                midLat = (from.lat + to.lat) / 2;
+                midLon = (from.lon + to.lon) / 2;
+            }
 
             var el = document.createElement("div");
             el.style.cssText =
@@ -1285,7 +1318,7 @@ if (sharedPoints) {
             state.map.setView([lat, lon], 15);
             setTimeout(function () {
                 state.map.setView([lat, lon], 15);
-                document.getElementById("address-input").placeholder = "Current location — or type an address";
+                document.getElementById("address-input").placeholder = "Search address";
                 loadPaths(lat, lon).then(function () {
                     if (state.graph) addWaypointAt(lat, lon, { exactPosition: true });
                 });
