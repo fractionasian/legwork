@@ -16,33 +16,13 @@ body {
     display: flex;
     gap: 6px;
     padding: 8px 10px;
+    padding-top: calc(env(safe-area-inset-top, 0px) + 8px);
     background: #1a1d28;
     align-items: center;
     border-bottom: 1px solid #2a2d3a;
     flex-shrink: 0;
 }
 
-.address-wrapper {
-    position: relative;
-    flex: 1;
-    min-width: 0;
-}
-
-.controls input[type="text"] {
-    width: 100%;
-    padding: 8px 10px;
-    border: 1px solid #3a3d4a;
-    border-radius: 6px;
-    background: #12141c;
-    color: #f0f0f0;
-    font-size: 14px;
-    transition: border-color 0.15s;
-}
-
-.controls input[type="text"]:focus {
-    outline: none;
-    border-color: #6ee7b7;
-}
 
 .controls button {
     padding: 8px 12px;
@@ -64,18 +44,6 @@ body {
 
 .controls button:active {
     background: #383c4f;
-}
-
-#geocode-btn {
-    background: #2d6a4f;
-    border-color: #2d6a4f;
-    color: #fff;
-    font-weight: 600;
-}
-
-#geocode-btn:hover {
-    background: #3a8063;
-    border-color: #3a8063;
 }
 
 .controls .distance-display {
@@ -133,6 +101,7 @@ body {
     align-items: center;
     justify-content: space-between;
     padding: 16px 18px;
+    padding-top: calc(env(safe-area-inset-top, 0px) + 16px);
     border-bottom: 1px solid #2a2d3a;
 }
 
@@ -196,10 +165,47 @@ button.menu-item {
     font-size: 13px;
 }
 
+/* ── Menu search input ────────────────────────────── */
+.menu-search {
+    position: relative;
+    padding: 12px 18px;
+}
+
+.menu-search input[type="text"] {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid #3a3d4a;
+    border-radius: 6px;
+    background: #12141c;
+    color: #f0f0f0;
+    font-size: 14px;
+    transition: border-color 0.15s;
+}
+
+.menu-search input[type="text"]:focus {
+    outline: none;
+    border-color: #6ee7b7;
+}
+
+.menu-search .autocomplete-list {
+    left: 18px;
+    right: 18px;
+}
+
 .menu-divider {
     height: 1px;
     background: #2a2d3a;
     margin: 8px 0;
+}
+
+/* ── Install prompt ──────────────────────────────── */
+.menu-install {
+    font-size: 13px;
+    color: #6ee7b7;
+}
+
+.menu-install.hidden {
+    display: none;
 }
 
 /* ── Gradient legend (in menu) ───────────────────── */
