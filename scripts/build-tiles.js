@@ -13,10 +13,30 @@ const HIGHWAYS = [
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-async function fetchJSON(url, opts) {
-    const resp = await fetch(url, opts);
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${url}`);
-    return resp.json();
+async function fetchJSON(url, opts, retries = 3) {
+    for (let attempt = 0; attempt <= retries; attempt++) {
+        try {
+            const resp = await fetch(url, opts);
+            if (resp.status === 429 || resp.status >= 500) {
+                if (attempt < retries) {
+                    const delay = 10000 * Math.pow(2, attempt); // 10s, 20s, 40s
+                    console.log(`  HTTP ${resp.status}, retrying in ${delay/1000}s...`);
+                    await sleep(delay);
+                    continue;
+                }
+            }
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${url}`);
+            return resp.json();
+        } catch (e) {
+            if (attempt < retries && (e.code === 'ECONNRESET' || e.code === 'ETIMEDOUT' || e.message.includes('fetch failed'))) {
+                const delay = 10000 * Math.pow(2, attempt);
+                console.log(`  ${e.message}, retrying in ${delay/1000}s...`);
+                await sleep(delay);
+                continue;
+            }
+            throw e;
+        }
+    }
 }
 
 function osmToGeoJSON(data) {
