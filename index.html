@@ -19,20 +19,34 @@
 </head>
 <body>
     <nav class="controls" aria-label="Route controls">
-        <span class="app-title" aria-hidden="true">&#129461; Legwork</span>
+        <button id="menu-btn" class="menu-btn" aria-label="Open menu" aria-expanded="false" aria-controls="side-menu">&#9776;</button>
         <div class="address-wrapper" role="combobox" aria-expanded="false" aria-haspopup="listbox" aria-owns="autocomplete-list">
             <input type="text" id="address-input" placeholder="Enter address..." autocomplete="off" aria-label="Search address" aria-autocomplete="list" aria-controls="autocomplete-list" />
             <div class="autocomplete-list" id="autocomplete-list" role="listbox" aria-label="Address suggestions"></div>
         </div>
         <button id="geocode-btn" aria-label="Go to address">Go</button>
         <button id="mode-btn" title="Click to toggle between loop and out-and-back" aria-label="Route mode: loop">&#8635; Loop</button>
-        <span class="distance-display" id="distance-display" role="status" aria-live="polite" tabindex="0">0.0 km</span>
-        <span class="time-display" id="time-display" role="status" aria-live="polite"></span>
-        <input type="text" id="pace-input" placeholder="Pace min/km" aria-label="Running pace in minutes per kilometre" style="width:90px;flex:none" />
-        <button id="reverse-btn" title="Reverse route direction" aria-label="Reverse route direction">Reverse</button>
-        <button id="clear-btn" aria-label="Clear all waypoints">Clear</button>
-        <button id="export-btn" aria-label="Export route as GPX file">Export GPX</button>
+        <button id="reverse-btn" title="Reverse route direction" aria-label="Reverse route direction">&#8644;</button>
+        <button id="clear-btn" aria-label="Clear all waypoints">&#10005;</button>
+        <span class="distance-display" id="distance-display" role="status" aria-live="polite">0.0 km</span>
     </nav>
+
+    <div class="menu-overlay hidden" id="menu-overlay"></div>
+    <aside class="side-menu" id="side-menu" aria-label="Menu" role="dialog">
+        <div class="menu-header">
+            <span class="app-title">&#129461; Legwork</span>
+            <button id="menu-close" class="menu-close" aria-label="Close menu">&#10005;</button>
+        </div>
+        <div class="menu-body">
+            <button id="export-btn" class="menu-item" aria-label="Export route as GPX file">Export GPX</button>
+            <div class="menu-item menu-toggle-row" id="unit-toggle">
+                <span>Units</span>
+                <span id="unit-label" class="menu-toggle-value">km</span>
+            </div>
+            <div class="menu-divider"></div>
+            <div class="menu-legend" id="menu-legend"></div>
+        </div>
+    </aside>
     <div class="info-banner" id="info-banner" role="alert" aria-live="assertive"></div>
     <div id="map" role="application" aria-label="Route planning map"></div>
     <div class="elevation-stats" id="elevation-stats">
