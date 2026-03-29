@@ -1011,7 +1011,24 @@ function sampleRoute(coords, intervalMetres) {
     return points;
 }
 
+function smoothElevations(elevData) {
+    if (elevData.length < 2) return elevData;
+    var alpha = 0.3;
+    var smoothed = [elevData[0]];
+    for (var i = 1; i < elevData.length; i++) {
+        var prev = smoothed[i-1].elevation;
+        var curr = elevData[i].elevation;
+        smoothed.push({ lat: elevData[i].lat, lon: elevData[i].lon, elevation: alpha * curr + (1 - alpha) * prev });
+    }
+    // Reverse pass to remove lag
+    for (var i = smoothed.length - 2; i >= 0; i--) {
+        smoothed[i] = { lat: smoothed[i].lat, lon: smoothed[i].lon, elevation: alpha * smoothed[i].elevation + (1 - alpha) * smoothed[i+1].elevation };
+    }
+    return smoothed;
+}
+
 function colourRouteByGradient(elevData) {
+    elevData = smoothElevations(elevData);
     if (elevData.length < 2) return;
     for (var r = 0; r < state.routeLines.length; r++) state.map.removeLayer(state.routeLines[r]);
     state.routeLines = [];
@@ -1053,12 +1070,17 @@ function updateElevation(elevData) {
     for (var i = 1; i < elevData.length; i++) {
         distances.push(distances[i-1] + haversine(elevData[i-1].lat, elevData[i-1].lon, elevData[i].lat, elevData[i].lon));
     }
+    elevData = smoothElevations(elevData);
     var elevations = elevData.map(function (e) { return e.elevation; });
 
     var totalAscent = 0, totalDescent = 0, maxGradient = 0;
+    var DEAD_BAND = 2; // metres — ignore cumulative changes below this
+    var pending = 0;
     for (var i = 1; i < elevations.length; i++) {
         var diff = elevations[i] - elevations[i-1];
-        if (diff > 0) totalAscent += diff; else totalDescent += Math.abs(diff);
+        pending += diff;
+        if (pending > DEAD_BAND) { totalAscent += pending; pending = 0; }
+        else if (pending < -DEAD_BAND) { totalDescent += Math.abs(pending); pending = 0; }
         var segDist = distances[i] - distances[i-1];
         if (segDist > 0) { var g = (Math.abs(diff) / segDist) * 100; if (g > maxGradient) maxGradient = g; }
     }
