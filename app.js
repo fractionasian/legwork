@@ -284,7 +284,7 @@ function updateMarkerNumber(marker, num) {
 var autocompleteTimer = null;
 
 function setAutocompleteOpen(open) {
-    var wrapper = document.querySelector(".address-wrapper");
+    var wrapper = document.querySelector(".menu-search");
     var list = document.getElementById("autocomplete-list");
     list.style.display = open ? "block" : "none";
     if (wrapper) wrapper.setAttribute("aria-expanded", open ? "true" : "false");
@@ -402,9 +402,15 @@ async function geocodeAddress(opts) {
 }
 
 function goToLocation(lat, lon) {
+    // Clear existing waypoints — this sets a new starting point
+    for (var i = 0; i < state.waypoints.length; i++) state.map.removeLayer(state.waypoints[i].marker);
+    state.waypoints = [];
+    updateRoute();
+
     state.startLat = lat;
     state.startLon = lon;
     state.map.setView([lat, lon], 15);
+    closeMenu();
     loadPaths(lat, lon).then(function () {
         if (state.graph) addWaypointAt(lat, lon, { exactPosition: true });
     });
@@ -786,6 +792,7 @@ async function updateRoute() {
     updateDistance();
     debouncedFetchElevation(allRouteCoords);
     updateShareHash();
+    saveRoute();
 }
 
 var _elevationTimer = null;
@@ -818,10 +825,43 @@ function addMidpointMarkers() {
         (function (pair) {
             var fromIdx = pair.afterIdx;
             var toIdx = pair.closing ? 0 : fromIdx + 1;
-            var from = state.waypoints[fromIdx];
-            var to = state.waypoints[toIdx];
-            var midLat = (from.lat + to.lat) / 2;
-            var midLon = (from.lon + to.lon) / 2;
+
+            // Find midpoint along the actual routed segment
+            var segCoords;
+            if (pair.closing && state.closingLine) {
+                var cls = state.closingLine.getLatLngs();
+                segCoords = cls.map(function (ll) { return [ll.lat, ll.lng]; });
+            } else if (!pair.closing && state.routeSegments[fromIdx]) {
+                segCoords = state.routeSegments[fromIdx];
+            }
+
+            var midLat, midLon;
+            if (segCoords && segCoords.length >= 2) {
+                // Walk along segment to find the geographic midpoint
+                var totalDist = 0;
+                for (var s = 1; s < segCoords.length; s++) {
+                    totalDist += haversine(segCoords[s-1][0], segCoords[s-1][1], segCoords[s][0], segCoords[s][1]);
+                }
+                var halfDist = totalDist / 2, acc = 0;
+                midLat = segCoords[0][0];
+                midLon = segCoords[0][1];
+                for (var s = 1; s < segCoords.length; s++) {
+                    var d = haversine(segCoords[s-1][0], segCoords[s-1][1], segCoords[s][0], segCoords[s][1]);
+                    if (acc + d >= halfDist) {
+                        var ratio = (halfDist - acc) / d;
+                        midLat = segCoords[s-1][0] + ratio * (segCoords[s][0] - segCoords[s-1][0]);
+                        midLon = segCoords[s-1][1] + ratio * (segCoords[s][1] - segCoords[s-1][1]);
+                        break;
+                    }
+                    acc += d;
+                }
+            } else {
+                // Fallback to straight-line midpoint
+                var from = state.waypoints[fromIdx];
+                var to = state.waypoints[toIdx];
+                midLat = (from.lat + to.lat) / 2;
+                midLon = (from.lon + to.lon) / 2;
+            }
 
             var el = document.createElement("div");
             el.style.cssText =
@@ -1109,7 +1149,6 @@ function showBanner(msg, type) {
 }
 
 // ── Event bindings ─────────────────────────────────────
-document.getElementById("geocode-btn").addEventListener("click", function () { geocodeAddress(); });
 document.getElementById("address-input").addEventListener("keydown", function (e) { if (e.key === "Enter") geocodeAddress(); });
 // ── Reverse button visibility ─────────────────────────
 function updateReverseVisibility() {
@@ -1185,6 +1224,86 @@ function autoDetectUnits(lat, lon) {
             }
         })
         .catch(function () {});
+}
+
+// ── New route ─────────────────────────────────────────
+document.getElementById("new-route-btn").addEventListener("click", function () {
+    for (var i = 0; i < state.waypoints.length; i++) state.map.removeLayer(state.waypoints[i].marker);
+    state.waypoints = [];
+    updateRoute();
+    localStorage.removeItem("lw:savedRoute");
+    closeMenu();
+    // Geolocate fresh
+    if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+            function (pos) {
+                var lat = pos.coords.latitude, lon = pos.coords.longitude;
+                state.map.setView([lat, lon], 15);
+                loadPaths(lat, lon).then(function () {
+                    if (state.graph) addWaypointAt(lat, lon, { exactPosition: true });
+                });
+            },
+            function () {},
+            { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
+        );
+    }
+});
+
+// ── Route persistence ─────────────────────────────────
+function saveRoute() {
+    if (state.waypoints.length === 0) {
+        localStorage.removeItem("lw:savedRoute");
+        return;
+    }
+    var data = {
+        waypoints: state.waypoints.map(function (wp) {
+            return { lat: wp.lat, lon: wp.lon, nodeKey: wp.nodeKey };
+        }),
+        mode: state.mode,
+        zoom: state.map.getZoom(),
+    };
+    try { localStorage.setItem("lw:savedRoute", JSON.stringify(data)); } catch (e) {}
+}
+
+function loadSavedRoute() {
+    try {
+        var raw = localStorage.getItem("lw:savedRoute");
+        if (!raw) return null;
+        return JSON.parse(raw);
+    } catch (e) { return null; }
+}
+
+// ── Install prompt ────────────────────────────────────
+var deferredInstallPrompt = null;
+
+function setupInstallPrompt() {
+    var el = document.getElementById("install-prompt");
+    // Already running as installed PWA
+    if (window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone) return;
+
+    // Android/Chrome: capture the beforeinstallprompt event
+    window.addEventListener("beforeinstallprompt", function (e) {
+        e.preventDefault();
+        deferredInstallPrompt = e;
+        el.textContent = "Install app";
+        el.classList.remove("hidden");
+        el.style.cursor = "pointer";
+        el.addEventListener("click", function () {
+            deferredInstallPrompt.prompt();
+            deferredInstallPrompt.userChoice.then(function () {
+                deferredInstallPrompt = null;
+                el.classList.add("hidden");
+            });
+        });
+    });
+
+    // iOS Safari: show manual hint
+    var isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+    var isSafari = /Safari/.test(navigator.userAgent) && !/Chrome|CriOS|FxiOS/.test(navigator.userAgent);
+    if (isIOS && isSafari) {
+        el.innerHTML = 'Add to Home Screen: tap <strong>Share</strong> → <strong>Add to Home Screen</strong>';
+        el.classList.remove("hidden");
+    }
 }
 
 // ── Share link ─────────────────────────────────────────
@@ -1265,16 +1384,35 @@ buildMenuLegend();
 updateReverseVisibility();
 showWelcome();
 updateOnlineStatus();
+setupInstallPrompt();
 
 var sharedPoints = loadFromHash();
+var savedRoute = !sharedPoints ? loadSavedRoute() : null;
+
 if (sharedPoints) {
+    // Restore from share link
     var center = sharedPoints[0];
     state.map.setView([center.lat, center.lon], 14);
     autoDetectUnits(center.lat, center.lon);
     loadPaths(center.lat, center.lon).then(function () {
         for (var i = 0; i < sharedPoints.length; i++) addWaypointAt(sharedPoints[i].lat, sharedPoints[i].lon, { exactPosition: i === 0 });
     });
+} else if (savedRoute && savedRoute.waypoints && savedRoute.waypoints.length > 0) {
+    // Restore last session's route
+    if (savedRoute.mode) {
+        state.mode = savedRoute.mode;
+        document.getElementById("mode-btn").textContent = state.mode === "loop" ? "\u21BB Loop" : "\u21C4 Out & Back";
+        updateReverseVisibility();
+    }
+    var sw = savedRoute.waypoints;
+    var ctr = sw[0];
+    state.map.setView([ctr.lat, ctr.lon], savedRoute.zoom || 14);
+    autoDetectUnits(ctr.lat, ctr.lon);
+    loadPaths(ctr.lat, ctr.lon).then(function () {
+        for (var i = 0; i < sw.length; i++) addWaypointAt(sw[i].lat, sw[i].lon, { exactPosition: i === 0 });
+    });
 } else if (navigator.geolocation) {
+    // Fresh start — geolocate
     navigator.geolocation.getCurrentPosition(
         function (pos) {
             var lat = pos.coords.latitude;
@@ -1285,7 +1423,6 @@ if (sharedPoints) {
             state.map.setView([lat, lon], 15);
             setTimeout(function () {
                 state.map.setView([lat, lon], 15);
-                document.getElementById("address-input").placeholder = "Current location — or type an address";
                 loadPaths(lat, lon).then(function () {
                     if (state.graph) addWaypointAt(lat, lon, { exactPosition: true });
                 });
