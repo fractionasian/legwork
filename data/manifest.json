@@ -1,6 +1,6 @@
 {
-  "built": "2026-03-29T23:20:52.019Z",
-  "version": "629208a7",
+  "built": "2026-03-29T23:39:20.923Z",
+  "version": "cbf06fe6",
   "cities": {
     "perth": {
       "name": "Perth",
@@ -96,9 +96,7 @@
             115.9
           ],
           "suburbs": [
-            "Clifton Crescent",
-            "Third Avenue",
-            "Second Avenue"
+            "Unknown"
           ],
           "ways": 5862
         },
@@ -1274,7 +1272,7 @@
             145.05
           ],
           "suburbs": [
-            "Alphington"
+            "Unknown"
           ],
           "ways": 6562
         },
@@ -1287,7 +1285,7 @@
             145.05
           ],
           "suburbs": [
-            "Brighton East"
+            "Unknown"
           ],
           "ways": 5772
         },
