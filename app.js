@@ -881,6 +881,10 @@ function addMidpointMarkers() {
                 zIndexOffset: -50,
             }).addTo(state.map);
 
+            // Prevent map click from firing during drag
+            mid.on("mousedown", function (e) { L.DomEvent.stopPropagation(e); });
+            mid.on("click", function (e) { L.DomEvent.stopPropagation(e); });
+
             mid.on("dragend", function () {
                 var pos = mid.getLatLng();
                 // Insert a new waypoint after fromIdx
