@@ -140,9 +140,18 @@ async function buildCity(city, dataDir) {
 
     const tileMeta = [];
     for (const [key, tile] of Object.entries(tiles)) {
-        const tileGeoJSON = { type: "FeatureCollection", features: tile.features };
+        // Compact format: [id, highway, name, [[lon5dp,lat5dp],...]] per feature
+        const compact = tile.features.map(f => [
+            f.properties.id,
+            f.properties.highway,
+            f.properties.name || "",
+            f.geometry.coordinates.map(c => [
+                parseFloat(c[0].toFixed(5)),
+                parseFloat(c[1].toFixed(5))
+            ])
+        ]);
         const filePath = path.join(tileDir, `${key}.json`);
-        fs.writeFileSync(filePath, JSON.stringify(tileGeoJSON));
+        fs.writeFileSync(filePath, JSON.stringify(compact));
 
         const centerLat = (tile.bounds[0] + tile.bounds[2]) / 2;
         const centerLon = (tile.bounds[1] + tile.bounds[3]) / 2;
