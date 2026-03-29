@@ -121,12 +121,10 @@ Rate limiting: 1s delay between Photon reverse geocode calls. Overpass queries u
 ### 6. City Request Flow (user-facing)
 
 When a user geolocates outside all cached cities:
-1. After Overpass fallback loads, show a subtle banner link: `"Want faster loading here? Request this city"`
-2. Clicking opens a pre-filled GitHub Issue:
-   - Title: `City request: {reverse-geocoded city name}`
-   - Body: `Bounding box: {computed bbox around user location}`
-   - Labels: `city-request`
-3. Peter reviews, adds to `cities.json`, pushes. Next build picks it up.
+1. A "Request your city" link appears in the side menu (bottom, small text)
+2. Clicking opens a Google Form (one field: city name)
+3. Peter gets email notification, adds to `cities.json`, pushes. Next build picks it up.
+4. No GitHub account required. Non-intrusive — only visible in the menu, not as a banner.
 
 ### 7. Analytics (Plausible)
 
