@@ -1,0 +1,1814 @@
+{
+  "built": "2026-03-29T23:20:52.019Z",
+  "version": "629208a7",
+  "cities": {
+    "perth": {
+      "name": "Perth",
+      "bounds": [
+        -32.15,
+        115.65,
+        -31.75,
+        116.05
+      ],
+      "tileSize": 0.05,
+      "grid": [
+        8,
+        8
+      ],
+      "tiles": [
+        {
+          "file": "3_3.json",
+          "bounds": [
+            -32,
+            115.80000000000001,
+            -31.95,
+            115.85000000000001
+          ],
+          "suburbs": [
+            "Mounts Bay Road"
+          ],
+          "ways": 4619
+        },
+        {
+          "file": "3_4.json",
+          "bounds": [
+            -32,
+            115.85000000000001,
+            -31.95,
+            115.9
+          ],
+          "suburbs": [
+            "South Perth"
+          ],
+          "ways": 7971
+        },
+        {
+          "file": "1_3.json",
+          "bounds": [
+            -32.1,
+            115.80000000000001,
+            -32.05,
+            115.85000000000001
+          ],
+          "suburbs": [
+            "Farrington Road",
+            "Botany Way West",
+            "Botany Way East"
+          ],
+          "ways": 4869
+        },
+        {
+          "file": "1_4.json",
+          "bounds": [
+            -32.1,
+            115.85000000000001,
+            -32.05,
+            115.9
+          ],
+          "suburbs": [
+            "Bowmen of Melville Archery Club",
+            "Melville Golf Centre",
+            "Beasley Road"
+          ],
+          "ways": 4299
+        },
+        {
+          "file": "3_2.json",
+          "bounds": [
+            -32,
+            115.75,
+            -31.95,
+            115.80000000000001
+          ],
+          "suburbs": [
+            "Lake Claremont",
+            "Gloucester Street Shared Path",
+            "Ballaruk Bushland"
+          ],
+          "ways": 4613
+        },
+        {
+          "file": "4_4.json",
+          "bounds": [
+            -31.95,
+            115.85000000000001,
+            -31.9,
+            115.9
+          ],
+          "suburbs": [
+            "Clifton Crescent",
+            "Third Avenue",
+            "Second Avenue"
+          ],
+          "ways": 5862
+        },
+        {
+          "file": "4_3.json",
+          "bounds": [
+            -31.95,
+            115.80000000000001,
+            -31.9,
+            115.85000000000001
+          ],
+          "suburbs": [
+            "Dodd Street",
+            "Telethon Speech & Hearing",
+            "Bendat Parent and Community Centre"
+          ],
+          "ways": 9406
+        },
+        {
+          "file": "6_2.json",
+          "bounds": [
+            -31.849999999999998,
+            115.75,
+            -31.799999999999997,
+            115.80000000000001
+          ],
+          "suburbs": [
+            "Meryll Place",
+            "Sillmon Way",
+            "Melene Road"
+          ],
+          "ways": 3790
+        },
+        {
+          "file": "5_2.json",
+          "bounds": [
+            -31.9,
+            115.75,
+            -31.849999999999998,
+            115.80000000000001
+          ],
+          "suburbs": [
+            "Cheddar Place",
+            "Burroughs Rd After Karrinyup Rd",
+            "Burroughs Road"
+          ],
+          "ways": 3664
+        },
+        {
+          "file": "5_4.json",
+          "bounds": [
+            -31.9,
+            115.85000000000001,
+            -31.849999999999998,
+            115.9
+          ],
+          "suburbs": [
+            "Altura Rise",
+            "Arcadia Place",
+            "Escallonia Street"
+          ],
+          "ways": 3447
+        },
+        {
+          "file": "6_3.json",
+          "bounds": [
+            -31.849999999999998,
+            115.80000000000001,
+            -31.799999999999997,
+            115.85000000000001
+          ],
+          "suburbs": [
+            "Kirby Place",
+            "Lydd Close",
+            "Bredhurst Road"
+          ],
+          "ways": 3322
+        },
+        {
+          "file": "5_3.json",
+          "bounds": [
+            -31.9,
+            115.80000000000001,
+            -31.849999999999998,
+            115.85000000000001
+          ],
+          "suburbs": [
+            "Canning Street",
+            "Alexander Street",
+            "Amelia Street"
+          ],
+          "ways": 4595
+        },
+        {
+          "file": "7_2.json",
+          "bounds": [
+            -31.799999999999997,
+            115.75,
+            -31.75,
+            115.80000000000001
+          ],
+          "suburbs": [
+            "Harrier Way",
+            "Bellanger Drive"
+          ],
+          "ways": 4043
+        },
+        {
+          "file": "5_5.json",
+          "bounds": [
+            -31.9,
+            115.9,
+            -31.849999999999998,
+            115.95
+          ],
+          "suburbs": [
+            "Beechboro Road North",
+            "Beechboro Road before Benara Road"
+          ],
+          "ways": 3064
+        },
+        {
+          "file": "7_1.json",
+          "bounds": [
+            -31.799999999999997,
+            115.7,
+            -31.75,
+            115.75
+          ],
+          "suburbs": [
+            "Mullaloo Beach"
+          ],
+          "ways": 1707
+        },
+        {
+          "file": "6_1.json",
+          "bounds": [
+            -31.849999999999998,
+            115.7,
+            -31.799999999999997,
+            115.75
+          ],
+          "suburbs": [
+            "Lighthouse",
+            "Northside Drive"
+          ],
+          "ways": 1093
+        },
+        {
+          "file": "4_2.json",
+          "bounds": [
+            -31.95,
+            115.75,
+            -31.9,
+            115.80000000000001
+          ],
+          "suburbs": [
+            "Durston Road",
+            "300 Acres Restaurant & Bar",
+            "Wembley Golf Clubhouse"
+          ],
+          "ways": 3734
+        },
+        {
+          "file": "2_2.json",
+          "bounds": [
+            -32.05,
+            115.75,
+            -32,
+            115.80000000000001
+          ],
+          "suburbs": [
+            "Point Roe Beach",
+            "Point Roe",
+            "Colonial Gardens"
+          ],
+          "ways": 6290
+        },
+        {
+          "file": "1_1.json",
+          "bounds": [
+            -32.1,
+            115.7,
+            -32.05,
+            115.75
+          ],
+          "suburbs": [
+            "Unknown"
+          ],
+          "ways": 1056
+        },
+        {
+          "file": "2_3.json",
+          "bounds": [
+            -32.05,
+            115.80000000000001,
+            -32,
+            115.85000000000001
+          ],
+          "suburbs": [
+            "Dunkley Avenue"
+          ],
+          "ways": 3715
+        },
+        {
+          "file": "4_7.json",
+          "bounds": [
+            -31.95,
+            116,
+            -31.9,
+            116.05
+          ],
+          "suburbs": [
+            "Northgate Promenade",
+            "Exmouth Road",
+            "Darley Lane"
+          ],
+          "ways": 1757
+        },
+        {
+          "file": "2_4.json",
+          "bounds": [
+            -32.05,
+            115.85000000000001,
+            -32,
+            115.9
+          ],
+          "suburbs": [
+            "Salter Point Parade",
+            "Howard Parade",
+            "Sulman Avenue after Howard Parade"
+          ],
+          "ways": 6168
+        },
+        {
+          "file": "5_7.json",
+          "bounds": [
+            -31.9,
+            116,
+            -31.849999999999998,
+            116.05
+          ],
+          "suburbs": [
+            "Patterson Drive"
+          ],
+          "ways": 3721
+        },
+        {
+          "file": "5_6.json",
+          "bounds": [
+            -31.9,
+            115.95,
+            -31.849999999999998,
+            116
+          ],
+          "suburbs": [
+            "Caversham",
+            "West Swan Road"
+          ],
+          "ways": 2252
+        },
+        {
+          "file": "6_4.json",
+          "bounds": [
+            -31.849999999999998,
+            115.85000000000001,
+            -31.799999999999997,
+            115.9
+          ],
+          "suburbs": [
+            "The Mall",
+            "Millbank Court",
+            "Euston Place"
+          ],
+          "ways": 2404
+        },
+        {
+          "file": "1_2.json",
+          "bounds": [
+            -32.1,
+            115.75,
+            -32.05,
+            115.80000000000001
+          ],
+          "suburbs": [
+            "Beaconsfield",
+            "York St Before Jean St"
+          ],
+          "ways": 6833
+        },
+        {
+          "file": "7_3.json",
+          "bounds": [
+            -31.799999999999997,
+            115.80000000000001,
+            -31.75,
+            115.85000000000001
+          ],
+          "suburbs": [
+            "Hocking"
+          ],
+          "ways": 2067
+        },
+        {
+          "file": "7_6.json",
+          "bounds": [
+            -31.799999999999997,
+            115.95,
+            -31.75,
+            116
+          ],
+          "suburbs": [
+            "Ellenbrook Skate Park",
+            "Westgrove Drive",
+            "Pinegrove Drive East"
+          ],
+          "ways": 3663
+        },
+        {
+          "file": "3_5.json",
+          "bounds": [
+            -32,
+            115.9,
+            -31.95,
+            115.95
+          ],
+          "suburbs": [
+            "Fulham Street",
+            "Cemy Place"
+          ],
+          "ways": 4878
+        },
+        {
+          "file": "4_5.json",
+          "bounds": [
+            -31.95,
+            115.9,
+            -31.9,
+            115.95
+          ],
+          "suburbs": [
+            "Newton Street",
+            "Higgins Way",
+            "Memorial Drive"
+          ],
+          "ways": 3637
+        },
+        {
+          "file": "4_6.json",
+          "bounds": [
+            -31.95,
+            115.95,
+            -31.9,
+            116
+          ],
+          "suburbs": [
+            "Perth Aviation Rescue Fire Fighting",
+            "Munday Swamp",
+            "Northern Perimeter Road"
+          ],
+          "ways": 2526
+        },
+        {
+          "file": "3_6.json",
+          "bounds": [
+            -32,
+            115.95,
+            -31.95,
+            116
+          ],
+          "suburbs": [
+            "Tonkin Highway"
+          ],
+          "ways": 2027
+        },
+        {
+          "file": "2_6.json",
+          "bounds": [
+            -32.05,
+            115.95,
+            -32,
+            116
+          ],
+          "suburbs": [
+            "Kenwick Wetlands Nature Reserve",
+            "Bickley Road"
+          ],
+          "ways": 3937
+        },
+        {
+          "file": "1_6.json",
+          "bounds": [
+            -32.1,
+            115.95,
+            -32.05,
+            116
+          ],
+          "suburbs": [
+            "Cardington Way",
+            "Newborough Place",
+            "Bayham Place"
+          ],
+          "ways": 7369
+        },
+        {
+          "file": "1_5.json",
+          "bounds": [
+            -32.1,
+            115.9,
+            -32.05,
+            115.95
+          ],
+          "suburbs": [
+            "Jeremiah Way",
+            "Ruth Playground",
+            "Ezekiel Avenue"
+          ],
+          "ways": 6100
+        },
+        {
+          "file": "2_5.json",
+          "bounds": [
+            -32.05,
+            115.9,
+            -32,
+            115.95
+          ],
+          "suburbs": [
+            "Liseron Way",
+            "Peninsula Road"
+          ],
+          "ways": 6483
+        },
+        {
+          "file": "7_4.json",
+          "bounds": [
+            -31.799999999999997,
+            115.85000000000001,
+            -31.75,
+            115.9
+          ],
+          "suburbs": [
+            "Knight Road",
+            "Trainor Road",
+            "Facey Road"
+          ],
+          "ways": 431
+        },
+        {
+          "file": "2_7.json",
+          "bounds": [
+            -32.05,
+            116,
+            -32,
+            116.05
+          ],
+          "suburbs": [
+            "Hardinge Road",
+            "Dale Place",
+            "Canter Court Golf Course"
+          ],
+          "ways": 702
+        },
+        {
+          "file": "0_7.json",
+          "bounds": [
+            -32.15,
+            116,
+            -32.1,
+            116.05
+          ],
+          "suburbs": [
+            "Canteen",
+            "Good Shepherd Catholic Primary School",
+            "Marmion Street"
+          ],
+          "ways": 5203
+        },
+        {
+          "file": "0_6.json",
+          "bounds": [
+            -32.15,
+            115.95,
+            -32.1,
+            116
+          ],
+          "suburbs": [
+            "Tonkin Highway",
+            "McNeill Road"
+          ],
+          "ways": 3785
+        },
+        {
+          "file": "2_1.json",
+          "bounds": [
+            -32.05,
+            115.7,
+            -32,
+            115.75
+          ],
+          "suburbs": [
+            "Unknown"
+          ],
+          "ways": 339
+        },
+        {
+          "file": "6_6.json",
+          "bounds": [
+            -31.849999999999998,
+            115.95,
+            -31.799999999999997,
+            116
+          ],
+          "suburbs": [
+            "Mormaer Street",
+            "Watervalley Boulevard",
+            "Magenta Vista"
+          ],
+          "ways": 1433
+        },
+        {
+          "file": "0_2.json",
+          "bounds": [
+            -32.15,
+            115.75,
+            -32.1,
+            115.80000000000001
+          ],
+          "suburbs": [
+            "Azolla Court",
+            "Carello Circuit",
+            "Hamilton Rd After Mayor Rd"
+          ],
+          "ways": 2757
+        },
+        {
+          "file": "0_5.json",
+          "bounds": [
+            -32.15,
+            115.9,
+            -32.1,
+            115.95
+          ],
+          "suburbs": [
+            "Nicholson Rd After Broadway Bvd",
+            "Nicholson Road",
+            "Nicholson Rd Before Easthope Link"
+          ],
+          "ways": 7235
+        },
+        {
+          "file": "1_7.json",
+          "bounds": [
+            -32.1,
+            116,
+            -32.05,
+            116.05
+          ],
+          "suburbs": [
+            "Cockram Road",
+            "Mills Road East"
+          ],
+          "ways": 2129
+        },
+        {
+          "file": "0_4.json",
+          "bounds": [
+            -32.15,
+            115.85000000000001,
+            -32.1,
+            115.9
+          ],
+          "suburbs": [
+            "Chicory Street",
+            "Elderflower Street",
+            "Yarrow Street"
+          ],
+          "ways": 3111
+        },
+        {
+          "file": "7_7.json",
+          "bounds": [
+            -31.799999999999997,
+            116,
+            -31.75,
+            116.05
+          ],
+          "suburbs": [
+            "Railway Parade",
+            "Great Northern Highway"
+          ],
+          "ways": 487
+        },
+        {
+          "file": "-1_6.json",
+          "bounds": [
+            -32.199999999999996,
+            115.95,
+            -32.15,
+            116
+          ],
+          "suburbs": [
+            "Hilbert Road",
+            "Cypress Avenue",
+            "Brush Street"
+          ],
+          "ways": 19
+        },
+        {
+          "file": "-1_7.json",
+          "bounds": [
+            -32.199999999999996,
+            116,
+            -32.15,
+            116.05
+          ],
+          "suburbs": [
+            "Richon Heights",
+            "Cooliabberra Drive",
+            "Cellar Place"
+          ],
+          "ways": 29
+        },
+        {
+          "file": "3_7.json",
+          "bounds": [
+            -32,
+            116,
+            -31.95,
+            116.05
+          ],
+          "suburbs": [
+            "Hibbertia Court",
+            "Leschenaultia Way",
+            "Sultana Road East"
+          ],
+          "ways": 2037
+        },
+        {
+          "file": "-1_4.json",
+          "bounds": [
+            -32.199999999999996,
+            115.85000000000001,
+            -32.15,
+            115.9
+          ],
+          "suburbs": [
+            "Triandra Court",
+            "Stromboli Way"
+          ],
+          "ways": 23
+        },
+        {
+          "file": "-1_5.json",
+          "bounds": [
+            -32.199999999999996,
+            115.9,
+            -32.15,
+            115.95
+          ],
+          "suburbs": [
+            "Rowley Road",
+            "Nicholson Road"
+          ],
+          "ways": 5
+        },
+        {
+          "file": "6_5.json",
+          "bounds": [
+            -31.849999999999998,
+            115.9,
+            -31.799999999999997,
+            115.95
+          ],
+          "suburbs": [
+            "Tonkin Highway",
+            "Zamia",
+            "Hennessy Road"
+          ],
+          "ways": 545
+        },
+        {
+          "file": "-1_3.json",
+          "bounds": [
+            -32.199999999999996,
+            115.80000000000001,
+            -32.15,
+            115.85000000000001
+          ],
+          "suburbs": [
+            "Wattleup Road",
+            "Unnamed WA48291 Conservation Park",
+            "Rosewood Street"
+          ],
+          "ways": 11
+        },
+        {
+          "file": "0_3.json",
+          "bounds": [
+            -32.15,
+            115.80000000000001,
+            -32.1,
+            115.85000000000001
+          ],
+          "suburbs": [
+            "Dunraven Drive"
+          ],
+          "ways": 2460
+        },
+        {
+          "file": "-1_2.json",
+          "bounds": [
+            -32.199999999999996,
+            115.75,
+            -32.15,
+            115.80000000000001
+          ],
+          "suburbs": [
+            "Cockburn Road Shared Path",
+            "Henderson Cliffs",
+            "Henderson Cliffs Walk Trail"
+          ],
+          "ways": 6
+        },
+        {
+          "file": "6_7.json",
+          "bounds": [
+            -31.849999999999998,
+            116,
+            -31.799999999999997,
+            116.05
+          ],
+          "suburbs": [
+            "McDonald Street",
+            "Till Street",
+            "Horner Way"
+          ],
+          "ways": 235
+        },
+        {
+          "file": "0_1.json",
+          "bounds": [
+            -32.15,
+            115.7,
+            -32.1,
+            115.75
+          ],
+          "suburbs": [
+            "Unknown"
+          ],
+          "ways": 11
+        },
+        {
+          "file": "7_5.json",
+          "bounds": [
+            -31.799999999999997,
+            115.9,
+            -31.75,
+            115.95
+          ],
+          "suburbs": [
+            "Lexia"
+          ],
+          "ways": 84
+        }
+      ]
+    },
+    "melbourne": {
+      "name": "Melbourne",
+      "bounds": [
+        -37.95,
+        144.75,
+        -37.65,
+        145.15
+      ],
+      "tileSize": 0.05,
+      "grid": [
+        7,
+        9
+      ],
+      "tiles": [
+        {
+          "file": "2_6.json",
+          "bounds": [
+            -37.85,
+            145.05,
+            -37.800000000000004,
+            145.1
+          ],
+          "suburbs": [
+            "Canterbury"
+          ],
+          "ways": 4103
+        },
+        {
+          "file": "2_5.json",
+          "bounds": [
+            -37.85,
+            145,
+            -37.800000000000004,
+            145.05
+          ],
+          "suburbs": [
+            "Hawthorn"
+          ],
+          "ways": 9418
+        },
+        {
+          "file": "3_6.json",
+          "bounds": [
+            -37.800000000000004,
+            145.05,
+            -37.75,
+            145.1
+          ],
+          "suburbs": [
+            "Bulleen Park",
+            "Future Yarra Junior Football League Pavillion"
+          ],
+          "ways": 5010
+        },
+        {
+          "file": "3_4.json",
+          "bounds": [
+            -37.800000000000004,
+            144.95,
+            -37.75,
+            145
+          ],
+          "suburbs": [
+            "Brunswick East"
+          ],
+          "ways": 15603
+        },
+        {
+          "file": "2_4.json",
+          "bounds": [
+            -37.85,
+            144.95,
+            -37.800000000000004,
+            145
+          ],
+          "suburbs": [
+            "Pioneer Women's Memorial Garden",
+            "Sidney Myer",
+            "CityLink"
+          ],
+          "ways": 19012
+        },
+        {
+          "file": "5_0.json",
+          "bounds": [
+            -37.7,
+            144.75,
+            -37.650000000000006,
+            144.8
+          ],
+          "suburbs": [
+            "Keilor North",
+            "Calder Freeway",
+            "Calder Park"
+          ],
+          "ways": 2181
+        },
+        {
+          "file": "4_0.json",
+          "bounds": [
+            -37.75,
+            144.75,
+            -37.7,
+            144.8
+          ],
+          "suburbs": [
+            "Delahey"
+          ],
+          "ways": 6301
+        },
+        {
+          "file": "5_-1.json",
+          "bounds": [
+            -37.7,
+            144.7,
+            -37.650000000000006,
+            144.75
+          ],
+          "suburbs": [
+            "Hillside"
+          ],
+          "ways": 28
+        },
+        {
+          "file": "3_3.json",
+          "bounds": [
+            -37.800000000000004,
+            144.9,
+            -37.75,
+            144.95
+          ],
+          "suburbs": [
+            "Ascot Vale"
+          ],
+          "ways": 9678
+        },
+        {
+          "file": "1_8.json",
+          "bounds": [
+            -37.900000000000006,
+            145.15,
+            -37.85,
+            145.15
+          ],
+          "suburbs": [
+            "Glen Waverley"
+          ],
+          "ways": 56
+        },
+        {
+          "file": "1_7.json",
+          "bounds": [
+            -37.900000000000006,
+            145.1,
+            -37.85,
+            145.15
+          ],
+          "suburbs": [
+            "Mount Waverley"
+          ],
+          "ways": 5748
+        },
+        {
+          "file": "0_7.json",
+          "bounds": [
+            -37.95,
+            145.1,
+            -37.900000000000006,
+            145.15
+          ],
+          "suburbs": [
+            "Clayton"
+          ],
+          "ways": 7184
+        },
+        {
+          "file": "3_7.json",
+          "bounds": [
+            -37.800000000000004,
+            145.1,
+            -37.75,
+            145.15
+          ],
+          "suburbs": [
+            "Artemis Court",
+            "Templestowe Lower"
+          ],
+          "ways": 5737
+        },
+        {
+          "file": "1_6.json",
+          "bounds": [
+            -37.900000000000006,
+            145.05,
+            -37.85,
+            145.1
+          ],
+          "suburbs": [
+            "Winton Road",
+            "Ashburton"
+          ],
+          "ways": 8143
+        },
+        {
+          "file": "2_7.json",
+          "bounds": [
+            -37.85,
+            145.1,
+            -37.800000000000004,
+            145.15
+          ],
+          "suburbs": [
+            "Box Hill"
+          ],
+          "ways": 4935
+        },
+        {
+          "file": "1_5.json",
+          "bounds": [
+            -37.900000000000006,
+            145,
+            -37.85,
+            145.05
+          ],
+          "suburbs": [
+            "Caulfield North"
+          ],
+          "ways": 8813
+        },
+        {
+          "file": "0_6.json",
+          "bounds": [
+            -37.95,
+            145.05,
+            -37.900000000000006,
+            145.1
+          ],
+          "suburbs": [
+            "Bentleigh East"
+          ],
+          "ways": 5959
+        },
+        {
+          "file": "1_4.json",
+          "bounds": [
+            -37.900000000000006,
+            144.95,
+            -37.85,
+            145
+          ],
+          "suburbs": [
+            "St.Kilda Marina Boat Storage",
+            "Riva",
+            "Bay Trail"
+          ],
+          "ways": 5171
+        },
+        {
+          "file": "2_8.json",
+          "bounds": [
+            -37.85,
+            145.15,
+            -37.800000000000004,
+            145.15
+          ],
+          "suburbs": [
+            "Blackburn"
+          ],
+          "ways": 41
+        },
+        {
+          "file": "5_5.json",
+          "bounds": [
+            -37.7,
+            145,
+            -37.650000000000006,
+            145.05
+          ],
+          "suburbs": [
+            "Lalor"
+          ],
+          "ways": 5505
+        },
+        {
+          "file": "4_4.json",
+          "bounds": [
+            -37.75,
+            144.95,
+            -37.7,
+            145
+          ],
+          "suburbs": [
+            "Coburg North",
+            "Newlands Road"
+          ],
+          "ways": 7522
+        },
+        {
+          "file": "5_4.json",
+          "bounds": [
+            -37.7,
+            144.95,
+            -37.650000000000006,
+            145
+          ],
+          "suburbs": [
+            "Merri Creek Trail",
+            "Galada Tamboore and Marran Baba Parklands",
+            "Campbellfield"
+          ],
+          "ways": 3424
+        },
+        {
+          "file": "4_3.json",
+          "bounds": [
+            -37.75,
+            144.9,
+            -37.7,
+            144.95
+          ],
+          "suburbs": [
+            "Pascoe Vale"
+          ],
+          "ways": 4906
+        },
+        {
+          "file": "0_4.json",
+          "bounds": [
+            -37.95,
+            144.95,
+            -37.900000000000006,
+            145
+          ],
+          "suburbs": [
+            "Green Point",
+            "Green Point Lookout",
+            "Green Point Coastal Reserve"
+          ],
+          "ways": 1660
+        },
+        {
+          "file": "3_0.json",
+          "bounds": [
+            -37.800000000000004,
+            144.75,
+            -37.75,
+            144.8
+          ],
+          "suburbs": [
+            "Deer Park",
+            "Station Road"
+          ],
+          "ways": 5859
+        },
+        {
+          "file": "4_1.json",
+          "bounds": [
+            -37.75,
+            144.8,
+            -37.7,
+            144.85
+          ],
+          "suburbs": [
+            "Keilor",
+            "Green Gully Road",
+            "Taylors Creek"
+          ],
+          "ways": 4033
+        },
+        {
+          "file": "5_1.json",
+          "bounds": [
+            -37.7,
+            144.8,
+            -37.650000000000006,
+            144.85
+          ],
+          "suburbs": [
+            "Melbourne Airport",
+            "Arundel Creek",
+            "McNabs Road"
+          ],
+          "ways": 668
+        },
+        {
+          "file": "3_2.json",
+          "bounds": [
+            -37.800000000000004,
+            144.85,
+            -37.75,
+            144.9
+          ],
+          "suburbs": [
+            "Maidstone Tram Depot",
+            "Test Track",
+            "Maribyrnong"
+          ],
+          "ways": 6261
+        },
+        {
+          "file": "3_5.json",
+          "bounds": [
+            -37.800000000000004,
+            145,
+            -37.75,
+            145.05
+          ],
+          "suburbs": [
+            "Alphington"
+          ],
+          "ways": 6562
+        },
+        {
+          "file": "0_5.json",
+          "bounds": [
+            -37.95,
+            145,
+            -37.900000000000006,
+            145.05
+          ],
+          "suburbs": [
+            "Brighton East"
+          ],
+          "ways": 5772
+        },
+        {
+          "file": "5_7.json",
+          "bounds": [
+            -37.7,
+            145.1,
+            -37.650000000000006,
+            145.15
+          ],
+          "suburbs": [
+            "Plenty"
+          ],
+          "ways": 2951
+        },
+        {
+          "file": "4_7.json",
+          "bounds": [
+            -37.75,
+            145.1,
+            -37.7,
+            145.15
+          ],
+          "suburbs": [
+            "Montmorency"
+          ],
+          "ways": 3747
+        },
+        {
+          "file": "0_8.json",
+          "bounds": [
+            -37.95,
+            145.15,
+            -37.900000000000006,
+            145.15
+          ],
+          "suburbs": [
+            "Mulgrave"
+          ],
+          "ways": 35
+        },
+        {
+          "file": "3_1.json",
+          "bounds": [
+            -37.800000000000004,
+            144.8,
+            -37.75,
+            144.85
+          ],
+          "suburbs": [
+            "St Albans Road",
+            "Sunshine North"
+          ],
+          "ways": 5845
+        },
+        {
+          "file": "1_0.json",
+          "bounds": [
+            -37.900000000000006,
+            144.75,
+            -37.85,
+            144.8
+          ],
+          "suburbs": [
+            "Altona Meadows"
+          ],
+          "ways": 4067
+        },
+        {
+          "file": "4_6.json",
+          "bounds": [
+            -37.75,
+            145.05,
+            -37.7,
+            145.1
+          ],
+          "suburbs": [
+            "Macleod"
+          ],
+          "ways": 5511
+        },
+        {
+          "file": "2_3.json",
+          "bounds": [
+            -37.85,
+            144.9,
+            -37.800000000000004,
+            144.95
+          ],
+          "suburbs": [
+            "Douglas Street",
+            "Port Melbourne",
+            "Australian Road Research Board"
+          ],
+          "ways": 7784
+        },
+        {
+          "file": "4_2.json",
+          "bounds": [
+            -37.75,
+            144.85,
+            -37.7,
+            144.9
+          ],
+          "suburbs": [
+            "Airport West"
+          ],
+          "ways": 5906
+        },
+        {
+          "file": "5_2.json",
+          "bounds": [
+            -37.7,
+            144.85,
+            -37.650000000000006,
+            144.9
+          ],
+          "suburbs": [
+            "Moonee Ponds Creek Trail",
+            "Westmeadows"
+          ],
+          "ways": 3649
+        },
+        {
+          "file": "2_1.json",
+          "bounds": [
+            -37.85,
+            144.8,
+            -37.800000000000004,
+            144.85
+          ],
+          "suburbs": [
+            "West Gate Freeway (Express)",
+            "Western Ring Road Onramp"
+          ],
+          "ways": 2677
+        },
+        {
+          "file": "2_2.json",
+          "bounds": [
+            -37.85,
+            144.85,
+            -37.800000000000004,
+            144.9
+          ],
+          "suburbs": [
+            "Spotswood"
+          ],
+          "ways": 7080
+        },
+        {
+          "file": "5_3.json",
+          "bounds": [
+            -37.7,
+            144.9,
+            -37.650000000000006,
+            144.95
+          ],
+          "suburbs": [
+            "Dallas"
+          ],
+          "ways": 4754
+        },
+        {
+          "file": "4_5.json",
+          "bounds": [
+            -37.75,
+            145,
+            -37.7,
+            145.05
+          ],
+          "suburbs": [
+            "Reservoir"
+          ],
+          "ways": 7761
+        },
+        {
+          "file": "5_8.json",
+          "bounds": [
+            -37.7,
+            145.15,
+            -37.650000000000006,
+            145.15
+          ],
+          "suburbs": [
+            "Diamond Creek"
+          ],
+          "ways": 28
+        },
+        {
+          "file": "6_7.json",
+          "bounds": [
+            -37.650000000000006,
+            145.1,
+            -37.65,
+            145.15
+          ],
+          "suburbs": [
+            "Yarrambat",
+            "Yan Yean Road"
+          ],
+          "ways": 8
+        },
+        {
+          "file": "5_6.json",
+          "bounds": [
+            -37.7,
+            145.05,
+            -37.650000000000006,
+            145.1
+          ],
+          "suburbs": [
+            "Mill Park",
+            "Riccana Court"
+          ],
+          "ways": 6549
+        },
+        {
+          "file": "2_0.json",
+          "bounds": [
+            -37.85,
+            144.75,
+            -37.800000000000004,
+            144.8
+          ],
+          "suburbs": [
+            "Kayes Drain",
+            "Laverton North"
+          ],
+          "ways": 1557
+        },
+        {
+          "file": "1_2.json",
+          "bounds": [
+            -37.900000000000006,
+            144.85,
+            -37.85,
+            144.9
+          ],
+          "suburbs": [
+            "Unknown"
+          ],
+          "ways": 1218
+        },
+        {
+          "file": "3_8.json",
+          "bounds": [
+            -37.800000000000004,
+            145.15,
+            -37.75,
+            145.15
+          ],
+          "suburbs": [
+            "Doncaster East"
+          ],
+          "ways": 23
+        },
+        {
+          "file": "0_0.json",
+          "bounds": [
+            -37.95,
+            144.75,
+            -37.900000000000006,
+            144.8
+          ],
+          "suburbs": [
+            "Side Entrance Road",
+            "Spectacle Lake",
+            "Bird Hide - Spectacle Lake"
+          ],
+          "ways": 1524
+        },
+        {
+          "file": "1_3.json",
+          "bounds": [
+            -37.900000000000006,
+            144.9,
+            -37.85,
+            144.95
+          ],
+          "suburbs": [
+            "Eastern By-pass Channel"
+          ],
+          "ways": 363
+        },
+        {
+          "file": "1_1.json",
+          "bounds": [
+            -37.900000000000006,
+            144.8,
+            -37.85,
+            144.85
+          ],
+          "suburbs": [
+            "Altona Pier",
+            "Esplanade",
+            "Altona"
+          ],
+          "ways": 1634
+        },
+        {
+          "file": "4_8.json",
+          "bounds": [
+            -37.75,
+            145.15,
+            -37.7,
+            145.15
+          ],
+          "suburbs": [
+            "Eltham"
+          ],
+          "ways": 31
+        },
+        {
+          "file": "-1_7.json",
+          "bounds": [
+            -38,
+            145.1,
+            -37.95,
+            145.15
+          ],
+          "suburbs": [
+            "Dingley Village"
+          ],
+          "ways": 24
+        },
+        {
+          "file": "6_0.json",
+          "bounds": [
+            -37.650000000000006,
+            144.75,
+            -37.65,
+            144.8
+          ],
+          "suburbs": [
+            "Bulla"
+          ],
+          "ways": 2
+        },
+        {
+          "file": "2_-1.json",
+          "bounds": [
+            -37.85,
+            144.7,
+            -37.800000000000004,
+            144.75
+          ],
+          "suburbs": [
+            "Truganina"
+          ],
+          "ways": 14
+        },
+        {
+          "file": "6_5.json",
+          "bounds": [
+            -37.650000000000006,
+            145,
+            -37.65,
+            145.05
+          ],
+          "suburbs": [
+            "Epping",
+            "High Street"
+          ],
+          "ways": 46
+        },
+        {
+          "file": "-1_5.json",
+          "bounds": [
+            -38,
+            145,
+            -37.95,
+            145.05
+          ],
+          "suburbs": [
+            "Black Rock"
+          ],
+          "ways": 43
+        },
+        {
+          "file": "4_-1.json",
+          "bounds": [
+            -37.75,
+            144.7,
+            -37.7,
+            144.75
+          ],
+          "suburbs": [
+            "Deanside"
+          ],
+          "ways": 51
+        },
+        {
+          "file": "-1_6.json",
+          "bounds": [
+            -38,
+            145.05,
+            -37.95,
+            145.1
+          ],
+          "suburbs": [
+            "Cheltenham",
+            "Albenca Street",
+            "Mentone"
+          ],
+          "ways": 24
+        },
+        {
+          "file": "3_-1.json",
+          "bounds": [
+            -37.800000000000004,
+            144.7,
+            -37.75,
+            144.75
+          ],
+          "suburbs": [
+            "Riding Boundary Road",
+            "Profiling stock pile"
+          ],
+          "ways": 23
+        },
+        {
+          "file": "1_-1.json",
+          "bounds": [
+            -37.900000000000006,
+            144.7,
+            -37.85,
+            144.75
+          ],
+          "suburbs": [
+            "Hoppers Crossing",
+            "Hammer Court"
+          ],
+          "ways": 56
+        },
+        {
+          "file": "6_3.json",
+          "bounds": [
+            -37.650000000000006,
+            144.9,
+            -37.65,
+            144.95
+          ],
+          "suburbs": [
+            "Meadow Heights",
+            "Golden Ash Court"
+          ],
+          "ways": 19
+        },
+        {
+          "file": "6_2.json",
+          "bounds": [
+            -37.650000000000006,
+            144.85,
+            -37.65,
+            144.9
+          ],
+          "suburbs": [
+            "St Charbel Village",
+            "Greenvale"
+          ],
+          "ways": 13
+        },
+        {
+          "file": "6_6.json",
+          "bounds": [
+            -37.650000000000006,
+            145.05,
+            -37.65,
+            145.1
+          ],
+          "suburbs": [
+            "McDonalds Road"
+          ],
+          "ways": 46
+        },
+        {
+          "file": "0_-1.json",
+          "bounds": [
+            -37.95,
+            144.7,
+            -37.900000000000006,
+            144.75
+          ],
+          "suburbs": [
+            "Werribee South",
+            "Lignum Road"
+          ],
+          "ways": 26
+        },
+        {
+          "file": "6_4.json",
+          "bounds": [
+            -37.650000000000006,
+            144.95,
+            -37.65,
+            145
+          ],
+          "suburbs": [
+            "Epping",
+            "McKellar Way"
+          ],
+          "ways": 21
+        },
+        {
+          "file": "6_1.json",
+          "bounds": [
+            -37.650000000000006,
+            144.8,
+            -37.65,
+            144.85
+          ],
+          "suburbs": [
+            "Melbourne Airport",
+            "Old Bulla Road",
+            "Perimeter Road"
+          ],
+          "ways": 2
+        }
+      ]
+    }
+  }
+}
