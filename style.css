@@ -281,6 +281,21 @@ button.menu-item:disabled {
     cursor: not-allowed;
 }
 
+/* ── City request link ───────────────────────────── */
+.menu-request {
+    color: #6b6e7a;
+    font-size: 12px;
+    text-decoration: none;
+}
+
+.menu-request:hover {
+    color: #6ee7b7;
+}
+
+.menu-request.hidden {
+    display: none;
+}
+
 /* ── Gradient legend (in menu) ───────────────────── */
 .menu-legend {
     padding: 12px 18px;
