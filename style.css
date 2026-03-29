@@ -46,15 +46,104 @@ body {
     background: #383c4f;
 }
 
+.distance-wrapper {
+    margin-left: auto;
+    position: relative;
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 6px;
+    transition: background 0.15s;
+}
+
+.distance-wrapper:hover {
+    background: #252836;
+}
+
 .controls .distance-display {
     font-size: 18px;
     font-weight: 700;
     color: #6ee7b7;
-    margin-left: auto;
     padding: 0 2px;
     white-space: nowrap;
     letter-spacing: -0.5px;
     font-variant-numeric: tabular-nums;
+}
+
+.distance-chevron {
+    color: #6b6e7a;
+    font-size: 10px;
+    margin-left: 4px;
+    transition: transform 0.15s;
+}
+
+.distance-wrapper.open .distance-chevron {
+    transform: rotate(180deg);
+}
+
+.distance-menu {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    margin-top: 4px;
+    background: #1e2030;
+    border: 1px solid #3a3d4a;
+    border-radius: 8px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+    min-width: 160px;
+    z-index: 1000;
+    overflow: hidden;
+}
+
+.distance-menu.hidden {
+    display: none;
+}
+
+.distance-menu button {
+    display: block;
+    width: 100%;
+    padding: 10px 14px;
+    font-size: 13px;
+    color: #d0d0d0;
+    background: none;
+    border: none;
+    text-align: left;
+    cursor: pointer;
+}
+
+.distance-menu button:hover {
+    background: #252836;
+    color: #6ee7b7;
+}
+
+/* ── GPS location dot ────────────────────────────── */
+@keyframes gps-pulse {
+    0% { opacity: 0.6; transform: scale(1); }
+    50% { opacity: 0.2; transform: scale(2.5); }
+    100% { opacity: 0; transform: scale(3); }
+}
+
+.gps-dot {
+    width: 14px;
+    height: 14px;
+    background: #4285f4;
+    border: 2px solid #fff;
+    border-radius: 50%;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.4);
+    position: relative;
+}
+
+.gps-dot::after {
+    content: "";
+    position: absolute;
+    top: -2px;
+    left: -2px;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: #4285f4;
+    animation: gps-pulse 2s ease-out infinite;
 }
 
 /* ── Hamburger button ────────────────────────────── */
