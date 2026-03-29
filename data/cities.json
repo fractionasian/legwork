@@ -1,0 +1,12 @@
+[
+  {
+    "id": "perth",
+    "name": "Perth",
+    "bounds": [-32.15, 115.65, -31.75, 116.05]
+  },
+  {
+    "id": "melbourne",
+    "name": "Melbourne",
+    "bounds": [-37.95, 144.75, -37.65, 145.15]
+  }
+]
