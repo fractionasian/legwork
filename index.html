@@ -48,14 +48,18 @@
         </div>
     </aside>
     <div class="info-banner" id="info-banner" role="alert" aria-live="assertive"></div>
-    <div id="map" role="application" aria-label="Route planning map"></div>
-    <div class="elevation-stats" id="elevation-stats">
-        Ascent: <span id="stat-ascent">&#8212;</span> &nbsp;
-        Descent: <span id="stat-descent">&#8212;</span> &nbsp;
-        Max gradient: <span id="stat-gradient">&#8212;</span>
-    </div>
-    <div id="elevation-container">
-        <canvas id="elevation-canvas"></canvas>
+    <div class="map-area">
+        <div id="map" role="application" aria-label="Route planning map"></div>
+        <div class="elevation-panel" id="elevation-panel">
+            <div class="elevation-stats" id="elevation-stats">
+                Ascent: <span id="stat-ascent">&#8212;</span> &nbsp;
+                Descent: <span id="stat-descent">&#8212;</span> &nbsp;
+                Max gradient: <span id="stat-gradient">&#8212;</span>
+            </div>
+            <div id="elevation-container">
+                <canvas id="elevation-canvas"></canvas>
+            </div>
+        </div>
     </div>
 
     <div class="modal-overlay" id="welcome-modal">
