@@ -1000,7 +1000,11 @@ function colourRouteByGradient(elevData) {
 function updateElevation(elevData) {
     var container = document.getElementById("elevation-container");
     var statsEl = document.getElementById("elevation-stats");
-    if (elevData.length < 2) { container.style.display = "none"; statsEl.style.display = "none"; return; }
+    if (elevData.length < 2) {
+        container.style.display = "none";
+        statsEl.style.display = "none";
+        return;
+    }
 
     container.style.display = "block";
     statsEl.style.display = "flex";
@@ -1248,6 +1252,11 @@ if ("serviceWorker" in navigator) {
         console.warn("SW registration failed:", e.message);
     });
 }
+
+// ── Responsive resize ─────────────────────────────────
+window.addEventListener("resize", function () {
+    if (state.map) state.map.invalidateSize();
+});
 
 // ── Boot ───────────────────────────────────────────────
 initMap();

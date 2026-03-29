@@ -8,6 +8,7 @@ body {
     flex-direction: column;
     height: 100vh;
     height: 100dvh;
+    overflow: hidden;
 }
 
 /* ── Controls bar ─────────────────────────────────── */
@@ -257,10 +258,17 @@ button.menu-item {
 
 .autocomplete-item:last-child { border-bottom: none; }
 
-/* ── Map ──────────────────────────────────────────── */
-#map {
+/* ── Map area (contains map + docked elevation) ──── */
+.map-area {
     flex: 1;
+    position: relative;
     min-height: 0;
+    overflow: hidden;
+}
+
+#map {
+    position: absolute;
+    inset: 0;
 }
 
 /* Greyscale base tiles so coloured route stands out */
@@ -268,16 +276,29 @@ button.menu-item {
     filter: grayscale(1) brightness(0.7) contrast(1.1);
 }
 
-/* ── Elevation ────────────────────────────────────── */
+/* ── Elevation panel (docked to bottom of map) ───── */
+.elevation-panel {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 800;
+    pointer-events: none;
+}
+
+.elevation-panel > * {
+    pointer-events: auto;
+}
+
 .elevation-stats {
-    display: flex;
-    gap: 20px;
-    padding: 8px 16px;
-    background: #1a1d28;
-    font-size: 12px;
+    display: none;
+    gap: 12px;
+    padding: 6px 12px;
+    background: rgba(26, 29, 40, 0.92);
+    backdrop-filter: blur(8px);
+    font-size: 11px;
     color: #808390;
     border-top: 1px solid #2a2d3a;
-    display: none;
 }
 
 .elevation-stats span {
@@ -286,15 +307,24 @@ button.menu-item {
 }
 
 #elevation-container {
-    height: 120px;
-    background: #1a1d28;
-    padding: 4px 12px 8px;
+    height: 100px;
+    background: rgba(26, 29, 40, 0.92);
+    backdrop-filter: blur(8px);
+    padding: 2px 10px 6px;
     display: none;
 }
 
 #elevation-canvas {
     width: 100%;
     height: 100%;
+}
+
+/* Larger elevation on taller screens */
+@media (min-height: 700px) {
+    #elevation-container { height: 120px; }
+}
+@media (min-height: 900px) {
+    #elevation-container { height: 150px; }
 }
 
 /* ── Info banner ──────────────────────────────────── */
