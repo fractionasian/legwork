@@ -478,9 +478,13 @@ async function loadPaths(lat, lon) {
         '  way["highway"="service"](around:' + radius + ',' + lat + ',' + lon + ');\n' +
         '  way["highway"="unclassified"](around:' + radius + ',' + lat + ',' + lon + ');\n' +
         '  way["highway"="tertiary"](around:' + radius + ',' + lat + ',' + lon + ');\n' +
+        '  way["highway"="tertiary_link"](around:' + radius + ',' + lat + ',' + lon + ');\n' +
         '  way["highway"="secondary"](around:' + radius + ',' + lat + ',' + lon + ');\n' +
+        '  way["highway"="secondary_link"](around:' + radius + ',' + lat + ',' + lon + ');\n' +
         '  way["highway"="primary"](around:' + radius + ',' + lat + ',' + lon + ');\n' +
+        '  way["highway"="primary_link"](around:' + radius + ',' + lat + ',' + lon + ');\n' +
         '  way["highway"="trunk"](around:' + radius + ',' + lat + ',' + lon + ');\n' +
+        '  way["highway"="trunk_link"](around:' + radius + ',' + lat + ',' + lon + ');\n' +
         '  way["highway"="crossing"](around:' + radius + ',' + lat + ',' + lon + ');\n' +
         '  way["highway"="steps"](around:' + radius + ',' + lat + ',' + lon + ');\n' +
         ');\nout body;\n>;\nout skel qt;';
@@ -1421,7 +1425,8 @@ async function saveArea() {
     try {
         // 1. Fetch paths via bbox Overpass query
         var highways = ["footway","cycleway","path","residential","living_street",
-            "pedestrian","service","unclassified","tertiary","secondary","primary","trunk","crossing","steps"];
+            "pedestrian","service","unclassified","tertiary","tertiary_link","secondary","secondary_link",
+            "primary","primary_link","trunk","trunk_link","crossing","steps"];
         var wayLines = highways.map(function (h) {
             return '  way["highway"="' + h + '"](' + south + ',' + west + ',' + north + ',' + east + ');';
         }).join("\n");
