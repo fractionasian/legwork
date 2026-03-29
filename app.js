@@ -1367,6 +1367,89 @@ document.getElementById("export-btn").addEventListener("click", function () {
     closeMenu();
     exportGPX();
 });
+
+// ── GPS location dot ──────────────────────────────────
+var gpsDotMarker = null;
+
+function showGpsDot(lat, lon) {
+    if (gpsDotMarker) state.map.removeLayer(gpsDotMarker);
+    var icon = L.divIcon({
+        html: '<div class="gps-dot"></div>',
+        className: "",
+        iconSize: [18, 18],
+        iconAnchor: [9, 9],
+    });
+    gpsDotMarker = L.marker([lat, lon], { icon: icon, interactive: false, zIndexOffset: -200 }).addTo(state.map);
+}
+
+document.getElementById("locate-btn").addEventListener("click", function () {
+    if (state.startLat && state.startLon) {
+        state.map.setView([state.startLat, state.startLon], 15);
+    } else if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+            function (pos) {
+                state.startLat = pos.coords.latitude;
+                state.startLon = pos.coords.longitude;
+                state.map.setView([state.startLat, state.startLon], 15);
+                showGpsDot(state.startLat, state.startLon);
+            },
+            function () { showBanner("Could not get your location"); },
+            { enableHighAccuracy: true, timeout: 10000 }
+        );
+    }
+});
+
+// ── Distance action dropdown ──────────────────────────
+var distWrapper = document.querySelector(".distance-wrapper");
+var distMenu = document.getElementById("distance-menu");
+
+distWrapper.addEventListener("click", function (e) {
+    if (state.waypoints.length < 2) return;
+    var isOpen = !distMenu.classList.contains("hidden");
+    if (isOpen) {
+        distMenu.classList.add("hidden");
+        distWrapper.classList.remove("open");
+    } else {
+        distMenu.classList.remove("hidden");
+        distWrapper.classList.add("open");
+    }
+});
+
+document.addEventListener("click", function (e) {
+    if (!distWrapper.contains(e.target)) {
+        distMenu.classList.add("hidden");
+        distWrapper.classList.remove("open");
+    }
+});
+
+document.getElementById("dm-save").addEventListener("click", function (e) {
+    e.stopPropagation();
+    distMenu.classList.add("hidden");
+    distWrapper.classList.remove("open");
+    saveNamedRoute();
+});
+
+document.getElementById("dm-export").addEventListener("click", function (e) {
+    e.stopPropagation();
+    distMenu.classList.add("hidden");
+    distWrapper.classList.remove("open");
+    exportGPX();
+});
+
+document.getElementById("dm-share").addEventListener("click", function (e) {
+    e.stopPropagation();
+    distMenu.classList.add("hidden");
+    distWrapper.classList.remove("open");
+    var url = window.location.href;
+    if (navigator.clipboard) {
+        navigator.clipboard.writeText(url).then(function () {
+            showBanner("Link copied!");
+            setTimeout(function () { showBanner(""); }, 2000);
+        });
+    } else {
+        prompt("Copy this link:", url);
+    }
+});
 document.addEventListener("keydown", function (e) {
     if ((e.ctrlKey || e.metaKey) && e.key === "z") {
         e.preventDefault();
@@ -1974,6 +2057,7 @@ if (sharedPoints) {
             state.startLon = lon;
             autoDetectUnits(lat, lon);
             state.map.setView([lat, lon], 15);
+            showGpsDot(lat, lon);
             loadTilesForLocation(lat, lon).then(function (loaded) {
                 if (!loaded) {
                     showCityRequest();
@@ -1983,7 +2067,12 @@ if (sharedPoints) {
                 if (state.graph) addWaypointAt(lat, lon, { exactPosition: true });
             });
         },
-        function () { /* no location — user types address */ },
+        function () {
+            // Geolocation failed — prompt user to search
+            openMenu();
+            var input = document.getElementById("address-input");
+            if (input) { input.focus(); input.placeholder = "Search for your location to get started"; }
+        },
         { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
     );
 }
