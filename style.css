@@ -208,6 +208,79 @@ button.menu-item {
     display: none;
 }
 
+/* ── Saved areas & routes ────────────────────────── */
+.menu-section-title {
+    padding: 8px 18px 4px;
+    font-size: 11px;
+    font-weight: 600;
+    color: #6b6e7a;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.saved-list {
+    padding: 0 18px;
+}
+
+.saved-list.hidden {
+    display: none;
+}
+
+.saved-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 0;
+    border-bottom: 1px solid #1e2030;
+}
+
+.saved-item:last-child {
+    border-bottom: none;
+}
+
+.saved-item-name {
+    flex: 1;
+    font-size: 13px;
+    color: #d0d0d0;
+    cursor: pointer;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.saved-item-name:hover {
+    color: #6ee7b7;
+}
+
+.saved-item-delete {
+    background: none;
+    border: none;
+    color: #6b6e7a;
+    font-size: 16px;
+    cursor: pointer;
+    padding: 0 0 0 8px;
+    line-height: 1;
+}
+
+.saved-item-delete:hover {
+    color: #f87171;
+}
+
+.menu-progress {
+    font-size: 12px;
+    color: #6ee7b7;
+    padding: 4px 18px;
+}
+
+.menu-progress.hidden {
+    display: none;
+}
+
+button.menu-item:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
 /* ── Gradient legend (in menu) ───────────────────── */
 .menu-legend {
     padding: 12px 18px;
