@@ -74,6 +74,125 @@ async function migrateLocalStorage() {
     if (migrated) console.log("Migrated localStorage cache to IndexedDB");
 }
 
+// ── Pre-cached tile loading ───────────────────────────
+var TILES_BASE = "./data/";
+var _manifest = null;
+
+async function fetchManifest() {
+    if (_manifest) return _manifest;
+    try {
+        var resp = await fetch(TILES_BASE + "manifest.json");
+        if (!resp.ok) return null;
+        _manifest = await resp.json();
+        return _manifest;
+    } catch (e) { return null; }
+}
+
+function findCityForLocation(manifest, lat, lon) {
+    if (!manifest || !manifest.cities) return null;
+    var ids = Object.keys(manifest.cities);
+    for (var i = 0; i < ids.length; i++) {
+        var city = manifest.cities[ids[i]];
+        var b = city.bounds; // [south, west, north, east]
+        if (lat >= b[0] && lat <= b[2] && lon >= b[1] && lon <= b[3]) {
+            return { id: ids[i], city: city };
+        }
+    }
+    return null;
+}
+
+function tilesInRadius(city, lat, lon, radiusKm) {
+    var radiusDeg = radiusKm / 111; // rough km-to-degrees
+    var selected = [];
+    for (var i = 0; i < city.tiles.length; i++) {
+        var t = city.tiles[i];
+        var b = t.bounds; // [south, west, north, east]
+        var tCenterLat = (b[0] + b[2]) / 2;
+        var tCenterLon = (b[1] + b[3]) / 2;
+        var dlat = tCenterLat - lat;
+        var dlon = (tCenterLon - lon) * Math.cos(lat * Math.PI / 180);
+        var dist = Math.sqrt(dlat * dlat + dlon * dlon);
+        if (dist < radiusDeg) selected.push(t);
+    }
+    return selected;
+}
+
+async function loadTilesForLocation(lat, lon) {
+    var manifest = await fetchManifest();
+    if (!manifest) return false;
+
+    var match = findCityForLocation(manifest, lat, lon);
+    if (!match) return false;
+
+    var cityId = match.id;
+    var city = match.city;
+    var tiles = tilesInRadius(city, lat, lon, 5);
+    if (tiles.length === 0) return false;
+
+    // Check which tiles need fetching (not already in IndexedDB with current version)
+    var toFetch = [];
+    for (var i = 0; i < tiles.length; i++) {
+        var cacheKey = "tile:" + cityId + ":" + tiles[i].file + ":" + manifest.version;
+        var cached = await cacheGet(cacheKey);
+        if (cached) {
+            applyPaths(cached);
+        } else {
+            toFetch.push(tiles[i]);
+        }
+    }
+
+    if (toFetch.length === 0) {
+        console.log("All " + tiles.length + " tiles loaded from cache");
+        return true;
+    }
+
+    // Collect suburb names for banner
+    var suburbs = [];
+    for (var i = 0; i < toFetch.length; i++) {
+        for (var s = 0; s < toFetch[i].suburbs.length; s++) {
+            if (suburbs.indexOf(toFetch[i].suburbs[s]) === -1) suburbs.push(toFetch[i].suburbs[s]);
+        }
+    }
+    showBanner("Loading " + suburbs.join(", ") + "...", "loading");
+
+    // Fetch tiles in parallel
+    var loaded = 0;
+    var total = toFetch.length;
+    var promises = toFetch.map(function (tile) {
+        var url = TILES_BASE + "tiles/" + cityId + "/" + tile.file;
+        return fetch(url).then(function (resp) {
+            if (!resp.ok) throw new Error("HTTP " + resp.status);
+            return resp.json();
+        }).then(function (geojson) {
+            applyPaths(geojson);
+            var cacheKey = "tile:" + cityId + ":" + tile.file + ":" + manifest.version;
+            cacheSet(cacheKey, geojson);
+            loaded++;
+            if (loaded < total) {
+                showBanner("Loaded " + loaded + "/" + total + " areas...", "loading");
+            }
+        }).catch(function (e) {
+            console.warn("Tile fetch failed: " + tile.file, e.message);
+        });
+    });
+
+    await Promise.all(promises);
+    showBanner("");
+    console.log("Loaded " + loaded + "/" + total + " tiles for " + city.name);
+    return true;
+}
+
+function showCityRequest() {
+    // Show "Request your city" link in side menu when outside cached cities
+    var el = document.getElementById("city-request-link");
+    if (el) el.classList.remove("hidden");
+}
+
+function hideCityRequest() {
+    var el = document.getElementById("city-request-link");
+    if (el) el.classList.add("hidden");
+}
+
 // ── State ──────────────────────────────────────────────
 var state = {
     map: null,
@@ -1804,7 +1923,9 @@ if (sharedPoints) {
     var center = sharedPoints[0];
     state.map.setView([center.lat, center.lon], 14);
     autoDetectUnits(center.lat, center.lon);
-    loadPaths(center.lat, center.lon).then(function () {
+    loadTilesForLocation(center.lat, center.lon).then(function (loaded) {
+        if (!loaded) return loadPaths(center.lat, center.lon);
+    }).then(function () {
         for (var i = 0; i < sharedPoints.length; i++) addWaypointAt(sharedPoints[i].lat, sharedPoints[i].lon, { exactPosition: i === 0 });
     });
 } else if (savedRoute && savedRoute.waypoints && savedRoute.waypoints.length > 0) {
@@ -1818,7 +1939,9 @@ if (sharedPoints) {
     var ctr = sw[0];
     state.map.setView([ctr.lat, ctr.lon], savedRoute.zoom || 14);
     autoDetectUnits(ctr.lat, ctr.lon);
-    loadPaths(ctr.lat, ctr.lon).then(function () {
+    loadTilesForLocation(ctr.lat, ctr.lon).then(function (loaded) {
+        if (!loaded) return loadPaths(ctr.lat, ctr.lon);
+    }).then(function () {
         for (var i = 0; i < sw.length; i++) addWaypointAt(sw[i].lat, sw[i].lon, { exactPosition: i === 0 });
     });
 } else if (navigator.geolocation) {
@@ -1831,12 +1954,14 @@ if (sharedPoints) {
             state.startLon = lon;
             autoDetectUnits(lat, lon);
             state.map.setView([lat, lon], 15);
-            setTimeout(function () {
-                state.map.setView([lat, lon], 15);
-                loadPaths(lat, lon).then(function () {
-                    if (state.graph) addWaypointAt(lat, lon, { exactPosition: true });
-                });
-            }, 100);
+            loadTilesForLocation(lat, lon).then(function (loaded) {
+                if (!loaded) {
+                    showCityRequest();
+                    return loadPaths(lat, lon);
+                }
+            }).then(function () {
+                if (state.graph) addWaypointAt(lat, lon, { exactPosition: true });
+            });
         },
         function () { /* no location — user types address */ },
         { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
