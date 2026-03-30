@@ -1428,12 +1428,15 @@ document.getElementById("locate-btn").addEventListener("click", function () {
 var distWrapper = document.querySelector(".distance-wrapper");
 var distMenu = document.getElementById("distance-menu");
 
-distWrapper.addEventListener("click", function (e) {
+function closeDistMenu() {
+    distMenu.classList.add("hidden");
+    distWrapper.classList.remove("open");
+}
+
+distWrapper.addEventListener("click", function () {
     if (state.waypoints.length < 2) return;
-    var isOpen = !distMenu.classList.contains("hidden");
-    if (isOpen) {
-        distMenu.classList.add("hidden");
-        distWrapper.classList.remove("open");
+    if (!distMenu.classList.contains("hidden")) {
+        closeDistMenu();
     } else {
         distMenu.classList.remove("hidden");
         distWrapper.classList.add("open");
@@ -1441,30 +1444,21 @@ distWrapper.addEventListener("click", function (e) {
 });
 
 document.addEventListener("click", function (e) {
-    if (!distWrapper.contains(e.target)) {
-        distMenu.classList.add("hidden");
-        distWrapper.classList.remove("open");
+    if (!distMenu.classList.contains("hidden") && !distWrapper.contains(e.target)) {
+        closeDistMenu();
     }
 });
 
 document.getElementById("dm-save").addEventListener("click", function (e) {
-    e.stopPropagation();
-    distMenu.classList.add("hidden");
-    distWrapper.classList.remove("open");
-    saveNamedRoute();
+    e.stopPropagation(); closeDistMenu(); saveNamedRoute();
 });
 
 document.getElementById("dm-export").addEventListener("click", function (e) {
-    e.stopPropagation();
-    distMenu.classList.add("hidden");
-    distWrapper.classList.remove("open");
-    exportGPX();
+    e.stopPropagation(); closeDistMenu(); exportGPX();
 });
 
 document.getElementById("dm-share").addEventListener("click", function (e) {
-    e.stopPropagation();
-    distMenu.classList.add("hidden");
-    distWrapper.classList.remove("open");
+    e.stopPropagation(); closeDistMenu();
     var url = window.location.href;
     if (navigator.clipboard) {
         navigator.clipboard.writeText(url).then(function () {
@@ -1805,33 +1799,36 @@ async function renderSavedAreas() {
 }
 
 // ── Saved Routes ──────────────────────────────────────
-async function saveNamedRoute() {
+function saveNamedRoute() {
     if (state.waypoints.length < 2) { showBanner("Add at least 2 waypoints first"); return; }
 
     var inputRow = document.getElementById("save-route-input");
     var nameInput = document.getElementById("save-route-name");
+    var dist = document.getElementById("distance-display").textContent;
 
-    // Auto-name from reverse geocode of start
-    var startWp = state.waypoints[0];
-    var routeName = "Route";
-    try {
-        if (navigator.onLine) {
-            var resp = await fetch("https://photon.komoot.io/reverse?lat=" + startWp.lat + "&lon=" + startWp.lon + "&limit=1");
-            if (resp.ok) {
-                var data = await resp.json();
-                var feat = (data.features || [])[0];
-                if (feat && feat.properties) {
-                    var p = feat.properties;
-                    routeName = p.name || p.street || p.city || "Route";
-                }
-            }
-        }
-    } catch (e) {}
-
-    nameInput.value = routeName + " \u2014 " + document.getElementById("distance-display").textContent;
+    // Show input immediately with distance, then update with geocoded name in background
+    nameInput.value = "Route \u2014 " + dist;
     inputRow.classList.remove("hidden");
     nameInput.focus();
     nameInput.select();
+
+    var startWp = state.waypoints[0];
+    if (navigator.onLine) {
+        fetch("https://photon.komoot.io/reverse?lat=" + startWp.lat + "&lon=" + startWp.lon + "&limit=1")
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                var feat = (data.features || [])[0];
+                if (feat && feat.properties) {
+                    var p = feat.properties;
+                    var name = p.name || p.street || p.city;
+                    if (name && inputRow.classList.contains("hidden") === false) {
+                        nameInput.value = name + " \u2014 " + dist;
+                        nameInput.select();
+                    }
+                }
+            })
+            .catch(function () {});
+    }
 }
 
 async function confirmSaveRoute() {
@@ -1854,7 +1851,6 @@ async function confirmSaveRoute() {
         center: { lat: state.map.getCenter().lat, lon: state.map.getCenter().lng },
         routeSegments: state.routeSegments,
         elevationData: state.lastElevationData,
-        pathFeatures: state.pathFeatures,
         ts: Date.now(),
     };
 
@@ -1924,10 +1920,9 @@ async function restoreSavedRoute(id) {
         // Restore map position
         state.map.setView([route.center.lat, route.center.lon], route.zoom || 14);
 
-        // Restore path network
-        if (route.pathFeatures) {
-            applyPaths(route.pathFeatures);
-        }
+        // Restore path network from tiles or Overpass
+        var loaded = await loadTilesForLocation(route.center.lat, route.center.lon);
+        if (!loaded) await loadPaths(route.center.lat, route.center.lon);
 
         // Restore waypoints
         for (var i = 0; i < route.waypoints.length; i++) {
