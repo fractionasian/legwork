@@ -16,9 +16,6 @@ function openDB() {
             var db = e.target.result;
             if (!db.objectStoreNames.contains("pathCache")) db.createObjectStore("pathCache");
             if (!db.objectStoreNames.contains("elevCache")) db.createObjectStore("elevCache");
-            if (!db.objectStoreNames.contains("savedAreas")) {
-                db.createObjectStore("savedAreas", { keyPath: "id", autoIncrement: true });
-            }
             if (!db.objectStoreNames.contains("savedRoutes")) {
                 db.createObjectStore("savedRoutes", { keyPath: "id", autoIncrement: true });
             }
@@ -1518,7 +1515,6 @@ function autoDetectUnits(lat, lon) {
 }
 
 // ── New route ─────────────────────────────────────────
-document.getElementById("save-area-btn").addEventListener("click", saveArea);
 document.getElementById("save-route-btn").addEventListener("click", saveNamedRoute);
 // ── Route persistence ─────────────────────────────────
 function saveRoute() {
@@ -1608,194 +1604,29 @@ function loadFromHash() {
 // ── Welcome modal ──────────────────────────────────────
 function showWelcome() {
     var modal = document.getElementById("welcome-modal");
-    // Show correct modifier key per platform
+    try {
+        if (localStorage.getItem("lw:welcomed")) {
+            modal.classList.add("hidden");
+            return;
+        }
+    } catch (e) { /* blocked storage — show modal every time */ }
+    // Only reached for first-time users
     var isMac = /Mac|iPhone|iPad|iPod/.test(navigator.platform);
     var undoKey = document.getElementById("undo-key");
     if (undoKey && isMac) undoKey.textContent = "\u2318";
-    if (localStorage.getItem("lw:welcomed")) {
-        modal.classList.add("hidden");
-        return;
+    function onEsc(e) {
+        if (e.key === "Escape" && !modal.classList.contains("hidden")) dismiss();
     }
     function dismiss() {
         modal.classList.add("hidden");
-        localStorage.setItem("lw:welcomed", "1");
+        document.removeEventListener("keydown", onEsc);
+        try { localStorage.setItem("lw:welcomed", "1"); } catch (e) { /* blocked storage */ }
     }
     document.getElementById("welcome-dismiss").addEventListener("click", dismiss);
-    // Also dismiss when clicking the overlay background
     modal.addEventListener("click", function (e) {
         if (e.target === modal) dismiss();
     });
-}
-
-// ── Save Area (offline pre-fetch) ─────────────────────
-async function saveArea() {
-    if (!navigator.onLine) { showBanner("Can't save area while offline"); return; }
-    var bounds = state.map.getBounds();
-    var south = bounds.getSouth(), west = bounds.getWest();
-    var north = bounds.getNorth(), east = bounds.getEast();
-    var center = bounds.getCenter();
-
-    var progressEl = document.getElementById("save-area-progress");
-    var btnEl = document.getElementById("save-area-btn");
-    btnEl.disabled = true;
-    progressEl.classList.remove("hidden");
-    progressEl.textContent = "Fetching paths...";
-
-    try {
-        // 1. Fetch paths via bbox Overpass query
-        var highways = ["footway","cycleway","path","residential","living_street",
-            "pedestrian","service","unclassified","tertiary","tertiary_link","secondary","secondary_link",
-            "primary","primary_link","trunk","trunk_link","crossing","steps"];
-        var wayLines = highways.map(function (h) {
-            return '  way["highway"="' + h + '"](' + south + ',' + west + ',' + north + ',' + east + ');';
-        }).join("\n");
-        var query = '[out:json][timeout:60];\n(\n' + wayLines + '\n);\nout body;\n>;\nout skel qt;';
-
-        var resp = await fetch("https://overpass-api.de/api/interpreter", {
-            method: "POST",
-            body: "data=" + encodeURIComponent(query),
-            headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        });
-        if (!resp.ok) throw new Error("Overpass HTTP " + resp.status);
-        var raw = await resp.json();
-        var geojson = osmToGeoJSON(raw);
-
-        // Cache paths under bbox key
-        var bboxKey = "paths:bbox:" + south.toFixed(3) + ":" + west.toFixed(3) + ":" + north.toFixed(3) + ":" + east.toFixed(3);
-        await cacheSet(bboxKey, geojson);
-        applyPaths(geojson);
-
-        // 2. Pre-fetch elevation grid (~100m spacing, capped at 2000 points)
-        progressEl.textContent = "Fetching elevation...";
-        var MAX_ELEV_POINTS = 2000;
-        var latSpan = north - south, lonSpan = east - west;
-        var latStep = 0.0009; // ~100m
-        var lonStep = 0.0009 / Math.cos(center.lat * Math.PI / 180);
-        // If grid would be too dense, increase spacing
-        var estCount = Math.ceil(latSpan / latStep) * Math.ceil(lonSpan / lonStep);
-        if (estCount > MAX_ELEV_POINTS) {
-            var scale = Math.sqrt(estCount / MAX_ELEV_POINTS);
-            latStep *= scale;
-            lonStep *= scale;
-        }
-        var elevPoints = [];
-        for (var lat = south; lat <= north; lat += latStep) {
-            for (var lon = west; lon <= east; lon += lonStep) {
-                elevPoints.push({ lat: lat, lon: lon });
-            }
-        }
-        if (elevPoints.length > 0) {
-            await fetchElevation(elevPoints);
-        }
-
-        // 3. Auto-name via reverse geocode
-        var areaName = "Saved area";
-        try {
-            var geoResp = await fetch("https://photon.komoot.io/reverse?lat=" + center.lat + "&lon=" + center.lng + "&limit=1");
-            if (geoResp.ok) {
-                var geoData = await geoResp.json();
-                var feat = (geoData.features || [])[0];
-                if (feat && feat.properties) {
-                    var p = feat.properties;
-                    var parts = [];
-                    if (p.name || p.street) parts.push(p.name || p.street);
-                    if (p.city || p.locality) parts.push(p.city || p.locality);
-                    if (parts.length > 0) areaName = parts.join(", ");
-                }
-            }
-        } catch (e) {}
-
-        // 4. Save area metadata to IndexedDB
-        var db = await openDB();
-        var area = {
-            name: areaName,
-            bounds: { south: south, west: west, north: north, east: east },
-            center: { lat: center.lat, lon: center.lng },
-            zoom: state.map.getZoom(),
-            pathCount: geojson.features.length,
-            elevPoints: elevPoints.length,
-            ts: Date.now(),
-        };
-        await new Promise(function (resolve, reject) {
-            var tx = db.transaction("savedAreas", "readwrite");
-            tx.objectStore("savedAreas").add(area);
-            tx.oncomplete = resolve;
-            tx.onerror = function () { reject(tx.error); };
-        });
-
-        progressEl.textContent = "Saved!";
-        setTimeout(function () { progressEl.classList.add("hidden"); }, 1500);
-        showBanner("Area saved: " + areaName + " (" + geojson.features.length + " paths)");
-        renderSavedAreas();
-    } catch (e) {
-        showBanner("Failed to save area: " + e.message);
-        progressEl.classList.add("hidden");
-    } finally {
-        btnEl.disabled = false;
-    }
-}
-
-async function loadSavedAreas() {
-    try {
-        var db = await openDB();
-        return new Promise(function (resolve) {
-            var tx = db.transaction("savedAreas", "readonly");
-            var req = tx.objectStore("savedAreas").getAll();
-            req.onsuccess = function () { resolve(req.result || []); };
-            req.onerror = function () { resolve([]); };
-        });
-    } catch (e) { return []; }
-}
-
-async function deleteSavedArea(id) {
-    try {
-        var db = await openDB();
-        await new Promise(function (resolve, reject) {
-            var tx = db.transaction("savedAreas", "readwrite");
-            tx.objectStore("savedAreas").delete(id);
-            tx.oncomplete = resolve;
-            tx.onerror = function () { reject(tx.error); };
-        });
-    } catch (e) {}
-    renderSavedAreas();
-}
-
-async function renderSavedAreas() {
-    var list = document.getElementById("saved-areas-list");
-    if (!list) return;
-    var areas = await loadSavedAreas();
-    while (list.firstChild) list.removeChild(list.firstChild);
-    if (areas.length === 0) {
-        list.classList.add("hidden");
-        return;
-    }
-    list.classList.remove("hidden");
-    for (var i = 0; i < areas.length; i++) {
-        (function (area) {
-            var row = document.createElement("div");
-            row.className = "saved-item";
-            var label = document.createElement("span");
-            label.className = "saved-item-name";
-            label.textContent = area.name;
-            label.title = area.pathCount + " paths \u00b7 " + new Date(area.ts).toLocaleDateString();
-            label.addEventListener("click", function () {
-                state.map.setView([area.center.lat, area.center.lon], area.zoom || 14);
-                closeMenu();
-                loadPaths(area.center.lat, area.center.lon);
-            });
-            var del = document.createElement("button");
-            del.className = "saved-item-delete";
-            del.textContent = "\u00d7";
-            del.title = "Delete saved area";
-            del.addEventListener("click", function (e) {
-                e.stopPropagation();
-                deleteSavedArea(area.id);
-            });
-            row.appendChild(label);
-            row.appendChild(del);
-            list.appendChild(row);
-        })(areas[i]);
-    }
+    document.addEventListener("keydown", onEsc);
 }
 
 // ── Saved Routes ──────────────────────────────────────
@@ -2002,18 +1833,15 @@ async function renderSavedRoutes() {
 // ── Offline indicator ──────────────────────────────────
 function updateOnlineStatus() {
     var searchEl = document.getElementById("address-input");
-    var saveAreaBtn = document.getElementById("save-area-btn");
     if (!navigator.onLine) {
-        showBanner("You're offline \u2014 cached areas and saved routes still work", "loading");
+        showBanner("You're offline \u2014 saved routes still work", "loading");
         if (searchEl) searchEl.placeholder = "Search unavailable offline";
         if (searchEl) searchEl.disabled = true;
-        if (saveAreaBtn) saveAreaBtn.disabled = true;
     } else {
         var banner = document.getElementById("info-banner");
         if (banner.textContent.indexOf("offline") !== -1) showBanner("");
         if (searchEl) searchEl.placeholder = "Set starting point...";
         if (searchEl) searchEl.disabled = false;
-        if (saveAreaBtn) saveAreaBtn.disabled = false;
     }
 }
 window.addEventListener("online", updateOnlineStatus);
@@ -2042,7 +1870,6 @@ setupInstallPrompt();
 
 // Migrate old localStorage cache to IndexedDB, then render saved lists
 migrateLocalStorage().then(function () {
-    renderSavedAreas();
     renderSavedRoutes();
 });
 
