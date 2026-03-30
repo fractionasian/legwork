@@ -155,7 +155,7 @@ body {
     height: 14px;
     border-radius: 50%;
     background: #4285f4;
-    animation: gps-pulse 2s ease-out infinite;
+    animation: gps-pulse 2s ease-out 3;
 }
 
 /* ── Hamburger button ────────────────────────────── */
@@ -409,17 +409,17 @@ button.menu-item:disabled {
 }
 
 .save-confirm {
-    padding: 8px 14px !important;
-    background: #2d6a4f !important;
-    color: #fff !important;
-    border: none !important;
-    border-radius: 6px !important;
+    padding: 8px 14px;
+    background: #2d6a4f;
+    color: #fff;
+    border: none;
+    border-radius: 6px;
     font-size: 13px;
     cursor: pointer;
 }
 
 .save-confirm:hover {
-    background: #3a8063 !important;
+    background: #3a8063;
 }
 
 /* ── Saved route detail ──────────────────────────── */
