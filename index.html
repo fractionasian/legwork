@@ -49,8 +49,11 @@
                 <input type="text" id="address-input" placeholder="Set starting point..." autocomplete="off" aria-label="Search address" aria-autocomplete="list" aria-controls="autocomplete-list" />
                 <div class="autocomplete-list" id="autocomplete-list" role="listbox" aria-label="Address suggestions"></div>
             </div>
-            <button id="new-route-btn" class="menu-item">New route</button>
             <button id="save-route-btn" class="menu-item">Save route</button>
+            <div id="save-route-input" class="save-input-row hidden">
+                <input type="text" id="save-route-name" placeholder="Route name..." autocomplete="off" />
+                <button id="save-route-confirm" class="save-confirm">Save</button>
+            </div>
             <button id="export-btn" class="menu-item" aria-label="Export route as GPX file">Export GPX</button>
             <div class="menu-item menu-toggle-row" id="unit-toggle">
                 <span>Units</span>

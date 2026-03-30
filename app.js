@@ -1400,16 +1400,24 @@ function showGpsDot(lat, lon) {
 }
 
 document.getElementById("locate-btn").addEventListener("click", function () {
-    if (state.startLat && state.startLon) {
-        state.map.setView([state.startLat, state.startLon], 15);
-    } else if (navigator.geolocation) {
+    function startHere(lat, lon) {
+        // Clear existing route
+        for (var i = 0; i < state.waypoints.length; i++) state.map.removeLayer(state.waypoints[i].marker);
+        state.waypoints = [];
+        updateRoute();
+        state.startLat = lat;
+        state.startLon = lon;
+        state.map.setView([lat, lon], 15);
+        showGpsDot(lat, lon);
+        loadTilesForLocation(lat, lon).then(function (loaded) {
+            if (!loaded) return loadPaths(lat, lon);
+        }).then(function () {
+            if (state.graph) addWaypointAt(lat, lon, { exactPosition: true });
+        });
+    }
+    if (navigator.geolocation) {
         navigator.geolocation.getCurrentPosition(
-            function (pos) {
-                state.startLat = pos.coords.latitude;
-                state.startLon = pos.coords.longitude;
-                state.map.setView([state.startLat, state.startLon], 15);
-                showGpsDot(state.startLat, state.startLon);
-            },
+            function (pos) { startHere(pos.coords.latitude, pos.coords.longitude); },
             function () { showBanner("Could not get your location"); },
             { enableHighAccuracy: true, timeout: 10000 }
         );
@@ -1518,28 +1526,6 @@ function autoDetectUnits(lat, lon) {
 // ── New route ─────────────────────────────────────────
 document.getElementById("save-area-btn").addEventListener("click", saveArea);
 document.getElementById("save-route-btn").addEventListener("click", saveNamedRoute);
-document.getElementById("new-route-btn").addEventListener("click", function () {
-    for (var i = 0; i < state.waypoints.length; i++) state.map.removeLayer(state.waypoints[i].marker);
-    state.waypoints = [];
-    updateRoute();
-    localStorage.removeItem("lw:savedRoute");
-    closeMenu();
-    // Geolocate fresh
-    if (navigator.geolocation) {
-        navigator.geolocation.getCurrentPosition(
-            function (pos) {
-                var lat = pos.coords.latitude, lon = pos.coords.longitude;
-                state.map.setView([lat, lon], 15);
-                loadPaths(lat, lon).then(function () {
-                    if (state.graph) addWaypointAt(lat, lon, { exactPosition: true });
-                });
-            },
-            function () {},
-            { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
-        );
-    }
-});
-
 // ── Route persistence ─────────────────────────────────
 function saveRoute() {
     if (state.waypoints.length === 0) {
@@ -1822,6 +1808,9 @@ async function renderSavedAreas() {
 async function saveNamedRoute() {
     if (state.waypoints.length < 2) { showBanner("Add at least 2 waypoints first"); return; }
 
+    var inputRow = document.getElementById("save-route-input");
+    var nameInput = document.getElementById("save-route-name");
+
     // Auto-name from reverse geocode of start
     var startWp = state.waypoints[0];
     var routeName = "Route";
@@ -1839,12 +1828,24 @@ async function saveNamedRoute() {
         }
     } catch (e) {}
 
-    var name = prompt("Route name:", routeName + " \u2014 " + document.getElementById("distance-display").textContent);
+    nameInput.value = routeName + " \u2014 " + document.getElementById("distance-display").textContent;
+    inputRow.classList.remove("hidden");
+    nameInput.focus();
+    nameInput.select();
+}
+
+async function confirmSaveRoute() {
+    var inputRow = document.getElementById("save-route-input");
+    var nameInput = document.getElementById("save-route-name");
+    var name = nameInput.value.trim();
     if (!name) return;
 
-    // Gather all route data
+    inputRow.classList.add("hidden");
+
+    var dist = document.getElementById("distance-display").textContent;
     var routeData = {
         name: name,
+        distance: dist,
         waypoints: state.waypoints.map(function (wp) {
             return { lat: wp.lat, lon: wp.lon, nodeKey: wp.nodeKey };
         }),
@@ -1871,6 +1872,12 @@ async function saveNamedRoute() {
         showBanner("Failed to save route: " + e.message);
     }
 }
+
+document.getElementById("save-route-confirm").addEventListener("click", confirmSaveRoute);
+document.getElementById("save-route-name").addEventListener("keydown", function (e) {
+    if (e.key === "Enter") confirmSaveRoute();
+    if (e.key === "Escape") document.getElementById("save-route-input").classList.add("hidden");
+});
 
 async function loadSavedRoutes() {
     try {
@@ -1966,11 +1973,20 @@ async function renderSavedRoutes() {
         (function (route) {
             var row = document.createElement("div");
             row.className = "saved-item";
-            var label = document.createElement("span");
+            var info = document.createElement("div");
+            info.style.cssText = "flex:1;overflow:hidden;cursor:pointer;";
+            var label = document.createElement("div");
             label.className = "saved-item-name";
             label.textContent = route.name;
-            label.title = new Date(route.ts).toLocaleDateString();
-            label.addEventListener("click", function () {
+            var detail = document.createElement("div");
+            detail.className = "saved-item-detail";
+            var parts = [];
+            if (route.distance) parts.push(route.distance);
+            parts.push(new Date(route.ts).toLocaleDateString());
+            detail.textContent = parts.join(" \u00b7 ");
+            info.appendChild(label);
+            info.appendChild(detail);
+            info.addEventListener("click", function () {
                 restoreSavedRoute(route.id);
             });
             var del = document.createElement("button");
@@ -1981,7 +1997,7 @@ async function renderSavedRoutes() {
                 e.stopPropagation();
                 deleteSavedRoute(route.id);
             });
-            row.appendChild(label);
+            row.appendChild(info);
             row.appendChild(del);
             list.appendChild(row);
         })(routes[i]);
