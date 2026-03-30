@@ -1,4 +1,4 @@
-var CACHE_NAME = "legwork-v4";
+var CACHE_NAME = "legwork-v5";
 var APP_SHELL = [
     "./",
     "./index.html",
@@ -7,6 +7,7 @@ var APP_SHELL = [
     "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css",
     "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js",
     "https://cdn.jsdelivr.net/npm/chart.js@4",
+    "https://cdn.jsdelivr.net/npm/leaflet-hotline@0.4.0/dist/leaflet.hotline.min.js",
 ];
 
 // Tile URL patterns to cache

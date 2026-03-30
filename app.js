@@ -1200,25 +1200,41 @@ function colourRouteByGradient(elevData) {
     for (var r = 0; r < state.routeLines.length; r++) state.map.removeLayer(state.routeLines[r]);
     state.routeLines = [];
     if (state.closingLine) { state.map.removeLayer(state.closingLine); state.closingLine = null; }
-
     if (state.routeOutline) { state.map.removeLayer(state.routeOutline); state.routeOutline = null; }
 
+    // Build [lat, lon, grade%] array for hotline
+    // First point has no grade — use 0 (flat)
+    var coords = [[elevData[0].lat, elevData[0].lon, 0]];
     for (var i = 1; i < elevData.length; i++) {
         var prev = elevData[i-1], curr = elevData[i];
         var dist = haversine(prev.lat, prev.lon, curr.lat, curr.lon);
-        var color = "#6ee7b7";
-        if (dist > 0) {
-            var gradePct = ((curr.elevation - prev.elevation) / dist) * 100;
-            if (gradePct > 10) color = "#dc2626";       // very steep uphill
-            else if (gradePct > 5) color = "#f87171";    // steep uphill
-            else if (gradePct > 2) color = "#fbbf24";    // moderate uphill
-            else if (gradePct < -10) color = "#3b82f6";  // very steep downhill
-            else if (gradePct < -5) color = "#60a5fa";   // steep downhill
-            else if (gradePct < -2) color = "#93c5fd";   // moderate downhill
-        }
-        var seg = L.polyline([[prev.lat,prev.lon],[curr.lat,curr.lon]], { color: color, weight: 4, opacity: 1, lineCap: "round", lineJoin: "round" }).addTo(state.map);
-        state.gradientLines.push(seg);
+        var grade = 0;
+        if (dist > 0) grade = ((curr.elevation - prev.elevation) / dist) * 100;
+        // Clamp to ±15% for colour mapping
+        grade = Math.max(-15, Math.min(15, grade));
+        coords.push([curr.lat, curr.lon, grade]);
     }
+
+    // Hotline palette: blue (downhill) → green (flat) → yellow → red (uphill)
+    // min=-15 maps to 0.0, 0 maps to 0.5, max=+15 maps to 1.0
+    var hotline = L.hotline(coords, {
+        min: -15,
+        max: 15,
+        palette: {
+            0.0:  '#3b82f6',  // very steep downhill
+            0.17: '#60a5fa',  // steep downhill
+            0.33: '#93c5fd',  // moderate downhill
+            0.43: '#6ee7b7',  // flat
+            0.57: '#6ee7b7',  // flat
+            0.67: '#fbbf24',  // moderate uphill
+            0.83: '#f87171',  // steep uphill
+            1.0:  '#dc2626',  // very steep uphill
+        },
+        weight: 5,
+        outlineWidth: 1,
+        outlineColor: '#000',
+    }).addTo(state.map);
+    state.gradientLines.push(hotline);
 }
 
 function updateElevation(elevData) {
