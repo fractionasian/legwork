@@ -606,6 +606,10 @@ button.menu-item:disabled {
     background: #3a8063;
 }
 
+@media (hover: none), (pointer: coarse) {
+    .desktop-only { display: none; }
+}
+
 /* ── Keyboard shortcut keycaps ───────────────────── */
 kbd {
     display: inline-block;
