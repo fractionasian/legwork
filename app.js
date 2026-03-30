@@ -149,7 +149,7 @@ async function loadTilesForLocation(lat, lon) {
         var cacheKey = "tile:" + cityId + ":" + tiles[i].file + ":" + manifest.version;
         var cached = await cacheGet(cacheKey);
         if (cached) {
-            applyPaths(cached);
+            applyPaths(cached, { skipRender: true });
         } else {
             toFetch.push(tiles[i]);
         }
@@ -180,7 +180,7 @@ async function loadTilesForLocation(lat, lon) {
         }).then(function (data) {
             // Convert compact tile format to GeoJSON
             var geojson = Array.isArray(data) ? compactToGeoJSON(data) : data;
-            applyPaths(geojson);
+            applyPaths(geojson, { skipRender: true });
             var cacheKey = "tile:" + cityId + ":" + tile.file + ":" + manifest.version;
             cacheSet(cacheKey, geojson);
             loaded++;
@@ -697,7 +697,7 @@ var pathStyles = {
     },
 };
 
-function applyPaths(geojson) {
+function applyPaths(geojson, opts) {
     // Track seen feature IDs to avoid duplicates
     if (!state.seenIds) state.seenIds = {};
 
@@ -719,16 +719,17 @@ function applyPaths(geojson) {
         state.pathFeatures.features.push.apply(state.pathFeatures.features, newFeatures);
     }
 
-    // Add new features to existing map layer (don't remove old ones)
-    if (!state.pathLayer) {
-        state.pathLayer = L.geoJSON(null, {
-            style: pathStyles.style,
-            onEachFeature: pathStyles.tooltip,
-        }).addTo(state.map);
+    // Add new features to map layer (skip for tile-loaded data — OSM tiles show streets already)
+    if (!(opts && opts.skipRender)) {
+        if (!state.pathLayer) {
+            state.pathLayer = L.geoJSON(null, {
+                style: pathStyles.style,
+                onEachFeature: pathStyles.tooltip,
+            }).addTo(state.map);
+        }
+        var newGeo = { type: "FeatureCollection", features: newFeatures };
+        state.pathLayer.addData(newGeo);
     }
-
-    var newGeo = { type: "FeatureCollection", features: newFeatures };
-    state.pathLayer.addData(newGeo);
 
     // Extend the routing graph (don't rebuild — just add new edges)
     if (!state.graph) state.graph = {};
