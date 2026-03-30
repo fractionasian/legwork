@@ -382,6 +382,53 @@ button.menu-item:disabled {
     cursor: not-allowed;
 }
 
+/* ── Inline save input ────────────────────────────── */
+.save-input-row {
+    display: flex;
+    gap: 6px;
+    padding: 6px 18px 12px;
+}
+
+.save-input-row.hidden {
+    display: none;
+}
+
+.save-input-row input {
+    flex: 1;
+    padding: 8px 10px;
+    border: 1px solid #3a3d4a;
+    border-radius: 6px;
+    background: #12141c;
+    color: #f0f0f0;
+    font-size: 13px;
+}
+
+.save-input-row input:focus {
+    outline: none;
+    border-color: #6ee7b7;
+}
+
+.save-confirm {
+    padding: 8px 14px !important;
+    background: #2d6a4f !important;
+    color: #fff !important;
+    border: none !important;
+    border-radius: 6px !important;
+    font-size: 13px;
+    cursor: pointer;
+}
+
+.save-confirm:hover {
+    background: #3a8063 !important;
+}
+
+/* ── Saved route detail ──────────────────────────── */
+.saved-item-detail {
+    font-size: 11px;
+    color: #6b6e7a;
+    margin-top: 1px;
+}
+
 /* ── City request link ───────────────────────────── */
 .menu-request {
     color: #6b6e7a;
