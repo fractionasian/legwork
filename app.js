@@ -596,7 +596,7 @@ async function loadPaths(lat, lon) {
     // Check cache
     var cached = await cacheGet(cacheKey, PATHS_TTL);
     if (cached) {
-        applyPaths(cached);
+        applyPaths(cached, { skipRender: true });
         showBanner("");
         return;
     }
@@ -641,7 +641,7 @@ async function loadPaths(lat, lon) {
             var raw = await resp.json();
             var geojson = osmToGeoJSON(raw);
             await cacheSet(cacheKey, geojson);
-            applyPaths(geojson);
+            applyPaths(geojson, { skipRender: true });
             showBanner("");
             return;
         } catch (e) {
