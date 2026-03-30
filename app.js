@@ -4,7 +4,7 @@
 
 // ── IndexedDB Cache ───────────────────────────────────
 var DB_NAME = "legwork";
-var DB_VERSION = 1;
+var DB_VERSION = 2;
 var PATHS_TTL = 30 * 24 * 3600 * 1000; // 30 days
 
 var _db = null;
@@ -19,6 +19,7 @@ function openDB() {
             if (!db.objectStoreNames.contains("savedRoutes")) {
                 db.createObjectStore("savedRoutes", { keyPath: "id", autoIncrement: true });
             }
+            if (db.objectStoreNames.contains("savedAreas")) db.deleteObjectStore("savedAreas");
         };
         req.onsuccess = function () { _db = req.result; resolve(_db); };
         req.onerror = function () { reject(req.error); };
