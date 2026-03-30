@@ -1349,6 +1349,7 @@ function showBanner(msg, type) {
     var el = document.getElementById("info-banner");
     el.textContent = msg;
     el.className = "info-banner" + (type ? " " + type : " error");
+    el.dataset.type = type || "";
     el.style.display = msg ? "block" : "none";
 }
 
@@ -1612,9 +1613,9 @@ function showWelcome() {
         }
     } catch (e) { /* blocked storage — show modal every time */ }
     // Only reached for first-time users
-    var isMac = /Mac|iPhone|iPad|iPod/.test(navigator.platform);
+    var isMacDesktop = /Mac/.test(navigator.platform) && navigator.maxTouchPoints < 2;
     var undoKey = document.getElementById("undo-key");
-    if (undoKey && isMac) undoKey.textContent = "\u2318";
+    if (undoKey && isMacDesktop) undoKey.textContent = "\u2318";
     function onEsc(e) {
         if (e.key === "Escape" && !modal.classList.contains("hidden")) dismiss();
     }
@@ -1835,14 +1836,18 @@ async function renderSavedRoutes() {
 function updateOnlineStatus() {
     var searchEl = document.getElementById("address-input");
     if (!navigator.onLine) {
-        showBanner("You're offline \u2014 saved routes still work", "loading");
-        if (searchEl) searchEl.placeholder = "Search unavailable offline";
-        if (searchEl) searchEl.disabled = true;
+        showBanner("You're offline \u2014 saved routes still work", "offline");
+        if (searchEl) {
+            searchEl.placeholder = "Search unavailable offline";
+            searchEl.disabled = true;
+        }
     } else {
         var banner = document.getElementById("info-banner");
-        if (banner.textContent.indexOf("offline") !== -1) showBanner("");
-        if (searchEl) searchEl.placeholder = "Set starting point...";
-        if (searchEl) searchEl.disabled = false;
+        if (banner && banner.dataset.type === "offline") showBanner("");
+        if (searchEl) {
+            searchEl.placeholder = "Set starting point...";
+            searchEl.disabled = false;
+        }
     }
 }
 window.addEventListener("online", updateOnlineStatus);
