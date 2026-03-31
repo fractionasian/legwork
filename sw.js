@@ -1,4 +1,4 @@
-var CACHE_NAME = "legwork-v5";
+var CACHE_NAME = "legwork-v6";
 var APP_SHELL = [
     "./",
     "./index.html",
