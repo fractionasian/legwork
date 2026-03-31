@@ -632,7 +632,7 @@ async function loadPaths(lat, lon) {
             });
             if (resp.status === 429 || resp.status >= 500) {
                 if (attempt < maxRetries) {
-                    showBanner("Path server busy, retrying...", "loading");
+                    showBanner("Path server busy, retrying (" + (attempt + 1) + "/" + maxRetries + ")...", "loading");
                     await new Promise(function (r) { setTimeout(r, delay * Math.pow(2, attempt)); });
                     continue;
                 }
@@ -646,7 +646,7 @@ async function loadPaths(lat, lon) {
             return;
         } catch (e) {
             if (attempt < maxRetries) {
-                showBanner("Retrying path load...", "loading");
+                showBanner("Retrying path load (" + (attempt + 1) + "/" + maxRetries + ")...", "loading");
                 await new Promise(function (r) { setTimeout(r, delay * Math.pow(2, attempt)); });
                 continue;
             }
@@ -802,9 +802,26 @@ function wireMarkerEvents(marker) {
         for (var w = 0; w < state.waypoints.length; w++) { if (state.waypoints[w].marker === marker) { idx = w; break; } }
         removeWaypoint(idx);
     });
-    marker.on("dragend", function () {
+    marker.on("dragend", async function () {
         var pos = marker.getLatLng();
         var newKey = closestNode(state.graph, pos.lat, pos.lng);
+        // If closest node is >200m away, load tiles/paths at drag target first
+        if (newKey) {
+            var nkParts = newKey.split(",");
+            var snapDist = haversine(pos.lat, pos.lng, parseFloat(nkParts[0]), parseFloat(nkParts[1]));
+            if (snapDist > 200) {
+                showBanner("Loading paths for this area...", "loading");
+                var tilesLoaded = await loadTilesForLocation(pos.lat, pos.lng);
+                if (!tilesLoaded) await loadPaths(pos.lat, pos.lng);
+                newKey = closestNode(state.graph, pos.lat, pos.lng);
+            }
+        } else if (state.graph) {
+            // No node found at all — load tiles at drag target
+            showBanner("Loading paths for this area...", "loading");
+            var tilesLoaded = await loadTilesForLocation(pos.lat, pos.lng);
+            if (!tilesLoaded) await loadPaths(pos.lat, pos.lng);
+            newKey = closestNode(state.graph, pos.lat, pos.lng);
+        }
         if (newKey) {
             var p = newKey.split(",");
             marker.setLatLng([parseFloat(p[0]), parseFloat(p[1])]);
@@ -866,10 +883,12 @@ async function fillGapAndRetry(fromWp, toWp) {
     var steps = Math.max(1, Math.ceil(dist / 1500)); // one load every ~1.5km
     var loaded = false;
 
+    showBanner("Expanding route coverage...", "loading");
     for (var s = 0; s <= steps; s++) {
         var t = steps === 0 ? 0.5 : s / steps;
         var midLat = fromWp.lat + t * (toWp.lat - fromWp.lat);
         var midLon = fromWp.lon + t * (toWp.lon - fromWp.lon);
+        if (steps > 1) showBanner("Expanding route coverage (" + (s + 1) + "/" + (steps + 1) + ")...", "loading");
         await loadPaths(midLat, midLon);
         loaded = true;
     }
