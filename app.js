@@ -905,7 +905,9 @@ async function fillGapAndRetry(fromWp, toWp) {
 }
 
 // ── Route drawing ──────────────────────────────────────
+var _routeGen = 0;
 async function updateRoute() {
+    var gen = ++_routeGen;
     for (var r = 0; r < state.routeLines.length; r++) state.map.removeLayer(state.routeLines[r]);
     state.routeLines = [];
     state.routeSegments = [];
@@ -932,6 +934,7 @@ async function updateRoute() {
 
         if (needsGapFill) {
             result = await fillGapAndRetry(fromWp, toWp);
+            if (gen !== _routeGen) return; // superseded by newer call
         }
 
         if (result && result.path.length > 1) {
@@ -960,6 +963,7 @@ async function updateRoute() {
             (closeResult.dist > closeStraight * 3 && closeStraight > 200);
         if (closeNeedsGap) {
             closeResult = await fillGapAndRetry(lastWp, firstWp);
+            if (gen !== _routeGen) return; // superseded by newer call
         }
         if (closeResult && closeResult.path.length > 1) {
             var closeCoords = pathToCoords(closeResult.path);
@@ -1908,8 +1912,8 @@ if (sharedPoints) {
     autoDetectUnits(center.lat, center.lon);
     loadTilesForLocation(center.lat, center.lon).then(function (loaded) {
         if (!loaded) return loadPaths(center.lat, center.lon);
-    }).then(function () {
-        for (var i = 0; i < sharedPoints.length; i++) addWaypointAt(sharedPoints[i].lat, sharedPoints[i].lon, { exactPosition: i === 0 });
+    }).then(async function () {
+        for (var i = 0; i < sharedPoints.length; i++) await addWaypointAt(sharedPoints[i].lat, sharedPoints[i].lon, { exactPosition: i === 0 });
     });
 } else if (savedRoute && savedRoute.waypoints && savedRoute.waypoints.length > 0) {
     // Restore last session's route
@@ -1924,8 +1928,8 @@ if (sharedPoints) {
     autoDetectUnits(ctr.lat, ctr.lon);
     loadTilesForLocation(ctr.lat, ctr.lon).then(function (loaded) {
         if (!loaded) return loadPaths(ctr.lat, ctr.lon);
-    }).then(function () {
-        for (var i = 0; i < sw.length; i++) addWaypointAt(sw[i].lat, sw[i].lon, { exactPosition: i === 0 });
+    }).then(async function () {
+        for (var i = 0; i < sw.length; i++) await addWaypointAt(sw[i].lat, sw[i].lon, { exactPosition: i === 0 });
     });
 } else if (navigator.geolocation) {
     // Fresh start — geolocate
