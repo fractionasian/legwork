@@ -196,6 +196,11 @@ async function loadTilesForLocation(lat, lon) {
     return true;
 }
 
+async function loadTilesOrPaths(lat, lon) {
+    var tilesLoaded = await loadTilesForLocation(lat, lon);
+    if (!tilesLoaded) await loadPaths(lat, lon);
+}
+
 function showCityRequest() {
     // Show "Request your city" link in side menu when outside cached cities
     var el = document.getElementById("city-request-link");
@@ -572,7 +577,7 @@ function goToLocation(lat, lon) {
     state.startLon = lon;
     state.map.setView([lat, lon], 15);
     closeMenu();
-    loadPaths(lat, lon).then(function () {
+    loadTilesOrPaths(lat, lon).then(function () {
         if (state.graph) addWaypointAt(lat, lon, { exactPosition: true });
     });
 }
@@ -811,15 +816,13 @@ function wireMarkerEvents(marker) {
             var snapDist = haversine(pos.lat, pos.lng, parseFloat(nkParts[0]), parseFloat(nkParts[1]));
             if (snapDist > 200) {
                 showBanner("Loading paths for this area...", "loading");
-                var tilesLoaded = await loadTilesForLocation(pos.lat, pos.lng);
-                if (!tilesLoaded) await loadPaths(pos.lat, pos.lng);
+                await loadTilesOrPaths(pos.lat, pos.lng);
                 newKey = closestNode(state.graph, pos.lat, pos.lng);
             }
         } else if (state.graph) {
             // No node found at all — load tiles at drag target
             showBanner("Loading paths for this area...", "loading");
-            var tilesLoaded = await loadTilesForLocation(pos.lat, pos.lng);
-            if (!tilesLoaded) await loadPaths(pos.lat, pos.lng);
+            await loadTilesOrPaths(pos.lat, pos.lng);
             newKey = closestNode(state.graph, pos.lat, pos.lng);
         }
         if (newKey) {
@@ -843,18 +846,18 @@ function onMapClick(e) { addWaypointAt(e.latlng.lat, e.latlng.lng); }
 async function addWaypointAt(lat, lon, opts) {
     // Auto-load paths if we don't have coverage here
     if (!state.graph) {
-        var tilesLoaded = await loadTilesForLocation(lat, lon);
-        if (!tilesLoaded) await loadPaths(lat, lon);
+        showBanner("Loading paths for this area...", "loading");
+        await loadTilesOrPaths(lat, lon);
         if (!state.graph) { showBanner("Could not load paths for this area"); return; }
     }
     var nk = closestNode(state.graph, lat, lon);
     if (!nk) return;
-    // If closest node is >200m away, we probably need more paths
+    // If closest node is >200m away, we probably need more paths (tiles already tried above)
     var nkParts = nk.split(",");
     var snapDist = haversine(lat, lon, parseFloat(nkParts[0]), parseFloat(nkParts[1]));
     if (snapDist > 200) {
-        var tilesLoaded = await loadTilesForLocation(lat, lon);
-        if (!tilesLoaded) await loadPaths(lat, lon);
+        showBanner("Loading paths for this area...", "loading");
+        await loadPaths(lat, lon);
         nk = closestNode(state.graph, lat, lon);
         if (!nk) return;
     }
@@ -891,8 +894,7 @@ async function fillGapAndRetry(fromWp, toWp) {
         var midLat = fromWp.lat + t * (toWp.lat - fromWp.lat);
         var midLon = fromWp.lon + t * (toWp.lon - fromWp.lon);
         if (steps > 1) showBanner("Expanding route coverage (" + (s + 1) + "/" + (steps + 1) + ")...", "loading");
-        var tilesLoaded = await loadTilesForLocation(midLat, midLon);
-        if (!tilesLoaded) await loadPaths(midLat, midLon);
+        await loadTilesOrPaths(midLat, midLon);
         loaded = true;
     }
 
@@ -1466,9 +1468,7 @@ document.getElementById("locate-btn").addEventListener("click", function () {
         state.startLon = lon;
         state.map.setView([lat, lon], 15);
         showGpsDot(lat, lon);
-        loadTilesForLocation(lat, lon).then(function (loaded) {
-            if (!loaded) return loadPaths(lat, lon);
-        }).then(function () {
+        loadTilesOrPaths(lat, lon).then(function () {
             if (state.graph) addWaypointAt(lat, lon, { exactPosition: true });
         });
     }
@@ -1812,8 +1812,7 @@ async function restoreSavedRoute(id) {
         state.map.setView([route.center.lat, route.center.lon], route.zoom || 14);
 
         // Restore path network from tiles or Overpass
-        var loaded = await loadTilesForLocation(route.center.lat, route.center.lon);
-        if (!loaded) await loadPaths(route.center.lat, route.center.lon);
+        await loadTilesOrPaths(route.center.lat, route.center.lon);
 
         // Restore waypoints
         for (var i = 0; i < route.waypoints.length; i++) {
@@ -1945,9 +1944,7 @@ if (sharedPoints) {
     var center = sharedPoints[0];
     state.map.setView([center.lat, center.lon], 14);
     autoDetectUnits(center.lat, center.lon);
-    loadTilesForLocation(center.lat, center.lon).then(function (loaded) {
-        if (!loaded) return loadPaths(center.lat, center.lon);
-    }).then(async function () {
+    loadTilesOrPaths(center.lat, center.lon).then(async function () {
         for (var i = 0; i < sharedPoints.length; i++) await addWaypointAt(sharedPoints[i].lat, sharedPoints[i].lon, { exactPosition: i === 0 });
     });
 } else if (savedRoute && savedRoute.waypoints && savedRoute.waypoints.length > 0) {
@@ -1961,9 +1958,7 @@ if (sharedPoints) {
     var ctr = sw[0];
     state.map.setView([ctr.lat, ctr.lon], savedRoute.zoom || 14);
     autoDetectUnits(ctr.lat, ctr.lon);
-    loadTilesForLocation(ctr.lat, ctr.lon).then(function (loaded) {
-        if (!loaded) return loadPaths(ctr.lat, ctr.lon);
-    }).then(async function () {
+    loadTilesOrPaths(ctr.lat, ctr.lon).then(async function () {
         for (var i = 0; i < sw.length; i++) await addWaypointAt(sw[i].lat, sw[i].lon, { exactPosition: i === 0 });
     });
 } else if (navigator.geolocation) {
