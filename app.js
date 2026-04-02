@@ -1281,17 +1281,42 @@ function updateElevation(elevData) {
     var totalAscent = 0, totalDescent = 0, maxGradient = 0;
     var DEAD_BAND = 2; // metres — ignore cumulative changes below this
     var pending = 0;
+    var segGradients = [0]; // signed grade% per point; index 0 has no prior segment
     for (var i = 1; i < elevations.length; i++) {
         var diff = elevations[i] - elevations[i-1];
         pending += diff;
         if (pending > DEAD_BAND) { totalAscent += pending; pending = 0; }
         else if (pending < -DEAD_BAND) { totalDescent += Math.abs(pending); pending = 0; }
         var segDist = distances[i] - distances[i-1];
-        if (segDist > 0) { var g = (Math.abs(diff) / segDist) * 100; if (g > maxGradient) maxGradient = g; }
+        var gradePct = 0;
+        if (segDist > 0) { gradePct = (diff / segDist) * 100; var g = Math.abs(gradePct); if (g > maxGradient) maxGradient = g; }
+        segGradients.push(gradePct);
     }
     document.getElementById("stat-ascent").textContent = Math.round(totalAscent) + "m";
     document.getElementById("stat-descent").textContent = Math.round(totalDescent) + "m";
     document.getElementById("stat-gradient").textContent = maxGradient.toFixed(1) + "%";
+
+    // Grade-to-colour mapping matching the hotline palette on the map
+    function gradeColor(grade) {
+        var g = Math.max(-15, Math.min(15, grade));
+        if (g <= -10) return "#3b82f6";  // very steep downhill
+        if (g <= -5)  return "#60a5fa";  // steep downhill
+        if (g <= -2)  return "#93c5fd";  // moderate downhill
+        if (g <= 2)   return "#6ee7b7";  // flat
+        if (g <= 5)   return "#fbbf24";  // moderate uphill
+        if (g <= 10)  return "#f87171";  // steep uphill
+        return "#dc2626";                // very steep uphill
+    }
+    function gradeFill(grade) {
+        var g = Math.max(-15, Math.min(15, grade));
+        if (g <= -10) return "rgba(59,130,246,0.18)";
+        if (g <= -5)  return "rgba(96,165,250,0.15)";
+        if (g <= -2)  return "rgba(147,197,253,0.12)";
+        if (g <= 2)   return "rgba(110,231,183,0.1)";
+        if (g <= 5)   return "rgba(251,191,36,0.15)";
+        if (g <= 10)  return "rgba(248,113,113,0.15)";
+        return "rgba(220,38,38,0.18)";
+    }
 
     var ctx = document.getElementById("elevation-canvas").getContext("2d");
     if (state.elevationChart) state.elevationChart.destroy();
@@ -1299,7 +1324,14 @@ function updateElevation(elevData) {
         type: "line",
         data: {
             labels: distances.map(function (d) { return (d/1000).toFixed(1); }),
-            datasets: [{ data: elevations, borderColor: "#6ee7b7", backgroundColor: "rgba(110,231,183,0.1)", fill: true, pointRadius: 0, tension: 0.3, borderWidth: 2 }],
+            datasets: [{
+                data: elevations, borderColor: "#6ee7b7", backgroundColor: "rgba(110,231,183,0.1)",
+                fill: true, pointRadius: 0, tension: 0.3, borderWidth: 2,
+                segment: {
+                    borderColor: function (ctx) { return gradeColor(segGradients[ctx.p1DataIndex]); },
+                    backgroundColor: function (ctx) { return gradeFill(segGradients[ctx.p1DataIndex]); },
+                },
+            }],
         },
         options: {
             responsive: true, maintainAspectRatio: false,
