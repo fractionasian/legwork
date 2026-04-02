@@ -843,7 +843,8 @@ function onMapClick(e) { addWaypointAt(e.latlng.lat, e.latlng.lng); }
 async function addWaypointAt(lat, lon, opts) {
     // Auto-load paths if we don't have coverage here
     if (!state.graph) {
-        await loadPaths(lat, lon);
+        var tilesLoaded = await loadTilesForLocation(lat, lon);
+        if (!tilesLoaded) await loadPaths(lat, lon);
         if (!state.graph) { showBanner("Could not load paths for this area"); return; }
     }
     var nk = closestNode(state.graph, lat, lon);
@@ -852,7 +853,8 @@ async function addWaypointAt(lat, lon, opts) {
     var nkParts = nk.split(",");
     var snapDist = haversine(lat, lon, parseFloat(nkParts[0]), parseFloat(nkParts[1]));
     if (snapDist > 200) {
-        await loadPaths(lat, lon);
+        var tilesLoaded = await loadTilesForLocation(lat, lon);
+        if (!tilesLoaded) await loadPaths(lat, lon);
         nk = closestNode(state.graph, lat, lon);
         if (!nk) return;
     }
@@ -889,7 +891,8 @@ async function fillGapAndRetry(fromWp, toWp) {
         var midLat = fromWp.lat + t * (toWp.lat - fromWp.lat);
         var midLon = fromWp.lon + t * (toWp.lon - fromWp.lon);
         if (steps > 1) showBanner("Expanding route coverage (" + (s + 1) + "/" + (steps + 1) + ")...", "loading");
-        await loadPaths(midLat, midLon);
+        var tilesLoaded = await loadTilesForLocation(midLat, midLon);
+        if (!tilesLoaded) await loadPaths(midLat, midLon);
         loaded = true;
     }
 
