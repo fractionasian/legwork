@@ -235,6 +235,20 @@ var state = {
     lastElevationData: [], // cached elevation results for GPX export
 };
 
+// ── Road-type weights (runner preference) ────────────
+// Multipliers penalise busy roads so Dijkstra favours footpaths/quiet streets.
+// Only affects path selection — displayed distance uses actual haversine.
+var ROAD_WEIGHT = {
+    footway: 1.0, path: 1.0, cycleway: 1.0, pedestrian: 1.0, crossing: 1.0,
+    living_street: 1.1, residential: 1.1,
+    service: 1.2, unclassified: 1.2,
+    tertiary: 1.3, tertiary_link: 1.3,
+    steps: 1.5,
+    secondary: 1.6, secondary_link: 1.6,
+    primary: 2.0, primary_link: 2.0,
+    trunk: 2.5, trunk_link: 2.5,
+};
+
 // ── Routing graph ──────────────────────────────────────
 function nodeKey(lat, lon) {
     return lat.toFixed(6) + "," + lon.toFixed(6);
@@ -397,6 +411,77 @@ function initMap() {
     L.control.layers({ "Street": osm, "Satellite": satellite, "Terrain": terrain }, null, { position: "topright" }).addTo(state.map);
 
     state.map.on("click", onMapClick);
+
+    // ── Viewport tile preloading ──────────────────────
+    var _viewportTimer = null;
+    state.map.on("moveend", function () {
+        clearTimeout(_viewportTimer);
+        _viewportTimer = setTimeout(loadTilesInViewport, 500);
+    });
+}
+
+async function loadTilesInViewport() {
+    var manifest = await fetchManifest();
+    if (!manifest || !state.map) return;
+
+    var bounds = state.map.getBounds();
+    var center = bounds.getCenter();
+    var match = findCityForLocation(manifest, center.lat, center.lng);
+    if (!match) return;
+
+    var city = match.city;
+    var cityId = match.id;
+    var south = bounds.getSouth(), north = bounds.getNorth();
+    var west = bounds.getWest(), east = bounds.getEast();
+
+    // Find tiles whose bounds intersect the viewport
+    var toFetch = [];
+    for (var i = 0; i < city.tiles.length; i++) {
+        var tb = city.tiles[i].bounds; // [south, west, north, east]
+        // AABB intersection test
+        if (tb[2] < south || tb[0] > north || tb[3] < west || tb[1] > east) continue;
+        var cacheKey = "tile:" + cityId + ":" + city.tiles[i].file + ":" + manifest.version;
+        var cached = await cacheGet(cacheKey);
+        if (cached) {
+            applyPaths(cached, { skipRender: true });
+        } else {
+            toFetch.push(city.tiles[i]);
+        }
+        if (toFetch.length >= 20) break; // cap concurrent fetches
+    }
+
+    if (toFetch.length === 0) return;
+
+    var suburbs = [];
+    for (var i = 0; i < toFetch.length; i++) {
+        for (var s = 0; s < toFetch[i].suburbs.length; s++) {
+            if (suburbs.indexOf(toFetch[i].suburbs[s]) === -1) suburbs.push(toFetch[i].suburbs[s]);
+        }
+    }
+    showBanner("Loading " + suburbs.slice(0, 5).join(", ") + (suburbs.length > 5 ? "..." : "") + "", "loading");
+
+    var loaded = 0;
+    var promises = toFetch.map(function (tile) {
+        var url = TILES_BASE + "tiles/" + cityId + "/" + tile.file;
+        return fetch(url).then(function (resp) {
+            if (!resp.ok) throw new Error("HTTP " + resp.status);
+            return resp.json();
+        }).then(function (data) {
+            var geojson = Array.isArray(data) ? compactToGeoJSON(data) : data;
+            applyPaths(geojson, { skipRender: true });
+            var cacheKey = "tile:" + cityId + ":" + tile.file + ":" + manifest.version;
+            cacheSet(cacheKey, geojson);
+            loaded++;
+        }).catch(function (e) {
+            console.warn("Viewport tile fetch failed: " + tile.file, e.message);
+        });
+    });
+
+    await Promise.all(promises);
+    // Only clear banner if we showed it (avoid clearing route error banners)
+    var bannerEl = document.getElementById("info-banner");
+    if (bannerEl.dataset.type === "loading") showBanner("");
+    if (loaded > 0) console.log("Viewport preloaded " + loaded + " tiles");
 }
 
 // ── Build gradient legend in side menu ────────────────
@@ -740,6 +825,8 @@ function applyPaths(geojson, opts) {
     var adj = state.graph;
     for (var f = 0; f < newFeatures.length; f++) {
         var coords = newFeatures[f].geometry.coordinates;
+        var hw = newFeatures[f].properties.highway || "";
+        var weight = ROAD_WEIGHT[hw] || 1.2;
         for (var c = 1; c < coords.length; c++) {
             var lat1 = coords[c-1][1], lon1 = coords[c-1][0];
             var lat2 = coords[c][1], lon2 = coords[c][0];
@@ -748,7 +835,7 @@ function applyPaths(geojson, opts) {
             var edgeId = k1 < k2 ? k1 + "|" + k2 : k2 + "|" + k1;
             if (state.edgeSet[edgeId]) continue;
             state.edgeSet[edgeId] = true;
-            var d = haversine(lat1, lon1, lat2, lon2);
+            var d = haversine(lat1, lon1, lat2, lon2) * weight;
             if (!adj[k1]) { adj[k1] = []; gridInsert(k1, lat1, lon1); }
             if (!adj[k2]) { adj[k2] = []; gridInsert(k2, lat2, lon2); }
             adj[k1].push({ key: k2, lat: lat2, lon: lon2, dist: d });
@@ -1120,6 +1207,7 @@ function updateDistance() {
         var cl = state.closingLine.getLatLngs();
         for (var i = 1; i < cl.length; i++) total += haversine(cl[i-1].lat, cl[i-1].lng, cl[i].lat, cl[i].lng);
     } else if (state.mode === "outback") { total *= 2; }
+    // oneway: use raw total as-is
 
     state.totalDistMetres = total;
     var distText;
@@ -1415,6 +1503,11 @@ function showBanner(msg, type) {
 
 // ── Event bindings ─────────────────────────────────────
 document.getElementById("address-input").addEventListener("keydown", function (e) { if (e.key === "Enter") geocodeAddress(); });
+var MODE_LABELS = { loop: "\u21BB Loop", outback: "\u21C4 Out & Back", oneway: "\u2192 One Way" };
+function setModeButton() {
+    document.getElementById("mode-btn").textContent = MODE_LABELS[state.mode] || MODE_LABELS.loop;
+}
+
 // ── Reverse button visibility ─────────────────────────
 function updateReverseVisibility() {
     var btn = document.getElementById("reverse-btn");
@@ -1422,9 +1515,9 @@ function updateReverseVisibility() {
 }
 
 document.getElementById("mode-btn").addEventListener("click", function () {
-    state.mode = state.mode === "loop" ? "outback" : "loop";
-    this.textContent = state.mode === "loop" ? "\u21BB Loop" : "\u21C4 Out & Back";
-    this.setAttribute("aria-label", "Route mode: " + (state.mode === "loop" ? "loop" : "out and back"));
+    state.mode = state.mode === "loop" ? "outback" : state.mode === "outback" ? "oneway" : "loop";
+    setModeButton();
+    this.setAttribute("aria-label", "Route mode: " + state.mode);
     updateReverseVisibility();
     updateRoute();
 });
@@ -1651,11 +1744,9 @@ function loadFromHash() {
         return { lat: parseFloat(parts[0]), lon: parseFloat(parts[1]) };
     });
     if (points.length < 2) return false;
-    if (params.m === "outback" || params.m === "loop") {
+    if (params.m === "outback" || params.m === "loop" || params.m === "oneway") {
         state.mode = params.m;
-        if (params.m === "outback") {
-            document.getElementById("mode-btn").textContent = "\u21C4 Out & Back";
-        }
+        setModeButton();
         updateReverseVisibility();
     }
     return points;
@@ -1805,7 +1896,7 @@ async function restoreSavedRoute(id) {
 
         // Restore mode
         state.mode = route.mode || "loop";
-        document.getElementById("mode-btn").textContent = state.mode === "loop" ? "\u21BB Loop" : "\u21C4 Out & Back";
+        setModeButton();
         updateReverseVisibility();
 
         // Restore map position
@@ -1951,7 +2042,7 @@ if (sharedPoints) {
     // Restore last session's route
     if (savedRoute.mode) {
         state.mode = savedRoute.mode;
-        document.getElementById("mode-btn").textContent = state.mode === "loop" ? "\u21BB Loop" : "\u21C4 Out & Back";
+        setModeButton();
         updateReverseVisibility();
     }
     var sw = savedRoute.waypoints;
