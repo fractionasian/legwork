@@ -48,16 +48,22 @@ self.addEventListener("activate", function (e) {
     );
 });
 
-// Trim a cache to a max number of entries (FIFO). Approximates LRU well enough
-// for read-heavy tile workloads while staying within the SW Cache API.
-function trimCache(cacheName, maxEntries) {
-    return caches.open(cacheName).then(function (cache) {
-        return cache.keys().then(function (keys) {
-            if (keys.length <= maxEntries) return;
-            var excess = keys.length - maxEntries;
-            return Promise.all(keys.slice(0, excess).map(function (k) { return cache.delete(k); }));
+// FIFO trim by cache-insertion order — the Cache API doesn't expose access
+// time. Debounced because it enumerates the entire cache; on a fresh map pan
+// hundreds of tile puts would otherwise trigger hundreds of full scans.
+var _trimTimers = {};
+function scheduleTrim(cacheName, maxEntries) {
+    if (_trimTimers[cacheName]) return;
+    _trimTimers[cacheName] = setTimeout(function () {
+        _trimTimers[cacheName] = null;
+        caches.open(cacheName).then(function (cache) {
+            return cache.keys().then(function (keys) {
+                if (keys.length <= maxEntries) return;
+                var excess = keys.length - maxEntries;
+                return Promise.all(keys.slice(0, excess).map(function (k) { return cache.delete(k); }));
+            });
         });
-    });
+    }, 5000);
 }
 
 self.addEventListener("fetch", function (e) {
@@ -88,7 +94,7 @@ self.addEventListener("fetch", function (e) {
                         if (resp && resp.ok) {
                             cache.put(e.request, resp.clone());
                             // Trim opportunistically — don't block the response.
-                            e.waitUntil(trimCache(TILE_CACHE, TILE_MAX_ENTRIES));
+                            scheduleTrim(TILE_CACHE, TILE_MAX_ENTRIES);
                         }
                         return resp;
                     }).catch(function () { return cached; });
@@ -107,7 +113,7 @@ self.addEventListener("fetch", function (e) {
                 var clone = resp.clone();
                 caches.open(API_CACHE).then(function (c) {
                     c.put(e.request, clone);
-                    e.waitUntil(trimCache(API_CACHE, API_MAX_ENTRIES));
+                    scheduleTrim(API_CACHE, API_MAX_ENTRIES);
                 });
             }
             return resp;

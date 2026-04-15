@@ -254,6 +254,12 @@ function nodeKey(lat, lon) {
     return lat.toFixed(6) + "," + lon.toFixed(6);
 }
 
+// Cache key for the IndexedDB elevation store. Lower precision than nodeKey
+// because the elevation API only resolves to ~10m anyway.
+function elevKey(lat, lon) {
+    return "elev2:" + lat.toFixed(5) + ":" + lon.toFixed(5);
+}
+
 function buildGraph(geojson) {
     var adj = {};
     function addEdge(k1, lat1, lon1, k2, lat2, lon2) {
@@ -663,13 +669,8 @@ async function geocodeAddress(opts) {
 }
 
 function goToLocation(lat, lon) {
-    // Clear existing waypoints — this sets a new starting point
     clearWaypoints();
-    // Drop the routing graph if we're moving more than ~20km away — prevents
-    // unbounded memory growth when a user hops between cities.
-    if (state.startLat != null && haversine(lat, lon, state.startLat, state.startLon) > 20000) {
-        clearGraphState();
-    }
+    maybeResetGraphFor(lat, lon);
     updateRoute();
 
     state.startLat = lat;
@@ -862,8 +863,7 @@ function applyPaths(geojson, opts) {
 
 // ── Elevation (direct Open-Topo-Data API) ──────────────
 async function fetchElevation(points) {
-    // Batch all cache lookups in parallel rather than awaiting each sequentially.
-    var keys = points.map(function (p) { return "elev2:" + p.lat.toFixed(5) + ":" + p.lon.toFixed(5); });
+    var keys = points.map(function (p) { return elevKey(p.lat, p.lon); });
     var cachedAll = await Promise.all(keys.map(function (k) { return cacheGet(k); }));
 
     var results = new Array(points.length);
@@ -888,8 +888,8 @@ async function fetchElevation(points) {
                 var elev = elevArr[j] != null ? elevArr[j] : 0;
                 var entry = { lat: batch[j].lat, lon: batch[j].lon, elevation: elev };
                 results[uncachedIdx[b + j]] = entry;
-                // Fire-and-forget — IndexedDB write must not block the next batch.
-                if (elevArr[j] != null) cacheSet("elev2:" + entry.lat.toFixed(5) + ":" + entry.lon.toFixed(5), entry);
+                // Fire-and-forget so a stalled IndexedDB write can't block the next batch.
+                if (elevArr[j] != null) cacheSet(elevKey(entry.lat, entry.lon), entry);
             }
         } catch (e) {
             console.warn("Elevation batch failed:", e.message);
@@ -1015,12 +1015,7 @@ async function fillGapAndRetry(fromWp, toWp) {
 var _routeGen = 0;
 async function updateRoute() {
     var gen = ++_routeGen;
-    clearLayers(state.routeLines);
-    clearLayers(state.gradientLines);
-    clearLayers(state.midpointMarkers);
-    state.routeSegments = [];
-    if (state.closingLine) { state.map.removeLayer(state.closingLine); state.closingLine = null; }
-    if (state.routeOutline) { state.map.removeLayer(state.routeOutline); state.routeOutline = null; }
+    clearRouteOverlays();
 
     if (state.waypoints.length < 2) { updateDistance(); updateElevation([]); return; }
 
@@ -1082,6 +1077,7 @@ async function updateRoute() {
     else showBanner("");
 
     addMidpointMarkers();
+    rebuildCumulativeDist();
     updateDistance();
     debouncedFetchElevation(allRouteCoords);
     updateShareHash();
@@ -1204,10 +1200,11 @@ function addMidpointMarkers() {
 }
 
 // ── Distance ───────────────────────────────────────────
+// Reads the cumulative-distance cache populated by updateRoute(). Cheap
+// enough to call from the unit toggle without rebuilding geometry.
 function updateDistance() {
-    rebuildCumulativeDist();
-    var coords = state.routeFlatCoords;
-    var oneWayLen = coords.length > 0 ? state.cumDist[coords.length - 1] : 0;
+    var cum = state.cumDist;
+    var oneWayLen = cum && cum.length > 0 ? cum[cum.length - 1] : 0;
     var total = state.mode === "outback" ? oneWayLen * 2 : oneWayLen;
     state.totalDistMetres = total;
     var distText = state.useMiles
@@ -1218,8 +1215,6 @@ function updateDistance() {
 }
 
 // ── Distance markers ───────────────────────────────────
-// Uses the cumulative-distance cache + binary search instead of re-walking
-// every coordinate for each marker.
 function updateDistanceMarkers() {
     clearLayers(state.distanceMarkers);
     var interval = state.useMiles ? 1609.344 : 1000;
@@ -1281,8 +1276,8 @@ function sampleRoute(coords, intervalMetres) {
     return points;
 }
 
-// Memoized — colourRouteByGradient + updateElevation are called back-to-back
-// with the same elevation array, so smooth it once and reuse the result.
+// Memoized by reference: fetchRouteElevation passes the same array to both
+// colourRouteByGradient and updateElevation, so smooth once per route.
 var _smoothCache = { src: null, out: null };
 function smoothElevations(elevData) {
     if (_smoothCache.src === elevData) return _smoothCache.out;
@@ -1461,7 +1456,7 @@ async function exportGPX() {
         var elev = elevLookup[elevKey];
         // Also check IndexedDB elevation cache
         if (elev === undefined) {
-            var cached = await cacheGet("elev2:" + coords[i][0].toFixed(5) + ":" + coords[i][1].toFixed(5));
+            var cached = await cacheGet(elevKey(coords[i][0], coords[i][1]));
             if (cached) elev = cached.elevation;
         }
         if (elev !== undefined) {
@@ -1510,8 +1505,6 @@ function clearRouteOverlays() {
     state.cumDist = null;
 }
 
-// Drop the routing graph and related caches — call when switching to a new
-// location to prevent unbounded memory growth across cities.
 function clearGraphState() {
     if (state.pathLayer) { state.map.removeLayer(state.pathLayer); state.pathLayer = null; }
     state.pathFeatures = null;
@@ -1521,9 +1514,16 @@ function clearGraphState() {
     spatialGrid = {};
 }
 
+// Drop the routing graph when the user jumps to a far-away area — keeps
+// spatialGrid/pathFeatures/seenIds from growing unbounded across cities.
+var GRAPH_RESET_METRES = 20000;
+function maybeResetGraphFor(lat, lon) {
+    if (state.startLat == null) return;
+    if (haversine(lat, lon, state.startLat, state.startLon) > GRAPH_RESET_METRES) clearGraphState();
+}
+
 // ── Cumulative-distance cache ──────────────────────────
-// Build once per route update so distance markers and length sums can use
-// O(log N) binary search instead of O(N·M) haversine walks.
+// Built once per route update; consumers binary-search instead of re-walking.
 function rebuildCumulativeDist() {
     var coords = [];
     for (var s = 0; s < state.routeSegments.length; s++) {
@@ -1613,9 +1613,7 @@ function showGpsDot(lat, lon) {
 document.getElementById("locate-btn").addEventListener("click", function () {
     function startHere(lat, lon) {
         clearWaypoints();
-        if (state.startLat != null && haversine(lat, lon, state.startLat, state.startLon) > 20000) {
-            clearGraphState();
-        }
+        maybeResetGraphFor(lat, lon);
         updateRoute();
         state.startLat = lat;
         state.startLon = lon;
@@ -1940,13 +1938,9 @@ async function restoreSavedRoute(id) {
         });
         if (!route) { showBanner("Route not found"); return; }
 
-        // Clear existing state
         clearWaypoints();
         clearRouteOverlays();
-        // Drop graph if the saved route is far from current coverage
-        if (state.startLat != null && haversine(route.center.lat, route.center.lon, state.startLat, state.startLon) > 20000) {
-            clearGraphState();
-        }
+        maybeResetGraphFor(route.center.lat, route.center.lon);
 
         // Restore mode
         state.mode = route.mode || "loop";
@@ -1991,8 +1985,7 @@ async function deleteSavedRoute(id) {
     renderSavedRoutes();
 }
 
-// Single delegated listener instead of one per row — registered lazily on
-// first render so it survives later re-renders.
+// One delegated listener for the lifetime of the list element.
 function ensureSavedRoutesDelegation(list) {
     if (list._delegated) return;
     list._delegated = true;
