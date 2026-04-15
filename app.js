@@ -588,13 +588,20 @@ function updateActiveItem(items, idx, input) {
     }
 }
 
+var _autocompleteAbort = null;
 async function fetchSuggestions(query) {
     var list = document.getElementById("autocomplete-list");
+    // Cancel any in-flight Photon request so a slow earlier response can't
+    // clobber a fresher one when the user types quickly.
+    if (_autocompleteAbort) _autocompleteAbort.abort();
+    _autocompleteAbort = new AbortController();
+    var signal = _autocompleteAbort.signal;
     try {
         var center = state.map ? state.map.getCenter() : { lat: -31.95, lng: 115.86 };
         var resp = await fetch(
             "https://photon.komoot.io/api/?q=" + encodeURIComponent(query) +
-            "&limit=5&lat=" + center.lat + "&lon=" + center.lng
+            "&limit=5&lat=" + center.lat + "&lon=" + center.lng,
+            { signal: signal }
         );
         if (!resp.ok) return;
         var data = await resp.json();
@@ -629,7 +636,10 @@ async function fetchSuggestions(query) {
             })(features[i], i);
         }
         setAutocompleteOpen(true);
-    } catch (e) { console.warn("Autocomplete failed:", e.message); }
+    } catch (e) {
+        if (e.name === "AbortError") return; // superseded by newer query
+        console.warn("Autocomplete failed:", e.message);
+    }
 }
 
 // ── Geocode (via Photon) ───────────────────────────────
@@ -654,8 +664,12 @@ async function geocodeAddress(opts) {
 
 function goToLocation(lat, lon) {
     // Clear existing waypoints — this sets a new starting point
-    for (var i = 0; i < state.waypoints.length; i++) state.map.removeLayer(state.waypoints[i].marker);
-    state.waypoints = [];
+    clearWaypoints();
+    // Drop the routing graph if we're moving more than ~20km away — prevents
+    // unbounded memory growth when a user hops between cities.
+    if (state.startLat != null && haversine(lat, lon, state.startLat, state.startLon) > 20000) {
+        clearGraphState();
+    }
     updateRoute();
 
     state.startLat = lat;
@@ -848,14 +862,16 @@ function applyPaths(geojson, opts) {
 
 // ── Elevation (direct Open-Topo-Data API) ──────────────
 async function fetchElevation(points) {
-    var results = [];
+    // Batch all cache lookups in parallel rather than awaiting each sequentially.
+    var keys = points.map(function (p) { return "elev2:" + p.lat.toFixed(5) + ":" + p.lon.toFixed(5); });
+    var cachedAll = await Promise.all(keys.map(function (k) { return cacheGet(k); }));
+
+    var results = new Array(points.length);
     var uncached = [];
     var uncachedIdx = [];
-
     for (var i = 0; i < points.length; i++) {
-        var ck = "elev2:" + points[i].lat.toFixed(5) + ":" + points[i].lon.toFixed(5);
-        var cached = await cacheGet(ck);
-        if (cached) { results.push(cached); } else { results.push(null); uncached.push(points[i]); uncachedIdx.push(i); }
+        if (cachedAll[i]) results[i] = cachedAll[i];
+        else { results[i] = null; uncached.push(points[i]); uncachedIdx.push(i); }
     }
 
     // Open-Meteo elevation API — free, CORS-enabled, no key needed
@@ -872,14 +888,13 @@ async function fetchElevation(points) {
                 var elev = elevArr[j] != null ? elevArr[j] : 0;
                 var entry = { lat: batch[j].lat, lon: batch[j].lon, elevation: elev };
                 results[uncachedIdx[b + j]] = entry;
-                if (elevArr[j] != null) {
-                    await cacheSet("elev2:" + entry.lat.toFixed(5) + ":" + entry.lon.toFixed(5), entry);
-                }
+                // Fire-and-forget — IndexedDB write must not block the next batch.
+                if (elevArr[j] != null) cacheSet("elev2:" + entry.lat.toFixed(5) + ":" + entry.lon.toFixed(5), entry);
             }
         } catch (e) {
             console.warn("Elevation batch failed:", e.message);
-            for (var j = 0; j < batch.length; j++) {
-                if (!results[uncachedIdx[b + j]]) results[uncachedIdx[b + j]] = { lat: batch[j].lat, lon: batch[j].lon, elevation: 0 };
+            for (var k = 0; k < batch.length; k++) {
+                if (!results[uncachedIdx[b + k]]) results[uncachedIdx[b + k]] = { lat: batch[k].lat, lon: batch[k].lon, elevation: 0 };
             }
         }
     }
@@ -1000,15 +1015,12 @@ async function fillGapAndRetry(fromWp, toWp) {
 var _routeGen = 0;
 async function updateRoute() {
     var gen = ++_routeGen;
-    for (var r = 0; r < state.routeLines.length; r++) state.map.removeLayer(state.routeLines[r]);
-    state.routeLines = [];
+    clearLayers(state.routeLines);
+    clearLayers(state.gradientLines);
+    clearLayers(state.midpointMarkers);
     state.routeSegments = [];
     if (state.closingLine) { state.map.removeLayer(state.closingLine); state.closingLine = null; }
-    for (var g = 0; g < state.gradientLines.length; g++) state.map.removeLayer(state.gradientLines[g]);
-    state.gradientLines = [];
     if (state.routeOutline) { state.map.removeLayer(state.routeOutline); state.routeOutline = null; }
-    for (var mp = 0; mp < state.midpointMarkers.length; mp++) state.map.removeLayer(state.midpointMarkers[mp]);
-    state.midpointMarkers = [];
 
     if (state.waypoints.length < 2) { updateDistance(); updateElevation([]); return; }
 
@@ -1084,12 +1096,7 @@ function debouncedFetchElevation(coords) {
 
 // ── Midpoint markers (drag to insert waypoint) ─────────
 function addMidpointMarkers() {
-    // Clear old midpoints
-    for (var m = 0; m < state.midpointMarkers.length; m++) {
-        state.map.removeLayer(state.midpointMarkers[m]);
-    }
-    state.midpointMarkers = [];
-
+    clearLayers(state.midpointMarkers);
     if (state.waypoints.length < 2) return;
 
     // Add midpoint between each consecutive pair
@@ -1198,67 +1205,48 @@ function addMidpointMarkers() {
 
 // ── Distance ───────────────────────────────────────────
 function updateDistance() {
-    var total = 0;
-    for (var s = 0; s < state.routeSegments.length; s++) {
-        var seg = state.routeSegments[s];
-        for (var i = 1; i < seg.length; i++) total += haversine(seg[i-1][0], seg[i-1][1], seg[i][0], seg[i][1]);
-    }
-    if (state.mode === "loop" && state.closingLine) {
-        var cl = state.closingLine.getLatLngs();
-        for (var i = 1; i < cl.length; i++) total += haversine(cl[i-1].lat, cl[i-1].lng, cl[i].lat, cl[i].lng);
-    } else if (state.mode === "outback") { total *= 2; }
-    // oneway: use raw total as-is
-
+    rebuildCumulativeDist();
+    var coords = state.routeFlatCoords;
+    var oneWayLen = coords.length > 0 ? state.cumDist[coords.length - 1] : 0;
+    var total = state.mode === "outback" ? oneWayLen * 2 : oneWayLen;
     state.totalDistMetres = total;
-    var distText;
-    if (state.useMiles) {
-        distText = (total / 1609.344).toFixed(1) + " mi";
-    } else {
-        distText = (total / 1000).toFixed(1) + " km";
-    }
+    var distText = state.useMiles
+        ? (total / 1609.344).toFixed(1) + " mi"
+        : (total / 1000).toFixed(1) + " km";
     document.getElementById("distance-display").textContent = distText;
     updateDistanceMarkers();
 }
 
 // ── Distance markers ───────────────────────────────────
+// Uses the cumulative-distance cache + binary search instead of re-walking
+// every coordinate for each marker.
 function updateDistanceMarkers() {
-    for (var m = 0; m < state.distanceMarkers.length; m++) state.map.removeLayer(state.distanceMarkers[m]);
-    state.distanceMarkers = [];
-    var interval = state.useMiles ? 1609.344 : 1000; // 1 mile or 1 km
+    clearLayers(state.distanceMarkers);
+    var interval = state.useMiles ? 1609.344 : 1000;
     var suffix = state.useMiles ? "mi" : "k";
-    if (state.totalDistMetres < interval) return;
+    var coords = state.routeFlatCoords;
+    var cum = state.cumDist;
+    if (!coords || coords.length < 2) return;
+    var routeLen = cum[cum.length - 1];
+    if (routeLen < interval) return;
 
-    var coords = [];
-    for (var s = 0; s < state.routeSegments.length; s++) {
-        var seg = state.routeSegments[s];
-        var start = coords.length === 0 ? 0 : 1;
-        for (var ci = start; ci < seg.length; ci++) coords.push(seg[ci]);
-    }
-    if (state.mode === "loop" && state.closingLine) {
-        var cl = state.closingLine.getLatLngs();
-        for (var ci = 1; ci < cl.length; ci++) coords.push([cl[ci].lat, cl[ci].lng]);
-    }
-    if (coords.length < 2) return;
-
-    var accumulated = 0, nextMark = interval, markNum = 1;
-    for (var i = 1; i < coords.length; i++) {
-        var d = haversine(coords[i-1][0], coords[i-1][1], coords[i][0], coords[i][1]);
-        accumulated += d;
-        while (accumulated >= nextMark) {
-            var ratio = 1 - (accumulated - nextMark) / d;
-            var lat = coords[i-1][0] + ratio * (coords[i][0] - coords[i-1][0]);
-            var lon = coords[i-1][1] + ratio * (coords[i][1] - coords[i-1][1]);
-            var el = document.createElement("div");
-            el.style.cssText = "background:#fff;color:#1a1d28;border-radius:8px;padding:1px 5px;font-size:10px;font-weight:700;box-shadow:0 1px 4px rgba(0,0,0,0.5);";
-            el.textContent = markNum + suffix;
-            var mkr = L.marker([lat, lon], {
-                icon: L.divIcon({ html: el.outerHTML, className: "", iconSize: [30,16], iconAnchor: [15,8] }),
-                interactive: false, zIndexOffset: -100,
-            }).addTo(state.map);
-            state.distanceMarkers.push(mkr);
-            markNum++;
-            nextMark += interval;
-        }
+    var maxMark = Math.floor(routeLen / interval);
+    for (var n = 1; n <= maxMark; n++) {
+        var target = n * interval;
+        var i = findCumIndex(target);
+        if (i <= 0) continue;
+        var segDist = cum[i] - cum[i-1];
+        var ratio = segDist > 0 ? (target - cum[i-1]) / segDist : 0;
+        var lat = coords[i-1][0] + ratio * (coords[i][0] - coords[i-1][0]);
+        var lon = coords[i-1][1] + ratio * (coords[i][1] - coords[i-1][1]);
+        var el = document.createElement("div");
+        el.style.cssText = "background:#fff;color:#1a1d28;border-radius:8px;padding:1px 5px;font-size:10px;font-weight:700;box-shadow:0 1px 4px rgba(0,0,0,0.5);";
+        el.textContent = n + suffix;
+        var mkr = L.marker([lat, lon], {
+            icon: L.divIcon({ html: el.outerHTML, className: "", iconSize: [30,16], iconAnchor: [15,8] }),
+            interactive: false, zIndexOffset: -100,
+        }).addTo(state.map);
+        state.distanceMarkers.push(mkr);
     }
 }
 
@@ -1293,8 +1281,12 @@ function sampleRoute(coords, intervalMetres) {
     return points;
 }
 
+// Memoized — colourRouteByGradient + updateElevation are called back-to-back
+// with the same elevation array, so smooth it once and reuse the result.
+var _smoothCache = { src: null, out: null };
 function smoothElevations(elevData) {
-    if (elevData.length < 2) return elevData;
+    if (_smoothCache.src === elevData) return _smoothCache.out;
+    if (elevData.length < 2) { _smoothCache = { src: elevData, out: elevData }; return elevData; }
     var alpha = 0.6;
     var smoothed = [elevData[0]];
     for (var i = 1; i < elevData.length; i++) {
@@ -1303,17 +1295,17 @@ function smoothElevations(elevData) {
         smoothed.push({ lat: elevData[i].lat, lon: elevData[i].lon, elevation: alpha * curr + (1 - alpha) * prev });
     }
     // Reverse pass to remove lag
-    for (var i = smoothed.length - 2; i >= 0; i--) {
-        smoothed[i] = { lat: smoothed[i].lat, lon: smoothed[i].lon, elevation: alpha * smoothed[i].elevation + (1 - alpha) * smoothed[i+1].elevation };
+    for (var j = smoothed.length - 2; j >= 0; j--) {
+        smoothed[j] = { lat: smoothed[j].lat, lon: smoothed[j].lon, elevation: alpha * smoothed[j].elevation + (1 - alpha) * smoothed[j+1].elevation };
     }
+    _smoothCache = { src: elevData, out: smoothed };
     return smoothed;
 }
 
 function colourRouteByGradient(elevData) {
     elevData = smoothElevations(elevData);
     if (elevData.length < 2) return;
-    for (var r = 0; r < state.routeLines.length; r++) state.map.removeLayer(state.routeLines[r]);
-    state.routeLines = [];
+    clearLayers(state.routeLines);
     if (state.closingLine) { state.map.removeLayer(state.closingLine); state.closingLine = null; }
     if (state.routeOutline) { state.map.removeLayer(state.routeOutline); state.routeOutline = null; }
 
@@ -1493,6 +1485,74 @@ function haversine(lat1, lon1, lat2, lon2) {
     return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
 }
 
+// ── Layer & state cleanup helpers ──────────────────────
+function clearLayers(layers) {
+    if (!layers || !state.map) return;
+    for (var i = 0; i < layers.length; i++) state.map.removeLayer(layers[i]);
+    layers.length = 0;
+}
+
+function clearWaypoints() {
+    if (!state.map) { state.waypoints = []; return; }
+    for (var i = 0; i < state.waypoints.length; i++) state.map.removeLayer(state.waypoints[i].marker);
+    state.waypoints = [];
+}
+
+function clearRouteOverlays() {
+    clearLayers(state.routeLines);
+    clearLayers(state.gradientLines);
+    clearLayers(state.midpointMarkers);
+    clearLayers(state.distanceMarkers);
+    if (state.closingLine) { state.map.removeLayer(state.closingLine); state.closingLine = null; }
+    if (state.routeOutline) { state.map.removeLayer(state.routeOutline); state.routeOutline = null; }
+    state.routeSegments = [];
+    state.routeFlatCoords = null;
+    state.cumDist = null;
+}
+
+// Drop the routing graph and related caches — call when switching to a new
+// location to prevent unbounded memory growth across cities.
+function clearGraphState() {
+    if (state.pathLayer) { state.map.removeLayer(state.pathLayer); state.pathLayer = null; }
+    state.pathFeatures = null;
+    state.graph = null;
+    state.edgeSet = null;
+    state.seenIds = null;
+    spatialGrid = {};
+}
+
+// ── Cumulative-distance cache ──────────────────────────
+// Build once per route update so distance markers and length sums can use
+// O(log N) binary search instead of O(N·M) haversine walks.
+function rebuildCumulativeDist() {
+    var coords = [];
+    for (var s = 0; s < state.routeSegments.length; s++) {
+        var seg = state.routeSegments[s];
+        var start = coords.length === 0 ? 0 : 1;
+        for (var ci = start; ci < seg.length; ci++) coords.push(seg[ci]);
+    }
+    if (state.mode === "loop" && state.closingLine) {
+        var cl = state.closingLine.getLatLngs();
+        for (var ci2 = 1; ci2 < cl.length; ci2++) coords.push([cl[ci2].lat, cl[ci2].lng]);
+    }
+    var cum = new Float64Array(coords.length);
+    for (var i = 1; i < coords.length; i++) {
+        cum[i] = cum[i-1] + haversine(coords[i-1][0], coords[i-1][1], coords[i][0], coords[i][1]);
+    }
+    state.routeFlatCoords = coords;
+    state.cumDist = cum;
+}
+
+function findCumIndex(target) {
+    var cum = state.cumDist; if (!cum || cum.length === 0) return -1;
+    var lo = 1, hi = cum.length - 1;
+    while (lo < hi) {
+        var mid = (lo + hi) >> 1;
+        if (cum[mid] < target) lo = mid + 1; else hi = mid;
+    }
+    return lo;
+}
+
 function showBanner(msg, type) {
     var el = document.getElementById("info-banner");
     el.textContent = msg;
@@ -1528,8 +1588,7 @@ document.getElementById("reverse-btn").addEventListener("click", function () {
     updateRoute();
 });
 document.getElementById("clear-btn").addEventListener("click", function () {
-    for (var i = 0; i < state.waypoints.length; i++) state.map.removeLayer(state.waypoints[i].marker);
-    state.waypoints = [];
+    clearWaypoints();
     updateRoute();
 });
 document.getElementById("export-btn").addEventListener("click", function () {
@@ -1553,9 +1612,10 @@ function showGpsDot(lat, lon) {
 
 document.getElementById("locate-btn").addEventListener("click", function () {
     function startHere(lat, lon) {
-        // Clear existing route
-        for (var i = 0; i < state.waypoints.length; i++) state.map.removeLayer(state.waypoints[i].marker);
-        state.waypoints = [];
+        clearWaypoints();
+        if (state.startLat != null && haversine(lat, lon, state.startLat, state.startLon) > 20000) {
+            clearGraphState();
+        }
         updateRoute();
         state.startLat = lat;
         state.startLon = lon;
@@ -1809,7 +1869,7 @@ function saveNamedRoute() {
                     }
                 }
             })
-            .catch(function () {});
+            .catch(function (e) { console.warn("Reverse-geocode for save-name failed:", e.message); });
     }
 }
 
@@ -1881,18 +1941,12 @@ async function restoreSavedRoute(id) {
         if (!route) { showBanner("Route not found"); return; }
 
         // Clear existing state
-        for (var i = 0; i < state.waypoints.length; i++) state.map.removeLayer(state.waypoints[i].marker);
-        state.waypoints = [];
-        for (var r = 0; r < state.routeLines.length; r++) state.map.removeLayer(state.routeLines[r]);
-        state.routeLines = [];
-        for (var g = 0; g < state.gradientLines.length; g++) state.map.removeLayer(state.gradientLines[g]);
-        state.gradientLines = [];
-        if (state.routeOutline) { state.map.removeLayer(state.routeOutline); state.routeOutline = null; }
-        if (state.closingLine) { state.map.removeLayer(state.closingLine); state.closingLine = null; }
-        for (var mp = 0; mp < state.midpointMarkers.length; mp++) state.map.removeLayer(state.midpointMarkers[mp]);
-        state.midpointMarkers = [];
-        for (var dm = 0; dm < state.distanceMarkers.length; dm++) state.map.removeLayer(state.distanceMarkers[dm]);
-        state.distanceMarkers = [];
+        clearWaypoints();
+        clearRouteOverlays();
+        // Drop graph if the saved route is far from current coverage
+        if (state.startLat != null && haversine(route.center.lat, route.center.lon, state.startLat, state.startLon) > 20000) {
+            clearGraphState();
+        }
 
         // Restore mode
         state.mode = route.mode || "loop";
@@ -1901,6 +1955,8 @@ async function restoreSavedRoute(id) {
 
         // Restore map position
         state.map.setView([route.center.lat, route.center.lon], route.zoom || 14);
+        state.startLat = route.center.lat;
+        state.startLon = route.center.lon;
 
         // Restore path network from tiles or Overpass
         await loadTilesOrPaths(route.center.lat, route.center.lon);
@@ -1931,53 +1987,71 @@ async function deleteSavedRoute(id) {
             tx.oncomplete = resolve;
             tx.onerror = function () { reject(tx.error); };
         });
-    } catch (e) {}
+    } catch (e) { console.warn("Delete saved route failed:", e.message); }
     renderSavedRoutes();
+}
+
+// Single delegated listener instead of one per row — registered lazily on
+// first render so it survives later re-renders.
+function ensureSavedRoutesDelegation(list) {
+    if (list._delegated) return;
+    list._delegated = true;
+    list.addEventListener("click", function (e) {
+        var del = e.target.closest && e.target.closest(".saved-item-delete");
+        if (del) {
+            e.stopPropagation();
+            var dId = parseInt(del.dataset.id, 10);
+            if (!isNaN(dId)) deleteSavedRoute(dId);
+            return;
+        }
+        var item = e.target.closest && e.target.closest(".saved-item");
+        if (item && item.dataset.id) {
+            var rId = parseInt(item.dataset.id, 10);
+            if (!isNaN(rId)) restoreSavedRoute(rId);
+        }
+    });
 }
 
 async function renderSavedRoutes() {
     var list = document.getElementById("saved-routes-list");
     if (!list) return;
     var routes = await loadSavedRoutes();
+    ensureSavedRoutesDelegation(list);
     while (list.firstChild) list.removeChild(list.firstChild);
     if (routes.length === 0) {
         list.classList.add("hidden");
         return;
     }
     list.classList.remove("hidden");
+    var frag = document.createDocumentFragment();
     for (var i = 0; i < routes.length; i++) {
-        (function (route) {
-            var row = document.createElement("div");
-            row.className = "saved-item";
-            var info = document.createElement("div");
-            info.style.cssText = "flex:1;overflow:hidden;cursor:pointer;";
-            var label = document.createElement("div");
-            label.className = "saved-item-name";
-            label.textContent = route.name;
-            var detail = document.createElement("div");
-            detail.className = "saved-item-detail";
-            var parts = [];
-            if (route.distance) parts.push(route.distance);
-            parts.push(new Date(route.ts).toLocaleDateString());
-            detail.textContent = parts.join(" \u00b7 ");
-            info.appendChild(label);
-            info.appendChild(detail);
-            info.addEventListener("click", function () {
-                restoreSavedRoute(route.id);
-            });
-            var del = document.createElement("button");
-            del.className = "saved-item-delete";
-            del.textContent = "\u00d7";
-            del.title = "Delete saved route";
-            del.addEventListener("click", function (e) {
-                e.stopPropagation();
-                deleteSavedRoute(route.id);
-            });
-            row.appendChild(info);
-            row.appendChild(del);
-            list.appendChild(row);
-        })(routes[i]);
+        var route = routes[i];
+        var row = document.createElement("div");
+        row.className = "saved-item";
+        row.dataset.id = route.id;
+        var info = document.createElement("div");
+        info.style.cssText = "flex:1;overflow:hidden;cursor:pointer;";
+        var label = document.createElement("div");
+        label.className = "saved-item-name";
+        label.textContent = route.name;
+        var detail = document.createElement("div");
+        detail.className = "saved-item-detail";
+        var parts = [];
+        if (route.distance) parts.push(route.distance);
+        parts.push(new Date(route.ts).toLocaleDateString());
+        detail.textContent = parts.join(" \u00b7 ");
+        info.appendChild(label);
+        info.appendChild(detail);
+        var del = document.createElement("button");
+        del.className = "saved-item-delete";
+        del.textContent = "\u00d7";
+        del.title = "Delete saved route";
+        del.dataset.id = route.id;
+        row.appendChild(info);
+        row.appendChild(del);
+        frag.appendChild(row);
     }
+    list.appendChild(frag);
 }
 
 // ── Offline indicator ──────────────────────────────────

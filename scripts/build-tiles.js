@@ -171,19 +171,58 @@ async function buildCity(city, dataDir) {
     return { rows, cols, tiles: tileMeta };
 }
 
+// Parse simple --flag value args. Supports --city <id> for incremental builds
+// and --cities a,b,c for a subset.
+function parseArgs(argv) {
+    const args = {};
+    for (let i = 2; i < argv.length; i++) {
+        const a = argv[i];
+        if (a === "--city" || a === "--cities") args.cities = (argv[++i] || "").split(",").map(s => s.trim()).filter(Boolean);
+        else if (a === "--help" || a === "-h") args.help = true;
+    }
+    return args;
+}
+
 async function main() {
+    const args = parseArgs(process.argv);
+    if (args.help) {
+        console.log("Usage: build-tiles.js [--city <id> | --cities <id1,id2>]");
+        console.log("  Without --city, all cities are rebuilt.");
+        console.log("  With --city, only the specified city is built and merged into the existing manifest.");
+        return;
+    }
+
     const dataDir = path.join(__dirname, "..", "data");
     const citiesPath = path.join(dataDir, "cities.json");
+    const manifestPath = path.join(dataDir, "manifest.json");
 
     if (!fs.existsSync(citiesPath)) {
         console.error("Missing data/cities.json");
         process.exit(1);
     }
 
-    const cities = JSON.parse(fs.readFileSync(citiesPath, "utf-8"));
-    const manifest = { built: new Date().toISOString(), version: "", cities: {} };
+    const allCities = JSON.parse(fs.readFileSync(citiesPath, "utf-8"));
+    const targetCities = args.cities && args.cities.length
+        ? allCities.filter(c => args.cities.includes(c.id))
+        : allCities;
 
-    for (const city of cities) {
+    if (targetCities.length === 0) {
+        console.error(`No matching cities for: ${args.cities.join(", ")}`);
+        console.error(`Available: ${allCities.map(c => c.id).join(", ")}`);
+        process.exit(1);
+    }
+
+    // Start from the existing manifest if we're doing an incremental build,
+    // otherwise rebuild from scratch.
+    const incremental = !!(args.cities && args.cities.length);
+    const manifest = incremental && fs.existsSync(manifestPath)
+        ? JSON.parse(fs.readFileSync(manifestPath, "utf-8"))
+        : { built: new Date().toISOString(), version: "", cities: {} };
+    manifest.built = new Date().toISOString();
+
+    console.log(`Building ${targetCities.length} ${incremental ? "(incremental) " : ""}cit${targetCities.length === 1 ? "y" : "ies"}: ${targetCities.map(c => c.id).join(", ")}`);
+
+    for (const city of targetCities) {
         const result = await buildCity(city, dataDir);
         manifest.cities[city.id] = {
             name: city.name,
@@ -192,16 +231,17 @@ async function main() {
             grid: [result.rows, result.cols],
             tiles: result.tiles,
         };
-        if (cities.indexOf(city) < cities.length - 1) {
+        if (targetCities.indexOf(city) < targetCities.length - 1) {
             console.log("\n  Waiting 30s before next city...");
             await sleep(30000);
         }
     }
 
+    // Hash all city metadata so the version stays deterministic across
+    // incremental and full builds.
     const content = JSON.stringify(manifest.cities);
     manifest.version = crypto.createHash("md5").update(content).digest("hex").substring(0, 8);
 
-    const manifestPath = path.join(dataDir, "manifest.json");
     fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
     console.log(`\nManifest written: ${manifestPath}`);
     console.log(`Version: ${manifest.version}`);
