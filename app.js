@@ -141,13 +141,13 @@ async function loadTilesForLocation(lat, lon) {
     var tiles = tilesInRadius(city, lat, lon, 5);
     if (tiles.length === 0) return false;
 
-    // Check which tiles need fetching (not already in IndexedDB with current version)
+    // Check all tiles against IndexedDB in parallel
+    var cacheKeys = tiles.map(function (t) { return "tile:" + cityId + ":" + t.file + ":" + manifest.version; });
+    var cachedAll = await Promise.all(cacheKeys.map(function (k) { return cacheGet(k); }));
     var toFetch = [];
     for (var i = 0; i < tiles.length; i++) {
-        var cacheKey = "tile:" + cityId + ":" + tiles[i].file + ":" + manifest.version;
-        var cached = await cacheGet(cacheKey);
-        if (cached) {
-            applyPaths(cached, { skipRender: true });
+        if (cachedAll[i]) {
+            applyPaths(cachedAll[i], { skipRender: true });
         } else {
             toFetch.push(tiles[i]);
         }
@@ -260,27 +260,6 @@ function elevKey(lat, lon) {
     return "elev2:" + lat.toFixed(5) + ":" + lon.toFixed(5);
 }
 
-function buildGraph(geojson) {
-    var adj = {};
-    function addEdge(k1, lat1, lon1, k2, lat2, lon2) {
-        var d = haversine(lat1, lon1, lat2, lon2);
-        if (!adj[k1]) adj[k1] = [];
-        if (!adj[k2]) adj[k2] = [];
-        adj[k1].push({ key: k2, lat: lat2, lon: lon2, dist: d });
-        adj[k2].push({ key: k1, lat: lat1, lon: lon1, dist: d });
-    }
-    for (var f = 0; f < geojson.features.length; f++) {
-        var coords = geojson.features[f].geometry.coordinates;
-        for (var c = 1; c < coords.length; c++) {
-            addEdge(
-                nodeKey(coords[c-1][1], coords[c-1][0]), coords[c-1][1], coords[c-1][0],
-                nodeKey(coords[c][1], coords[c][0]), coords[c][1], coords[c][0]
-            );
-        }
-    }
-    return adj;
-}
-
 // ── Binary min-heap for Dijkstra ──────────────────────
 function MinHeap() {
     this.data = [];
@@ -341,7 +320,8 @@ function dijkstra(graph, startKey, endKey) {
     if (dist[endKey] === undefined) return null;
     var path = [];
     var cur = endKey;
-    while (cur) { path.unshift(cur); cur = prev[cur]; }
+    while (cur) { path.push(cur); cur = prev[cur]; }
+    path.reverse();
     return { dist: dist[endKey], path: path };
 }
 
@@ -426,7 +406,13 @@ function initMap() {
     });
 }
 
+var _viewportLoading = false;
 async function loadTilesInViewport() {
+    if (_viewportLoading) return; // previous call still in flight
+    _viewportLoading = true;
+    try { await _loadTilesInViewport(); } finally { _viewportLoading = false; }
+}
+async function _loadTilesInViewport() {
     var manifest = await fetchManifest();
     if (!manifest || !state.map) return;
 
@@ -440,20 +426,26 @@ async function loadTilesInViewport() {
     var south = bounds.getSouth(), north = bounds.getNorth();
     var west = bounds.getWest(), east = bounds.getEast();
 
-    // Find tiles whose bounds intersect the viewport
-    var toFetch = [];
+    // Collect tiles whose bounds intersect the viewport
+    var visible = [];
     for (var i = 0; i < city.tiles.length; i++) {
         var tb = city.tiles[i].bounds; // [south, west, north, east]
-        // AABB intersection test
         if (tb[2] < south || tb[0] > north || tb[3] < west || tb[1] > east) continue;
-        var cacheKey = "tile:" + cityId + ":" + city.tiles[i].file + ":" + manifest.version;
-        var cached = await cacheGet(cacheKey);
-        if (cached) {
-            applyPaths(cached, { skipRender: true });
+        visible.push(city.tiles[i]);
+    }
+    if (visible.length === 0) return;
+
+    // Check all visible tiles against IndexedDB in parallel
+    var vKeys = visible.map(function (t) { return "tile:" + cityId + ":" + t.file + ":" + manifest.version; });
+    var vCached = await Promise.all(vKeys.map(function (k) { return cacheGet(k); }));
+    var toFetch = [];
+    for (var vi = 0; vi < visible.length; vi++) {
+        if (vCached[vi]) {
+            applyPaths(vCached[vi], { skipRender: true });
         } else {
-            toFetch.push(city.tiles[i]);
+            toFetch.push(visible[vi]);
+            if (toFetch.length >= 20) break;
         }
-        if (toFetch.length >= 20) break; // cap concurrent fetches
     }
 
     if (toFetch.length === 0) return;
