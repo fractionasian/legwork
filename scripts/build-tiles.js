@@ -152,7 +152,23 @@ async function reverseGeocode(lat, lon) {
     }
 }
 
-async function buildCity(city, dataDir) {
+function boundsKey(bounds) {
+    return bounds.map(n => n.toFixed(6)).join(",");
+}
+
+function buildSuburbCache(previousCity) {
+    const cache = new Map();
+    if (!previousCity || !Array.isArray(previousCity.tiles)) return cache;
+    for (const t of previousCity.tiles) {
+        if (t && t.bounds && Array.isArray(t.suburbs) && t.suburbs.length && t.suburbs[0] !== "Unknown") {
+            cache.set(boundsKey(t.bounds), t.suburbs);
+        }
+    }
+    return cache;
+}
+
+async function buildCity(city, dataDir, options) {
+    const { skipGeocode, suburbCache } = options;
     console.log(`\nBuilding ${city.name}...`);
 
     const geojson = await queryOverpass(city.bounds);
@@ -165,6 +181,7 @@ async function buildCity(city, dataDir) {
     fs.mkdirSync(tileDir, { recursive: true });
 
     const tileMeta = [];
+    let geocodeGate = Promise.resolve();
     for (const [key, tile] of Object.entries(tiles)) {
         // Compact format: [id, highway, name, [[lon5dp,lat5dp],...]] per feature
         const compact = tile.features.map(f => [
@@ -179,10 +196,25 @@ async function buildCity(city, dataDir) {
         const filePath = path.join(tileDir, `${key}.json`);
         fs.writeFileSync(filePath, JSON.stringify(compact));
 
-        const centerLat = (tile.bounds[0] + tile.bounds[2]) / 2;
-        const centerLon = (tile.bounds[1] + tile.bounds[3]) / 2;
-        const suburbs = await reverseGeocode(centerLat, centerLon);
-        await sleep(1100);
+        const cached = suburbCache.get(boundsKey(tile.bounds));
+        let suburbs;
+        if (cached) {
+            suburbs = cached;
+            console.log(`  Tile ${key}: ${tile.features.length} ways — ${suburbs.join(", ")} (cached)`);
+        } else if (skipGeocode) {
+            suburbs = ["Unknown"];
+            console.log(`  Tile ${key}: ${tile.features.length} ways — skipped geocode`);
+        } else {
+            // Rate-limit Photon to ~1 req/s by serializing starts 1.1s apart,
+            // but let each fetch overlap the next tile's wait.
+            await geocodeGate;
+            const centerLat = (tile.bounds[0] + tile.bounds[2]) / 2;
+            const centerLon = (tile.bounds[1] + tile.bounds[3]) / 2;
+            const fetchP = reverseGeocode(centerLat, centerLon);
+            geocodeGate = sleep(1100);
+            suburbs = await fetchP;
+            console.log(`  Tile ${key}: ${tile.features.length} ways — ${suburbs.join(", ")}`);
+        }
 
         tileMeta.push({
             file: `${key}.json`,
@@ -190,27 +222,81 @@ async function buildCity(city, dataDir) {
             suburbs,
             ways: tile.features.length,
         });
-
-        console.log(`  Tile ${key}: ${tile.features.length} ways — ${suburbs.join(", ")}`);
     }
 
     return { rows, cols, tiles: tileMeta };
 }
 
+function parseArgs(argv) {
+    const args = { cities: null, skipGeocode: false };
+    for (let i = 0; i < argv.length; i++) {
+        const a = argv[i];
+        if (a === "--city" || a === "--cities") {
+            const val = argv[++i];
+            if (!val) { console.error(`${a} requires a value`); process.exit(1); }
+            args.cities = val.split(",").map(s => s.trim()).filter(Boolean);
+        } else if (a.startsWith("--city=") || a.startsWith("--cities=")) {
+            args.cities = a.slice(a.indexOf("=") + 1).split(",").map(s => s.trim()).filter(Boolean);
+        } else if (a === "--skip-geocode") {
+            args.skipGeocode = true;
+        } else if (a === "--help" || a === "-h") {
+            console.log("Usage: build-tiles.js [--city <id>[,<id>...]] [--skip-geocode]");
+            process.exit(0);
+        } else {
+            console.error(`Unknown argument: ${a}`);
+            process.exit(1);
+        }
+    }
+    return args;
+}
+
 async function main() {
+    const args = parseArgs(process.argv.slice(2));
     const dataDir = path.join(__dirname, "..", "data");
     const citiesPath = path.join(dataDir, "cities.json");
+    const manifestPath = path.join(dataDir, "manifest.json");
 
     if (!fs.existsSync(citiesPath)) {
         console.error("Missing data/cities.json");
         process.exit(1);
     }
 
-    const cities = JSON.parse(fs.readFileSync(citiesPath, "utf-8"));
-    const manifest = { built: new Date().toISOString(), version: "", cities: {} };
+    const allCities = JSON.parse(fs.readFileSync(citiesPath, "utf-8"));
+    let cities = allCities;
+    if (args.cities) {
+        const ids = new Set(args.cities);
+        cities = allCities.filter(c => ids.has(c.id));
+        const missing = args.cities.filter(id => !allCities.some(c => c.id === id));
+        if (missing.length) {
+            console.error(`Unknown city id(s): ${missing.join(", ")}`);
+            process.exit(1);
+        }
+        console.log(`Building subset: ${cities.map(c => c.id).join(", ")}`);
+    }
 
-    for (const city of cities) {
-        const result = await buildCity(city, dataDir);
+    let previousManifest = null;
+    if (fs.existsSync(manifestPath)) {
+        try { previousManifest = JSON.parse(fs.readFileSync(manifestPath, "utf-8")); } catch {}
+    }
+
+    const manifest = { built: new Date().toISOString(), version: "", cities: {} };
+    if (args.cities && previousManifest && previousManifest.cities) {
+        for (const [id, entry] of Object.entries(previousManifest.cities)) {
+            if (!args.cities.includes(id)) manifest.cities[id] = entry;
+        }
+    }
+
+    for (let i = 0; i < cities.length; i++) {
+        const city = cities[i];
+        const prevCity = previousManifest && previousManifest.cities && previousManifest.cities[city.id];
+        const prevBoundsMatch = prevCity && JSON.stringify(prevCity.bounds) === JSON.stringify(city.bounds);
+        const suburbCache = prevBoundsMatch ? buildSuburbCache(prevCity) : new Map();
+        if (suburbCache.size) console.log(`  Suburb cache: ${suburbCache.size} tiles`);
+
+        const result = await buildCity(city, dataDir, {
+            skipGeocode: args.skipGeocode,
+            suburbCache,
+        });
         manifest.cities[city.id] = {
             name: city.name,
             bounds: city.bounds,
@@ -218,7 +304,7 @@ async function main() {
             grid: [result.rows, result.cols],
             tiles: result.tiles,
         };
-        if (cities.indexOf(city) < cities.length - 1) {
+        if (i < cities.length - 1) {
             console.log("\n  Waiting 30s before next city...");
             await sleep(30000);
         }
@@ -227,7 +313,6 @@ async function main() {
     const content = JSON.stringify(manifest.cities);
     manifest.version = crypto.createHash("md5").update(content).digest("hex").substring(0, 8);
 
-    const manifestPath = path.join(dataDir, "manifest.json");
     fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
     console.log(`\nManifest written: ${manifestPath}`);
     console.log(`Version: ${manifest.version}`);
