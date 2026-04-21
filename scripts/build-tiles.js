@@ -11,13 +11,29 @@ const HIGHWAYS = [
     "primary","primary_link","trunk","trunk_link","crossing","steps"
 ];
 
+const USER_AGENT = "legwork-tile-builder/1.0 (+https://github.com/fractionasian/legwork)";
+
+const OVERPASS_ENDPOINTS = [
+    "https://overpass-api.de/api/interpreter",
+    "https://overpass.kumi.systems/api/interpreter",
+    "https://overpass.private.coffee/api/interpreter",
+];
+
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 async function fetchJSON(url, opts, retries = 3) {
+    const mergedOpts = {
+        ...opts,
+        headers: {
+            "User-Agent": USER_AGENT,
+            "Accept": "application/json",
+            ...(opts && opts.headers ? opts.headers : {}),
+        },
+    };
     for (let attempt = 0; attempt <= retries; attempt++) {
         try {
-            const resp = await fetch(url, opts);
-            if (resp.status === 429 || resp.status >= 500) {
+            const resp = await fetch(url, mergedOpts);
+            if (resp.status === 429 || resp.status === 406 || resp.status >= 500) {
                 if (attempt < retries) {
                     const delay = 10000 * Math.pow(2, attempt); // 10s, 20s, 40s
                     console.log(`  HTTP ${resp.status}, retrying in ${delay/1000}s...`);
@@ -71,13 +87,23 @@ async function queryOverpass(bounds) {
     const query = `[out:json][timeout:120];\n(way["highway"~"${regex}"](${south},${west},${north},${east}););\nout body;\n>;\nout skel qt;`;
 
     console.log(`  Querying Overpass (${(north-south).toFixed(2)}° x ${(east-west).toFixed(2)}°)...`);
-    const data = await fetchJSON("https://overpass-api.de/api/interpreter", {
-        method: "POST",
-        body: "data=" + encodeURIComponent(query),
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    });
-    console.log(`  Got ${(data.elements || []).length} elements`);
-    return osmToGeoJSON(data);
+
+    let lastError;
+    for (const endpoint of OVERPASS_ENDPOINTS) {
+        try {
+            const data = await fetchJSON(endpoint, {
+                method: "POST",
+                body: "data=" + encodeURIComponent(query),
+                headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            });
+            console.log(`  Got ${(data.elements || []).length} elements from ${endpoint}`);
+            return osmToGeoJSON(data);
+        } catch (e) {
+            lastError = e;
+            console.log(`  Endpoint ${endpoint} failed: ${e.message}`);
+        }
+    }
+    throw lastError;
 }
 
 function splitIntoTiles(geojson, bounds) {
