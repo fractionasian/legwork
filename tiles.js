@@ -166,6 +166,7 @@ async function resetGraphIfCityChanged(lat, lon) {
     state.pathFeatures = null;
     state.seenIds = {};
     state.edgeSet = {};
+    state.nodeAttrs = {};
     spatialGrid = {};
     if (state.pathLayer) {
         state.map.removeLayer(state.pathLayer);
@@ -262,7 +263,9 @@ function radiusFromZoom() {
 
 async function loadPaths(lat, lon) {
     var radius = radiusFromZoom();
-    var cacheKey = "paths:" + lat.toFixed(3) + ":" + lon.toFixed(3) + ":" + radius;
+    // Bumped from paths: to paths2: when we started carrying node tags through
+    // osmToGeoJSON for the runner-friendly preference weighting.
+    var cacheKey = "paths2:" + lat.toFixed(3) + ":" + lon.toFixed(3) + ":" + radius;
 
     showBanner("Loading paths...", "loading");
 
@@ -292,7 +295,9 @@ async function loadPaths(lat, lon) {
         '  way["highway"="trunk_link"](around:' + radius + ',' + lat + ',' + lon + ');\n' +
         '  way["highway"="crossing"](around:' + radius + ',' + lat + ',' + lon + ');\n' +
         '  way["highway"="steps"](around:' + radius + ',' + lat + ',' + lon + ');\n' +
-        ');\nout body;\n>;\nout skel qt;';
+        // `out body qt` on the node recurse (vs skel) brings node tags through
+        // — needed for barrier/crossing/traffic-signal weighting in applyPaths.
+        ');\nout body;\n>;\nout body qt;';
 
     var maxRetries = 3, delay = 2000;
     for (var attempt = 0; attempt <= maxRetries; attempt++) {
@@ -348,6 +353,17 @@ var pathStyles = {
 
 function applyPaths(geojson, opts) {
     if (!state.seenIds) state.seenIds = {};
+    if (!state.nodeAttrs) state.nodeAttrs = {};
+
+    // Merge any node attrs the geojson carries. Live Overpass paths populate
+    // this sidecar; cached compact tiles don't yet (pre-rebuild), so the
+    // default-empty dict means node-level prefs simply don't fire for them.
+    if (geojson.nodeAttrs) {
+        var keys = Object.keys(geojson.nodeAttrs);
+        for (var ni = 0; ni < keys.length; ni++) {
+            state.nodeAttrs[keys[ni]] = geojson.nodeAttrs[keys[ni]];
+        }
+    }
 
     var newFeatures = [];
     for (var i = 0; i < geojson.features.length; i++) {
@@ -381,9 +397,11 @@ function applyPaths(geojson, opts) {
     if (!state.edgeSet) state.edgeSet = {};
     var adj = state.graph;
     for (var f = 0; f < newFeatures.length; f++) {
+        var props = newFeatures[f].properties;
         var coords = newFeatures[f].geometry.coordinates;
-        var hw = newFeatures[f].properties.highway || "";
-        var weight = ROAD_WEIGHT[hw] || 1.2;
+        var hw = props.highway || "";
+        // Combine base road weight + way-level preferences (P1 named trails, P5 soft surfaces).
+        var baseWeight = (ROAD_WEIGHT[hw] || 1.2) * wayPrefMultiplier(hw, props.surface || "", props.name || "");
         for (var c = 1; c < coords.length; c++) {
             var lat1 = coords[c-1][1], lon1 = coords[c-1][0];
             var lat2 = coords[c][1], lon2 = coords[c][0];
@@ -391,7 +409,10 @@ function applyPaths(geojson, opts) {
             var edgeId = k1 < k2 ? k1 + "|" + k2 : k2 + "|" + k1;
             if (state.edgeSet[edgeId]) continue;
             state.edgeSet[edgeId] = true;
-            var d = haversine(lat1, lon1, lat2, lon2) * weight;
+            // Node-level preferences (P2 traffic signals, P3 marked crossings, P4 barriers)
+            // apply to both endpoints; the worst penalty / best bonus dominates via product.
+            var nodeMult = nodePrefMultiplier(state.nodeAttrs[k1]) * nodePrefMultiplier(state.nodeAttrs[k2]);
+            var d = haversine(lat1, lon1, lat2, lon2) * baseWeight * nodeMult;
             if (!adj[k1]) { adj[k1] = []; gridInsert(k1, lat1, lon1); }
             if (!adj[k2]) { adj[k2] = []; gridInsert(k2, lat2, lon2); }
             adj[k1].push({ key: k2, lat: lat2, lon: lon2, dist: d });
