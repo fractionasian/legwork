@@ -28,9 +28,25 @@ var state = {
     useMiles: false,
     lastElevationData: [], // cached elevation results for GPX export
     poiMarkers: [],
-    poisVisible: false,
+    showToilets: false,
+    showWater: false,
 };
-try { state.poisVisible = localStorage.getItem("lw:showPois") === "1"; } catch (e) {}
+// Read per-type toggle state. Migrate the old unified lw:showPois flag if present.
+try {
+    var _legacyPois = localStorage.getItem("lw:showPois");
+    if (_legacyPois !== null) {
+        var _on = _legacyPois === "1";
+        state.showToilets = _on;
+        state.showWater = _on;
+        localStorage.setItem("lw:showToilets", _on ? "1" : "0");
+        localStorage.setItem("lw:showWater", _on ? "1" : "0");
+        localStorage.removeItem("lw:showPois");
+    } else {
+        state.showToilets = localStorage.getItem("lw:showToilets") === "1";
+        state.showWater = localStorage.getItem("lw:showWater") === "1";
+    }
+} catch (e) {}
+function anyPoisVisible() { return state.showToilets || state.showWater; }
 
 // ── Map init ───────────────────────────────────────────
 function initMap() {
@@ -59,7 +75,7 @@ function initMap() {
     state.map.on("moveend", function () {
         clearTimeout(_viewportTimer);
         _viewportTimer = setTimeout(loadTilesInViewport, 500);
-        if (state.poisVisible) debouncedRefreshPois();
+        if (anyPoisVisible()) debouncedRefreshPois();
     });
 }
 
@@ -519,19 +535,54 @@ function escapeText(s) {
 }
 
 async function refreshPois() {
-    for (var i = 0; i < state.poiMarkers.length; i++) state.map.removeLayer(state.poiMarkers[i]);
-    state.poiMarkers = [];
-    if (!state.poisVisible || !state.map) return;
+    if (!state.map) return;
+    // If neither type is visible, clear immediately and stop.
+    if (!anyPoisVisible()) {
+        for (var i = 0; i < state.poiMarkers.length; i++) state.map.removeLayer(state.poiMarkers[i]);
+        state.poiMarkers = [];
+        return;
+    }
     var c = state.map.getCenter();
     var pois = await loadPois(c.lat, c.lng);
-    if (!pois || !state.poisVisible) return; // user may have toggled off mid-fetch
-    for (var i = 0; i < pois.length; i++) {
-        var p = pois[i];
-        var marker = L.marker([p.lat, p.lon], {
-            icon: poiIcon(p.amenity),
+    // User may have toggled everything off during the fetch.
+    if (!anyPoisVisible()) {
+        for (var j = 0; j < state.poiMarkers.length; j++) state.map.removeLayer(state.poiMarkers[j]);
+        state.poiMarkers = [];
+        return;
+    }
+    if (!pois) return;
+    // Reconcile by id: keep markers already on the map that still apply, add
+    // new ones, drop old ones. Avoids the mid-pan "disappear then reappear"
+    // flicker caused by the old clear-then-refetch order.
+    var keep = {};
+    for (var k = 0; k < pois.length; k++) {
+        var p = pois[k];
+        if (p.amenity === "toilets" && !state.showToilets) continue;
+        if (p.amenity === "drinking_water" && !state.showWater) continue;
+        keep[p.id] = p;
+    }
+    // Remove markers for POIs no longer in the visible set.
+    var surviving = [];
+    for (var m = 0; m < state.poiMarkers.length; m++) {
+        var existing = state.poiMarkers[m];
+        if (keep[existing._poiId]) {
+            surviving.push(existing);
+            delete keep[existing._poiId]; // mark as already rendered
+        } else {
+            state.map.removeLayer(existing);
+        }
+    }
+    state.poiMarkers = surviving;
+    // Add markers for newly-in-scope POIs.
+    var ids = Object.keys(keep);
+    for (var n = 0; n < ids.length; n++) {
+        var p2 = keep[ids[n]];
+        var marker = L.marker([p2.lat, p2.lon], {
+            icon: poiIcon(p2.amenity),
             zIndexOffset: -150,
         });
-        marker.bindPopup(poiPopupHtml(p), { maxWidth: 240 });
+        marker._poiId = p2.id;
+        marker.bindPopup(poiPopupHtml(p2), { maxWidth: 240 });
         marker.addTo(state.map);
         state.poiMarkers.push(marker);
     }
@@ -1226,20 +1277,28 @@ document.getElementById("unit-toggle").addEventListener("click", function () {
     updateDistance();
 });
 
-// ── POI toggle (in menu) ──────────────────────────────
-function syncPoiLabel() {
-    var label = document.getElementById("pois-label");
-    if (label) label.textContent = state.poisVisible ? "On" : "Off";
+// ── POI toggles (in menu) ─────────────────────────────
+function syncPoiLabels() {
+    var t = document.getElementById("toilets-label");
+    var w = document.getElementById("water-label");
+    if (t) t.textContent = state.showToilets ? "On" : "Off";
+    if (w) w.textContent = state.showWater ? "On" : "Off";
 }
-syncPoiLabel();
-document.getElementById("pois-toggle").addEventListener("click", function () {
-    state.poisVisible = !state.poisVisible;
-    try { localStorage.setItem("lw:showPois", state.poisVisible ? "1" : "0"); } catch (e) {}
-    syncPoiLabel();
+syncPoiLabels();
+document.getElementById("toilets-toggle").addEventListener("click", function () {
+    state.showToilets = !state.showToilets;
+    try { localStorage.setItem("lw:showToilets", state.showToilets ? "1" : "0"); } catch (e) {}
+    syncPoiLabels();
     refreshPois();
 });
-// If the user left POIs on in a previous session, paint them once the map is ready.
-if (state.poisVisible) setTimeout(refreshPois, 1200);
+document.getElementById("water-toggle").addEventListener("click", function () {
+    state.showWater = !state.showWater;
+    try { localStorage.setItem("lw:showWater", state.showWater ? "1" : "0"); } catch (e) {}
+    syncPoiLabels();
+    refreshPois();
+});
+// If either was on in a previous session, paint once the map is ready.
+if (anyPoisVisible()) setTimeout(refreshPois, 1200);
 
 // ── Auto-detect miles for US/UK/MM/LR ─────────────────
 var MILES_COUNTRIES = ["US", "GB", "MM", "LR"];

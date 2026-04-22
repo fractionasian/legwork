@@ -570,7 +570,9 @@ button.menu-item:disabled {
 /* ── Elevation panel (docked to bottom of map) ───── */
 .elevation-panel {
     position: absolute;
-    bottom: 0;
+    /* Lift above the iPhone home-indicator / gesture zone so the collapse
+       toggle isn't at the screen edge in standalone PWA mode. */
+    bottom: env(safe-area-inset-bottom, 0px);
     left: 0;
     right: 0;
     z-index: 800;
