@@ -466,6 +466,25 @@ button.menu-item:disabled {
     margin-right: 6px;
 }
 
+/* ── Credits footer ─────────────────────────────── */
+.menu-credits {
+    padding: 10px 18px 16px;
+    font-size: 11px;
+    line-height: 1.6;
+    color: #6b6e7a;
+}
+
+.menu-credits a {
+    color: #6b6e7a;
+    text-decoration: underline;
+    text-decoration-color: #3a3d4a;
+}
+
+.menu-credits a:hover {
+    color: #d0d0d0;
+    text-decoration-color: #6ee7b7;
+}
+
 /* ── Autocomplete ─────────────────────────────────── */
 .autocomplete-list {
     position: absolute;
@@ -592,6 +611,18 @@ button.menu-item:disabled {
 .info-banner.share {
     background: #1a1d28;
     color: #e8e9ef;
+}
+
+.info-banner.hint {
+    background: #1a2a24;
+    color: #a8e0c4;
+    border-bottom-color: #2a3a34;
+}
+
+.info-banner.offline {
+    background: #2a2a1a;
+    color: #e0d48a;
+    border-bottom-color: #3a3a2a;
 }
 
 .info-banner .share-input {

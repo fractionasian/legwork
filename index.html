@@ -22,7 +22,7 @@
     <nav class="controls" aria-label="Route controls">
         <button id="menu-btn" class="menu-btn" aria-label="Open menu" aria-expanded="false" aria-controls="side-menu">&#9776;</button>
         <div class="mode-group">
-            <button id="mode-btn" title="Click to toggle between loop and out-and-back" aria-label="Route mode: loop">&#8635; Loop</button>
+            <button id="mode-btn" title="Cycle route mode: Loop → Out &amp; Back → One Way" aria-label="Route mode: loop (tap to cycle through Loop, Out and Back, One Way)">&#8635; Loop</button>
             <button id="reverse-btn" title="Reverse route direction" aria-label="Reverse route direction">&#8644;</button>
         </div>
         <button id="clear-btn" aria-label="Clear all waypoints">&#10005;</button>
@@ -65,8 +65,13 @@
             <div class="menu-divider"></div>
             <div class="menu-legend" id="menu-legend"></div>
             <div class="menu-divider"></div>
+            <button id="show-tips-btn" class="menu-item menu-tips">Tips &amp; shortcuts</button>
             <div class="menu-item menu-install hidden" id="install-prompt"></div>
             <a id="city-request-link" class="menu-item menu-request hidden" href="https://docs.google.com/forms/d/e/1FAIpQLScQDjiNMpLcsz0yTblOfqCc_NPLPbcuHAOT6GWJ21rGgD_kuA/viewform" target="_blank">Request your city</a>
+            <div class="menu-divider"></div>
+            <div class="menu-credits">
+                Map data <a href="https://www.openstreetmap.org/copyright" target="_blank">© OpenStreetMap</a> · Geocoding <a href="https://photon.komoot.io/" target="_blank">Photon (Komoot)</a> · Elevation <a href="https://open-meteo.com/" target="_blank">Open-Meteo</a> (~30m DEM)
+            </div>
         </div>
     </aside>
     <div class="info-banner" id="info-banner" role="alert" aria-live="assertive"></div>
@@ -91,10 +96,11 @@
                 <li><strong>Click the map</strong> to add waypoints — routes follow footpaths automatically</li>
                 <li><strong>Click a waypoint</strong> to remove it, or <strong>drag</strong> to reposition</li>
                 <li><strong>Drag the green circles</strong> between waypoints to insert a new one</li>
+                <li>Tap the <strong>&#8635; Loop</strong> button to cycle between <em>Loop</em>, <em>Out &amp; Back</em>, and <em>One Way</em></li>
                 <li class="desktop-only"><kbd id="undo-key">Ctrl</kbd> + <kbd>Z</kbd> to undo the last waypoint</li>
                 <li>Routes are coloured by gradient: <span style="color:#6ee7b7">green</span> (flat), <span style="color:#fbbf24">yellow</span> (uphill), <span style="color:#f87171">red</span> (steep), <span style="color:#60a5fa">blue</span> (downhill)</li>
             </ul>
-            <button id="welcome-dismiss">Got it</button>
+            <button id="welcome-dismiss">Start planning</button>
         </div>
     </div>
 
