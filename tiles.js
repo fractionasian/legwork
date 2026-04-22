@@ -171,6 +171,11 @@ async function resetGraphIfCityChanged(lat, lon) {
         state.map.removeLayer(state.pathLayer);
         state.pathLayer = null;
     }
+    // POIs are per-city too — clear and let refreshPois repopulate.
+    if (state.poiMarkers) {
+        for (var i = 0; i < state.poiMarkers.length; i++) state.map.removeLayer(state.poiMarkers[i]);
+        state.poiMarkers = [];
+    }
 }
 
 function showCityRequest() {
@@ -181,6 +186,58 @@ function showCityRequest() {
 function hideCityRequest() {
     var el = document.getElementById("city-request-link");
     if (el) el.classList.add("hidden");
+}
+
+// ── Points of interest (toilets, drinking water) ──────
+// One Overpass call per ~10km area, cached 7 days in IDB. Keyed by coarse
+// lat/lon so panning within the same area hits the cache.
+var POIS_TTL = 7 * 24 * 3600 * 1000;
+
+async function loadPois(lat, lon) {
+    var radius = 10000;
+    var key = "pois:" + lat.toFixed(2) + ":" + lon.toFixed(2);
+    var cached = await cacheGet(key, POIS_TTL);
+    if (cached) return cached;
+
+    var query = '[out:json][timeout:25];(' +
+        'node["amenity"="toilets"](around:' + radius + ',' + lat + ',' + lon + ');' +
+        'node["amenity"="drinking_water"](around:' + radius + ',' + lat + ',' + lon + ');' +
+        ');out body;';
+
+    try {
+        var resp = await fetchWithTimeout("https://overpass-api.de/api/interpreter", {
+            method: "POST",
+            body: "data=" + encodeURIComponent(query),
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        }, 30000);
+        if (!resp.ok) return null;
+        var raw = await resp.json();
+        var pois = [];
+        for (var i = 0; i < (raw.elements || []).length; i++) {
+            var el = raw.elements[i];
+            if (el.type !== "node" || !el.tags || !el.tags.amenity) continue;
+            pois.push({
+                id: el.id,
+                lat: el.lat,
+                lon: el.lon,
+                amenity: el.tags.amenity,
+                name: el.tags.name || "",
+                access: el.tags["toilets:access"] || el.tags.access || "",
+                fee: el.tags.fee || "",
+                wheelchair: el.tags.wheelchair || "",
+                opening_hours: el.tags.opening_hours || "",
+                male: el.tags.male === "yes",
+                female: el.tags.female === "yes",
+                unisex: el.tags.unisex === "yes",
+                changing_table: el.tags.changing_table === "yes",
+            });
+        }
+        cacheSet(key, pois);
+        return pois;
+    } catch (e) {
+        console.warn("POI fetch failed:", e.message);
+        return null;
+    }
 }
 
 // ── Overpass fallback ─────────────────────────────────
