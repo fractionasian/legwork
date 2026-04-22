@@ -27,7 +27,10 @@ var state = {
     midpointMarkers: [],  // draggable midpoints for inserting waypoints
     useMiles: false,
     lastElevationData: [], // cached elevation results for GPX export
+    poiMarkers: [],
+    poisVisible: false,
 };
+try { state.poisVisible = localStorage.getItem("lw:showPois") === "1"; } catch (e) {}
 
 // ── Map init ───────────────────────────────────────────
 function initMap() {
@@ -56,6 +59,7 @@ function initMap() {
     state.map.on("moveend", function () {
         clearTimeout(_viewportTimer);
         _viewportTimer = setTimeout(loadTilesInViewport, 500);
+        if (state.poisVisible) debouncedRefreshPois();
     });
 }
 
@@ -478,6 +482,65 @@ var _elevationTimer = null;
 function debouncedFetchElevation(coords) {
     clearTimeout(_elevationTimer);
     _elevationTimer = setTimeout(function () { fetchRouteElevation(coords); }, 400);
+}
+
+// ── Points of interest: public toilets + drinking water ──
+function poiIcon(amenity) {
+    var glyph = amenity === "toilets" ? "🚻" : "💧";
+    return L.divIcon({
+        html: '<div class="poi-marker poi-' + amenity + '">' + glyph + '</div>',
+        className: "",
+        iconSize: [22, 22],
+        iconAnchor: [11, 11],
+    });
+}
+
+function poiPopupHtml(p) {
+    var heading = p.amenity === "toilets" ? "Public toilet" : "Drinking water";
+    var parts = [];
+    if (p.name) parts.push("<strong>" + escapeText(p.name) + "</strong>");
+    parts.push(heading);
+    var tags = [];
+    if (p.access && p.access !== "yes") tags.push("Access: " + p.access);
+    if (p.fee === "yes") tags.push("Fee applies");
+    else if (p.fee === "no") tags.push("Free");
+    if (p.wheelchair === "yes") tags.push("♿ Wheelchair accessible");
+    else if (p.wheelchair === "limited") tags.push("♿ Limited access");
+    if (p.changing_table) tags.push("Changing table");
+    if (p.opening_hours) tags.push(escapeText(p.opening_hours));
+    if (tags.length) parts.push('<span style="color:#808390;font-size:12px;">' + tags.join(" · ") + '</span>');
+    return parts.join("<br>");
+}
+
+function escapeText(s) {
+    var d = document.createElement("div");
+    d.textContent = s || "";
+    return d.innerHTML;
+}
+
+async function refreshPois() {
+    for (var i = 0; i < state.poiMarkers.length; i++) state.map.removeLayer(state.poiMarkers[i]);
+    state.poiMarkers = [];
+    if (!state.poisVisible || !state.map) return;
+    var c = state.map.getCenter();
+    var pois = await loadPois(c.lat, c.lng);
+    if (!pois || !state.poisVisible) return; // user may have toggled off mid-fetch
+    for (var i = 0; i < pois.length; i++) {
+        var p = pois[i];
+        var marker = L.marker([p.lat, p.lon], {
+            icon: poiIcon(p.amenity),
+            zIndexOffset: -150,
+        });
+        marker.bindPopup(poiPopupHtml(p), { maxWidth: 240 });
+        marker.addTo(state.map);
+        state.poiMarkers.push(marker);
+    }
+}
+
+var _poiTimer = null;
+function debouncedRefreshPois() {
+    clearTimeout(_poiTimer);
+    _poiTimer = setTimeout(refreshPois, 800);
 }
 
 // ── Midpoint markers (drag to insert waypoint) ─────────
@@ -1162,6 +1225,21 @@ document.getElementById("unit-toggle").addEventListener("click", function () {
     document.getElementById("unit-label").textContent = state.useMiles ? "mi" : "km";
     updateDistance();
 });
+
+// ── POI toggle (in menu) ──────────────────────────────
+function syncPoiLabel() {
+    var label = document.getElementById("pois-label");
+    if (label) label.textContent = state.poisVisible ? "On" : "Off";
+}
+syncPoiLabel();
+document.getElementById("pois-toggle").addEventListener("click", function () {
+    state.poisVisible = !state.poisVisible;
+    try { localStorage.setItem("lw:showPois", state.poisVisible ? "1" : "0"); } catch (e) {}
+    syncPoiLabel();
+    refreshPois();
+});
+// If the user left POIs on in a previous session, paint them once the map is ready.
+if (state.poisVisible) setTimeout(refreshPois, 1200);
 
 // ── Auto-detect miles for US/UK/MM/LR ─────────────────
 var MILES_COUNTRIES = ["US", "GB", "MM", "LR"];
