@@ -1,0 +1,67 @@
+name: Bump Service Worker Cache
+
+# Runs on every push to main that touches a shell file. Rewrites CACHE_NAME in
+# sw.js to a short hash of (index.html + app.js + routing.js + storage.js +
+# tiles.js + style.css), committing the change back. Self-pushes don't re-run
+# because the filter below excludes the bot actor.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'index.html'
+      - 'app.js'
+      - 'routing.js'
+      - 'storage.js'
+      - 'tiles.js'
+      - 'style.css'
+      - 'sw.js'
+
+permissions:
+  contents: write
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    if: github.actor != 'github-actions[bot]'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+
+      - name: Compute new cache name
+        id: hash
+        run: |
+          HASH=$(cat index.html app.js routing.js storage.js tiles.js style.css \
+            | sha256sum | cut -c1-8)
+          echo "hash=$HASH" >> "$GITHUB_OUTPUT"
+          echo "Computed cache hash: $HASH"
+
+      - name: Update sw.js if hash changed
+        id: update
+        env:
+          NEW_HASH: ${{ steps.hash.outputs.hash }}
+        run: |
+          NEW="legwork-${NEW_HASH}"
+          CURRENT=$(grep -oE 'var CACHE_NAME = "[^"]+";' sw.js | sed -E 's/.*"([^"]+)".*/\1/')
+          echo "Current: $CURRENT"
+          echo "New:     $NEW"
+          if [ "$CURRENT" = "$NEW" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "No change needed."
+          else
+            sed -i -E "s/var CACHE_NAME = \"[^\"]+\";/var CACHE_NAME = \"$NEW\";/" sw.js
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Commit bump
+        if: steps.update.outputs.changed == 'true'
+        env:
+          NEW_HASH: ${{ steps.hash.outputs.hash }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add sw.js
+          git commit -m "chore: bump sw CACHE_NAME to legwork-${NEW_HASH}"
+          git push
