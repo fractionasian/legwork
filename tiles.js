@@ -195,14 +195,18 @@ var POIS_TTL = 7 * 24 * 3600 * 1000;
 
 async function loadPois(lat, lon) {
     var radius = 10000;
-    var key = "pois:" + lat.toFixed(2) + ":" + lon.toFixed(2);
+    // Cache key bumped to v2 when we started including ways + relations.
+    var key = "pois2:" + lat.toFixed(2) + ":" + lon.toFixed(2);
     var cached = await cacheGet(key, POIS_TTL);
     if (cached) return cached;
 
+    // nwr = node/way/relation. Many toilet blocks are tagged on a building
+    // polygon (way) rather than a single point. `out center` returns a
+    // computed centroid for non-node elements so we get a lat/lon either way.
     var query = '[out:json][timeout:25];(' +
-        'node["amenity"="toilets"](around:' + radius + ',' + lat + ',' + lon + ');' +
-        'node["amenity"="drinking_water"](around:' + radius + ',' + lat + ',' + lon + ');' +
-        ');out body;';
+        'nwr["amenity"="toilets"](around:' + radius + ',' + lat + ',' + lon + ');' +
+        'nwr["amenity"="drinking_water"](around:' + radius + ',' + lat + ',' + lon + ');' +
+        ');out center;';
 
     try {
         var resp = await fetchWithTimeout("https://overpass-api.de/api/interpreter", {
@@ -215,11 +219,17 @@ async function loadPois(lat, lon) {
         var pois = [];
         for (var i = 0; i < (raw.elements || []).length; i++) {
             var el = raw.elements[i];
-            if (el.type !== "node" || !el.tags || !el.tags.amenity) continue;
+            if (!el.tags || !el.tags.amenity) continue;
+            // Nodes carry lat/lon directly; ways + relations get a computed
+            // centroid in el.center thanks to `out center`.
+            var plat, plon;
+            if (el.type === "node") { plat = el.lat; plon = el.lon; }
+            else if (el.center) { plat = el.center.lat; plon = el.center.lon; }
+            else continue;
             pois.push({
-                id: el.id,
-                lat: el.lat,
-                lon: el.lon,
+                id: el.type[0] + el.id, // prefix with type so node/way IDs don't collide
+                lat: plat,
+                lon: plon,
                 amenity: el.tags.amenity,
                 name: el.tags.name || "",
                 access: el.tags["toilets:access"] || el.tags.access || "",
