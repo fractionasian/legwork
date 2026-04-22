@@ -116,6 +116,25 @@
         </div>
     </div>
 
+    <script>
+        // Wire the dismiss button immediately so cold-start PWA taps register
+        // before app.js has parsed. app.js attaches its own handler on top —
+        // both are idempotent.
+        (function () {
+            var btn = document.getElementById("welcome-dismiss");
+            var modal = document.getElementById("welcome-modal");
+            if (!btn || !modal) return;
+            function dismiss() {
+                modal.classList.add("hidden");
+                try { localStorage.setItem("lw:welcomed", "1"); } catch (e) {}
+            }
+            btn.addEventListener("click", dismiss);
+            modal.addEventListener("click", function (e) {
+                if (e.target === modal) dismiss();
+            });
+        })();
+    </script>
+
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
     <script src="https://cdn.jsdelivr.net/npm/leaflet-hotline@0.4.0/dist/leaflet.hotline.min.js" crossorigin=""></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4" crossorigin=""></script>

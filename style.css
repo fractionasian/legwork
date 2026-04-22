@@ -570,9 +570,10 @@ button.menu-item:disabled {
 /* ── Elevation panel (docked to bottom of map) ───── */
 .elevation-panel {
     position: absolute;
-    /* Lift above the iPhone home-indicator / gesture zone so the collapse
-       toggle isn't at the screen edge in standalone PWA mode. */
-    bottom: env(safe-area-inset-bottom, 0px);
+    /* Background stretches to the bottom edge; safe-area padding on the
+       last visible child pushes interactive content above the iPhone
+       home-indicator gesture zone. */
+    bottom: 0;
     left: 0;
     right: 0;
     z-index: 800;
@@ -643,15 +644,23 @@ button.menu-item:disabled {
 }
 
 #elevation-container {
+    /* Height is the chart's drawable area; extra padding-bottom stretches the
+       panel background down across the safe-area without squeezing the chart. */
     height: 100px;
     background: rgba(26, 29, 40, 0.92);
     backdrop-filter: blur(8px);
-    padding: 2px 10px 6px;
+    padding: 2px 10px calc(6px + env(safe-area-inset-bottom, 0px));
     display: none;
 }
 
 .elevation-panel.collapsed #elevation-container {
     display: none !important;
+}
+
+/* When collapsed, the stats strip is the last visible child — extend its
+   background to the bottom edge while keeping content above the gesture zone. */
+.elevation-panel.collapsed .elevation-stats {
+    padding-bottom: calc(6px + env(safe-area-inset-bottom, 0px));
 }
 
 #elevation-canvas {
