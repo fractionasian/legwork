@@ -379,7 +379,23 @@ async function updateRoute() {
     var gen = ++_routeGen;
     clearRouteLayers(true); // keep waypoints; we're redrawing the geometry between them
 
-    if (state.waypoints.length < 2) { updateDistance(); updateElevation([]); return; }
+    if (state.waypoints.length < 2) {
+        updateDistance();
+        updateElevation([]);
+        // First-run nudge: one marker on the map, no route yet. Only show if no
+        // louder banner is up (loading / error), and clear when we dismiss later.
+        var bannerEl = document.getElementById("info-banner");
+        if (state.waypoints.length === 1 && (!bannerEl.dataset.type || bannerEl.dataset.type === "hint")) {
+            showBanner("Tap the map to add a destination", "hint");
+        } else if (bannerEl.dataset.type === "hint") {
+            showBanner("");
+        }
+        return;
+    }
+
+    // Clear the single-waypoint hint once the user has added a second point.
+    var bannerEl = document.getElementById("info-banner");
+    if (bannerEl.dataset.type === "hint") showBanner("");
 
     var allRouteCoords = [];
     var routeOk = true;
@@ -435,7 +451,7 @@ async function updateRoute() {
         }
     }
 
-    if (!routeOk) showBanner("Some segments have no footpath connection (shown in red)");
+    if (!routeOk) showBanner("Red segments have no footpath connection — try dragging a waypoint onto a nearby road");
     else showBanner("");
 
     addMidpointMarkers();
@@ -893,7 +909,7 @@ function updateReverseVisibility() {
 document.getElementById("mode-btn").addEventListener("click", function () {
     state.mode = state.mode === "loop" ? "outback" : state.mode === "outback" ? "oneway" : "loop";
     setModeButton();
-    this.setAttribute("aria-label", "Route mode: " + state.mode);
+    this.setAttribute("aria-label", "Route mode: " + state.mode + " (tap to cycle)");
     updateReverseVisibility();
     updateRoute();
 });
@@ -1040,6 +1056,13 @@ document.getElementById("menu-btn").addEventListener("click", openMenu);
 document.getElementById("menu-close").addEventListener("click", closeMenu);
 document.getElementById("menu-overlay").addEventListener("click", closeMenu);
 
+// Re-open the welcome modal from the side menu for users who've dismissed it.
+var tipsBtn = document.getElementById("show-tips-btn");
+if (tipsBtn) tipsBtn.addEventListener("click", function () {
+    closeMenu();
+    openWelcomeModal();
+});
+
 // ── Unit toggle (in menu) ─────────────────────────────
 document.getElementById("unit-toggle").addEventListener("click", function () {
     state.useMiles = !state.useMiles;
@@ -1145,31 +1168,40 @@ function loadFromHash() {
 }
 
 // ── Welcome modal ──────────────────────────────────────
-function showWelcome() {
+// Wired once at boot; openWelcomeModal() can be re-invoked from the Tips
+// menu item and the dismiss listeners are already in place.
+function wireWelcomeModal() {
     var modal = document.getElementById("welcome-modal");
-    try {
-        if (localStorage.getItem("lw:welcomed")) {
-            modal.classList.add("hidden");
-            return;
-        }
-    } catch (e) { /* blocked storage — show modal every time */ }
-    // Only reached for first-time users
     var isMacDesktop = /Mac/.test(navigator.platform) && navigator.maxTouchPoints < 2;
     var undoKey = document.getElementById("undo-key");
     if (undoKey && isMacDesktop) undoKey.textContent = "\u2318";
-    function onEsc(e) {
-        if (e.key === "Escape" && !modal.classList.contains("hidden")) dismiss();
-    }
+
     function dismiss() {
         modal.classList.add("hidden");
-        document.removeEventListener("keydown", onEsc);
         try { localStorage.setItem("lw:welcomed", "1"); } catch (e) { /* blocked storage */ }
     }
     document.getElementById("welcome-dismiss").addEventListener("click", dismiss);
     modal.addEventListener("click", function (e) {
         if (e.target === modal) dismiss();
     });
-    document.addEventListener("keydown", onEsc);
+    document.addEventListener("keydown", function (e) {
+        if (e.key === "Escape" && !modal.classList.contains("hidden")) dismiss();
+    });
+}
+
+function openWelcomeModal() {
+    document.getElementById("welcome-modal").classList.remove("hidden");
+}
+
+function showWelcome() {
+    wireWelcomeModal();
+    try {
+        if (localStorage.getItem("lw:welcomed")) {
+            document.getElementById("welcome-modal").classList.add("hidden");
+            return;
+        }
+    } catch (e) { /* blocked storage — show modal every time */ }
+    // First-time user: modal is already visible by default.
 }
 
 // ── Saved Routes ──────────────────────────────────────
