@@ -204,6 +204,55 @@
         assert(ROAD_WEIGHT.trunk === 2.5);
     });
 
+    // ── Runner-friendly preferences (P1–P5) ───────────
+    test("wayPref P1: named footway is cheaper", function () {
+        assert(wayPrefMultiplier("footway", "", "Coastal Path") === 0.85);
+    });
+    test("wayPref P1: named residential is NOT cheaper", function () {
+        assert(wayPrefMultiplier("residential", "", "Baker St") === 1);
+    });
+    test("wayPref P5: soft surface on path", function () {
+        assert(wayPrefMultiplier("path", "gravel", "") === 0.95);
+    });
+    test("wayPref: named + soft stacks multiplicatively", function () {
+        assert(near(wayPrefMultiplier("path", "dirt", "Bibbulmun"), 0.85 * 0.95));
+    });
+    test("nodePref P4: barrier is strongly penalised", function () {
+        assert(nodePrefMultiplier({ barrier: true }) === 1.25);
+    });
+    test("nodePref P2: bare traffic signal is penalised", function () {
+        assert(nodePrefMultiplier({ trafficSignal: true }) === 1.15);
+    });
+    test("nodePref P3: marked crossing wins over traffic-signal penalty", function () {
+        assert(nodePrefMultiplier({ trafficSignal: true, crossingMarked: true }) === 0.9);
+    });
+    test("nodePref: unmarked crossing neutral", function () {
+        assert(nodePrefMultiplier({ crossingUnmarked: true }) === 1);
+    });
+    test("nodeAttrsFromTags: barrier=gate", function () {
+        var a = nodeAttrsFromTags({ barrier: "gate" });
+        assert(a && a.barrier === true);
+    });
+    test("nodeAttrsFromTags: zebra crossing is marked", function () {
+        var a = nodeAttrsFromTags({ highway: "crossing", crossing: "zebra" });
+        assert(a && a.crossingMarked === true);
+    });
+    test("nodeAttrsFromTags: plain node returns null", function () {
+        assert(nodeAttrsFromTags({ name: "Fred" }) === null);
+    });
+    test("osmToGeoJSON: threads node attrs into sidecar", function () {
+        var gj = osmToGeoJSON({
+            elements: [
+                { type: "node", id: 1, lat: -31.95, lon: 115.86, tags: { barrier: "gate" } },
+                { type: "node", id: 2, lat: -31.951, lon: 115.861 },
+                { type: "way", id: 100, nodes: [1, 2], tags: { highway: "footway" } },
+            ],
+        });
+        assert(gj.nodeAttrs);
+        var key = "-31.950000,115.860000";
+        assert(gj.nodeAttrs[key] && gj.nodeAttrs[key].barrier === true);
+    });
+
     // ── Summary ───────────────────────────────────────
     var summary = document.getElementById("summary");
     if (failed === 0) {

@@ -23,6 +23,32 @@ var ROAD_WEIGHT = {
     trunk: 2.5, trunk_link: 2.5,
 };
 
+// Runner-friendly preference nudges — see docs/design/route-preferences.md.
+// Combines multiplicatively with ROAD_WEIGHT. Default-on, no UI.
+var PATHLIKE_HIGHWAYS = { footway: 1, path: 1, cycleway: 1, pedestrian: 1, track: 1 };
+var SOFT_SURFACES = { ground: 1, dirt: 1, grass: 1, compacted: 1, gravel: 1, unpaved: 1, fine_gravel: 1, earth: 1 };
+
+function wayPrefMultiplier(highway, surface, name) {
+    var m = 1;
+    // P1 — named trail on a foot/path-class way
+    if (name && PATHLIKE_HIGHWAYS[highway]) m *= 0.85;
+    // P5 — soft surface on a path-class way
+    if (PATHLIKE_HIGHWAYS[highway] && SOFT_SURFACES[surface]) m *= 0.95;
+    return m;
+}
+
+function nodePrefMultiplier(attrs) {
+    if (!attrs) return 1;
+    // P4 — barrier on the path: strongest penalty
+    if (attrs.barrier) return 1.25;
+    // P3 — marked crossing (zebra/signals/marked) favoured
+    if (attrs.crossingMarked) return 0.9;
+    // P2 — bare traffic signal (not paired with a pedestrian crossing)
+    if (attrs.trafficSignal) return 1.15;
+    // Unmarked crossings are neutral — no nudge.
+    return 1;
+}
+
 function nodeKey(lat, lon) {
     return lat.toFixed(6) + "," + lon.toFixed(6);
 }
@@ -141,14 +167,23 @@ function closestNode(graph, lat, lon) {
 
 // ── OSM / tile format converters ──────────────────────
 function osmToGeoJSON(data) {
-    // Overpass returns nodes before ways (out body; >; out skel qt;), so one
-    // pass is enough.
-    var nodes = {}, ways = [];
+    // Overpass returns nodes before ways (out body; >; out body qt;), so one
+    // pass is enough. When the query emits `out body qt` for nodes (vs skel),
+    // node tags come through — we extract the ones that influence routing
+    // preferences (barriers, crossings, traffic signals) into a keyed sidecar.
+    var nodes = {}, nodeAttrs = {}, ways = [];
     var elements = data.elements || [];
     for (var i = 0; i < elements.length; i++) {
         var el = elements[i];
-        if (el.type === "node") { nodes[el.id] = [el.lon, el.lat]; }
-        else if (el.type === "way") { ways.push(el); }
+        if (el.type === "node") {
+            nodes[el.id] = [el.lon, el.lat];
+            if (el.tags) {
+                var a = nodeAttrsFromTags(el.tags);
+                if (a) nodeAttrs[nodeKey(el.lat, el.lon)] = a;
+            }
+        } else if (el.type === "way") {
+            ways.push(el);
+        }
     }
     var features = [];
     for (var w = 0; w < ways.length; w++) {
@@ -166,7 +201,28 @@ function osmToGeoJSON(data) {
             geometry: { type: "LineString", coordinates: coords },
         });
     }
-    return { type: "FeatureCollection", features: features };
+    return { type: "FeatureCollection", features: features, nodeAttrs: nodeAttrs };
+}
+
+// Compact per-node routing-relevant flags. Returns null if no flags apply
+// (keeps the sidecar small for the 95% of nodes that don't matter).
+function nodeAttrsFromTags(tags) {
+    var attrs = {};
+    var any = false;
+    if (tags.barrier === "gate" || tags.barrier === "stile" ||
+        tags.barrier === "kissing_gate" || tags.barrier === "turnstile") {
+        attrs.barrier = true; any = true;
+    }
+    if (tags.highway === "traffic_signals") { attrs.trafficSignal = true; any = true; }
+    if (tags.highway === "crossing" || tags["footway"] === "crossing") {
+        var c = tags.crossing || "";
+        if (c === "traffic_signals" || c === "marked" || c === "zebra" || c === "uncontrolled") {
+            attrs.crossingMarked = true; any = true;
+        } else {
+            attrs.crossingUnmarked = true; any = true;
+        }
+    }
+    return any ? attrs : null;
 }
 
 function compactToGeoJSON(compact) {
