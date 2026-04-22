@@ -612,15 +612,27 @@ button.menu-item:disabled {
 
 .elevation-toggle {
     flex-shrink: 0;
+    position: relative;
     background: transparent;
     border: none;
     color: #808390;
     font-size: 14px;
     line-height: 1;
-    padding: 2px 6px;
+    padding: 6px 10px;
+    margin: -6px 0;
     border-radius: 4px;
     cursor: pointer;
     transition: background 0.15s, color 0.15s;
+    /* Expand the touch target above the visible pill so the collapsed strip
+       has a finger-sized hitbox that clears the Leaflet attribution row. */
+    min-height: 32px;
+    min-width: 40px;
+}
+
+.elevation-toggle::before {
+    content: "";
+    position: absolute;
+    inset: -10px -8px -10px -8px;
 }
 
 .elevation-toggle:hover {
