@@ -1047,7 +1047,15 @@ document.getElementById("dm-export").addEventListener("click", function (e) {
 document.getElementById("dm-share").addEventListener("click", function (e) {
     e.stopPropagation(); closeDistMenu();
     var url = window.location.href;
-    function fallback() {
+
+    // Compose a plain-text summary for share sheets: "5.2 km loop on Legwork".
+    function shareText() {
+        var modeWord = { loop: "loop", outback: "out & back", oneway: "one-way" }[state.mode] || "route";
+        var dist = document.getElementById("distance-display").textContent || "";
+        return (dist ? dist + " " : "") + modeWord + " on Legwork";
+    }
+
+    function inlineInputFallback() {
         // Put the URL in a read-only input appended to the banner so the user
         // can triple-tap/select-all and copy. No blocking prompt().
         var banner = document.getElementById("info-banner");
@@ -1070,14 +1078,31 @@ document.getElementById("dm-share").addEventListener("click", function (e) {
             if (banner.dataset.type === "share") showBanner("");
         }, 8000);
     }
-    if (navigator.clipboard) {
-        navigator.clipboard.writeText(url).then(function () {
-            showBanner("Link copied!");
-            setTimeout(function () { showBanner(""); }, 2000);
-        }).catch(fallback);
-    } else {
-        fallback();
+
+    function clipboardFallback() {
+        if (navigator.clipboard) {
+            navigator.clipboard.writeText(url).then(function () {
+                showBanner("Link copied!");
+                setTimeout(function () { showBanner(""); }, 2000);
+            }).catch(inlineInputFallback);
+        } else {
+            inlineInputFallback();
+        }
     }
+
+    // Native share sheet (iOS/Android): opens iMessage/WhatsApp/etc. directly.
+    // AbortError is thrown when the user dismisses the sheet — silent no-op.
+    if (navigator.share) {
+        var payload = { title: "Legwork route", text: shareText(), url: url };
+        if (!navigator.canShare || navigator.canShare(payload)) {
+            navigator.share(payload).catch(function (err) {
+                if (err && err.name === "AbortError") return;
+                clipboardFallback();
+            });
+            return;
+        }
+    }
+    clipboardFallback();
 });
 document.addEventListener("keydown", function (e) {
     if ((e.ctrlKey || e.metaKey) && e.key === "z") {
