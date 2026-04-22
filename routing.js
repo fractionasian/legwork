@@ -225,18 +225,37 @@ function nodeAttrsFromTags(tags) {
     return any ? attrs : null;
 }
 
-function compactToGeoJSON(compact) {
-    // Convert [id, highway, name, [[lon,lat],...]] entries to a FeatureCollection.
+function compactToGeoJSON(data) {
+    // Accepts either format emitted by build-tiles.js:
+    //   v1 (legacy): bare Array of [id, highway, name, coords]
+    //   v2:          { v:2, features: [[id, highway, name, coords, surface?], ...], nodeAttrs: {...} }
+    // Returns a FeatureCollection plus an optional `nodeAttrs` sidecar (same
+    // shape as osmToGeoJSON) so applyPaths can merge it into state.nodeAttrs.
+    var compact, nodeAttrs;
+    if (Array.isArray(data)) {
+        compact = data;
+        nodeAttrs = null;
+    } else {
+        compact = data.features || [];
+        nodeAttrs = data.nodeAttrs || null;
+    }
     var features = [];
     for (var i = 0; i < compact.length; i++) {
         var c = compact[i];
         features.push({
             type: "Feature",
-            properties: { id: c[0], highway: c[1], surface: "", name: c[2] },
+            properties: {
+                id: c[0],
+                highway: c[1],
+                name: c[2] || "",
+                surface: c[4] || "", // v2 adds surface as optional 5th element; v1 leaves it empty
+            },
             geometry: { type: "LineString", coordinates: c[3] },
         });
     }
-    return { type: "FeatureCollection", features: features };
+    var fc = { type: "FeatureCollection", features: features };
+    if (nodeAttrs) fc.nodeAttrs = nodeAttrs;
+    return fc;
 }
 
 // ── Route sampling + elevation smoothing ──────────────

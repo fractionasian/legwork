@@ -58,11 +58,46 @@ async function fetchJSON(url, opts, retries = 3) {
     throw new Error(`fetchJSON: retry loop exhausted for ${url}`);
 }
 
+// Extract routing-relevant flags from an OSM node's tags. Kept in sync with
+// the client-side nodeAttrsFromTags() in routing.js so keys stay stable.
+function nodeAttrsFromTags(tags) {
+    const attrs = {};
+    let any = false;
+    if (tags.barrier === "gate" || tags.barrier === "stile" ||
+        tags.barrier === "kissing_gate" || tags.barrier === "turnstile") {
+        attrs.barrier = true; any = true;
+    }
+    if (tags.highway === "traffic_signals") { attrs.trafficSignal = true; any = true; }
+    if (tags.highway === "crossing" || tags.footway === "crossing") {
+        const c = tags.crossing || "";
+        if (c === "traffic_signals" || c === "marked" || c === "zebra" || c === "uncontrolled") {
+            attrs.crossingMarked = true; any = true;
+        } else {
+            attrs.crossingUnmarked = true; any = true;
+        }
+    }
+    return any ? attrs : null;
+}
+
+// Produce the same nodeKey() string that routing.js will compute for a way
+// coord rounded to 5dp. Way coords in tiles are truncated to 5dp for bytes,
+// so we must key node attrs the same way.
+function nodeKey5dp(lat, lon) {
+    return parseFloat(lat.toFixed(5)).toFixed(6) + "," + parseFloat(lon.toFixed(5)).toFixed(6);
+}
+
 function osmToGeoJSON(data) {
     const nodes = {};
+    const nodeAttrs = {};
     const features = [];
     for (const el of data.elements || []) {
-        if (el.type === "node") nodes[el.id] = [el.lon, el.lat];
+        if (el.type === "node") {
+            nodes[el.id] = [el.lon, el.lat];
+            if (el.tags) {
+                const a = nodeAttrsFromTags(el.tags);
+                if (a) nodeAttrs[nodeKey5dp(el.lat, el.lon)] = a;
+            }
+        }
     }
     for (const el of data.elements || []) {
         if (el.type !== "way") continue;
@@ -75,7 +110,7 @@ function osmToGeoJSON(data) {
             geometry: { type: "LineString", coordinates: coords },
         });
     }
-    return { type: "FeatureCollection", features };
+    return { featureCollection: { type: "FeatureCollection", features }, nodeAttrs };
 }
 
 function featureCentroid(feature) {
@@ -87,7 +122,9 @@ function featureCentroid(feature) {
 async function queryOverpass(bounds) {
     const [south, west, north, east] = bounds;
     const regex = `^(${HIGHWAYS.join("|")})$`;
-    const query = `[out:json][timeout:120];\n(way["highway"~"${regex}"](${south},${west},${north},${east}););\nout body;\n>;\nout skel qt;`;
+    // `out body qt` on the node recurse (vs `out skel qt`) brings back node
+    // tags, which we mine for barriers, crossings, and traffic signals.
+    const query = `[out:json][timeout:120];\n(way["highway"~"${regex}"](${south},${west},${north},${east}););\nout body;\n>;\nout body qt;`;
 
     console.log(`  Querying Overpass (${(north-south).toFixed(2)}° x ${(east-west).toFixed(2)}°)...`);
 
@@ -174,10 +211,10 @@ async function buildCity(city, dataDir, options) {
     const { skipGeocode, suburbCache } = options;
     console.log(`\nBuilding ${city.name}...`);
 
-    const geojson = await queryOverpass(city.bounds);
-    console.log(`  ${geojson.features.length} features`);
+    const { featureCollection, nodeAttrs } = await queryOverpass(city.bounds);
+    console.log(`  ${featureCollection.features.length} features, ${Object.keys(nodeAttrs).length} tagged nodes`);
 
-    const { rows, cols, tiles } = splitIntoTiles(geojson, city.bounds);
+    const { rows, cols, tiles } = splitIntoTiles(featureCollection, city.bounds);
     console.log(`  Grid: ${rows}x${cols} = ${Object.keys(tiles).length} non-empty tiles`);
 
     const tileDir = path.join(dataDir, "tiles", city.id);
@@ -188,18 +225,41 @@ async function buildCity(city, dataDir, options) {
     const tileMeta = [];
     let geocodeGate = Promise.resolve();
     for (const [key, tile] of Object.entries(tiles)) {
-        // Compact format: [id, highway, name, [[lon5dp,lat5dp],...]] per feature
-        const compact = tile.features.map(f => [
-            f.properties.id,
-            f.properties.highway,
-            f.properties.name || "",
-            f.geometry.coordinates.map(c => [
-                parseFloat(c[0].toFixed(5)),
-                parseFloat(c[1].toFixed(5))
-            ])
-        ]);
+        // v2 compact format per feature: [id, highway, name, coords, surface?]
+        // (surface omitted when empty to save bytes)
+        const features = tile.features.map(f => {
+            const base = [
+                f.properties.id,
+                f.properties.highway,
+                f.properties.name || "",
+                f.geometry.coordinates.map(c => [
+                    parseFloat(c[0].toFixed(5)),
+                    parseFloat(c[1].toFixed(5))
+                ]),
+            ];
+            const surface = f.properties.surface || "";
+            if (surface) base.push(surface);
+            return base;
+        });
+
+        // Per-tile nodeAttrs: filter to nodes whose coords fall within this
+        // tile's bounds. Keys are already nodeKey5dp strings from osmToGeoJSON.
+        const tileNodeAttrs = {};
+        const [tSouth, tWest, tNorth, tEast] = tile.bounds;
+        for (const [nk, attrs] of Object.entries(nodeAttrs)) {
+            const comma = nk.indexOf(",");
+            const lat = parseFloat(nk.substring(0, comma));
+            const lon = parseFloat(nk.substring(comma + 1));
+            if (lat >= tSouth && lat <= tNorth && lon >= tWest && lon <= tEast) {
+                tileNodeAttrs[nk] = attrs;
+            }
+        }
+
+        const payload = { v: 2, features };
+        if (Object.keys(tileNodeAttrs).length > 0) payload.nodeAttrs = tileNodeAttrs;
+
         const filePath = path.join(tileDir, `${key}.json`);
-        fs.writeFileSync(filePath, JSON.stringify(compact));
+        fs.writeFileSync(filePath, JSON.stringify(payload));
 
         const cached = suburbCache.get(boundsKey(tile.bounds));
         let suburbs;

@@ -83,7 +83,8 @@ async function loadTilesFromList(cityId, manifestVersion, tiles, opts) {
             if (!resp.ok) throw new Error("HTTP " + resp.status);
             return resp.json();
         }).then(function (data) {
-            var geojson = Array.isArray(data) ? compactToGeoJSON(data) : data;
+            // compactToGeoJSON now accepts both v1 (Array) and v2 ({v,features,nodeAttrs}) tile formats.
+            var geojson = compactToGeoJSON(data);
             applyPaths(geojson, { skipRender: true });
             var cacheKey = "tile:" + cityId + ":" + tile.file + ":" + manifestVersion;
             cacheSet(cacheKey, geojson);
