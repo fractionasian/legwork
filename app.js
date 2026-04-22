@@ -1,216 +1,10 @@
 // ── Legwork — Static Running Route Planner ─────────────
 // All API calls go directly to free external services.
 // No backend required. Runs on GitHub Pages.
-
-// ── IndexedDB Cache ───────────────────────────────────
-var DB_NAME = "legwork";
-var DB_VERSION = 2;
-var PATHS_TTL = 30 * 24 * 3600 * 1000; // 30 days
-
-var _db = null;
-function openDB() {
-    if (_db) return Promise.resolve(_db);
-    return new Promise(function (resolve, reject) {
-        var req = indexedDB.open(DB_NAME, DB_VERSION);
-        req.onupgradeneeded = function (e) {
-            var db = e.target.result;
-            if (!db.objectStoreNames.contains("pathCache")) db.createObjectStore("pathCache");
-            if (!db.objectStoreNames.contains("elevCache")) db.createObjectStore("elevCache");
-            if (!db.objectStoreNames.contains("savedRoutes")) {
-                db.createObjectStore("savedRoutes", { keyPath: "id", autoIncrement: true });
-            }
-            if (db.objectStoreNames.contains("savedAreas")) db.deleteObjectStore("savedAreas");
-        };
-        req.onsuccess = function () { _db = req.result; resolve(_db); };
-        req.onerror = function () { reject(req.error); };
-    });
-}
-
-async function cacheGet(key, ttlMs) {
-    try {
-        var db = await openDB();
-        var store = key.indexOf("elev2:") === 0 ? "elevCache" : "pathCache";
-        return new Promise(function (resolve) {
-            var tx = db.transaction(store, "readonly");
-            var req = tx.objectStore(store).get(key);
-            req.onsuccess = function () {
-                var entry = req.result;
-                if (!entry) return resolve(null);
-                if (ttlMs && Date.now() - entry.ts > ttlMs) return resolve(null);
-                resolve(entry.v);
-            };
-            req.onerror = function () { resolve(null); };
-        });
-    } catch (e) { return null; }
-}
-
-async function cacheSet(key, value) {
-    try {
-        var db = await openDB();
-        var store = key.indexOf("elev2:") === 0 ? "elevCache" : "pathCache";
-        var tx = db.transaction(store, "readwrite");
-        tx.objectStore(store).put({ v: value, ts: Date.now() }, key);
-    } catch (e) { /* IndexedDB write failed — degrade silently */ }
-}
-
-// Migrate localStorage cache to IndexedDB on first run
-async function migrateLocalStorage() {
-    var migrated = false;
-    for (var i = localStorage.length - 1; i >= 0; i--) {
-        var k = localStorage.key(i);
-        if (!k || k.indexOf("lw:") !== 0) continue;
-        // Skip non-cache keys
-        if (k === "lw:savedRoute" || k === "lw:welcomed") continue;
-        try {
-            var raw = JSON.parse(localStorage.getItem(k));
-            var cacheKey = k.substring(3); // strip "lw:" prefix
-            await cacheSet(cacheKey, raw.v);
-            localStorage.removeItem(k);
-            migrated = true;
-        } catch (e) {}
-    }
-    if (migrated) console.log("Migrated localStorage cache to IndexedDB");
-}
-
-// ── Pre-cached tile loading ───────────────────────────
-var TILES_BASE = "./data/";
-var _manifest = null;
-
-async function fetchManifest() {
-    if (_manifest) return _manifest;
-    try {
-        var resp = await fetch(TILES_BASE + "manifest.json");
-        if (!resp.ok) return null;
-        _manifest = await resp.json();
-        return _manifest;
-    } catch (e) { return null; }
-}
-
-function findCityForLocation(manifest, lat, lon) {
-    if (!manifest || !manifest.cities) return null;
-    var ids = Object.keys(manifest.cities);
-    for (var i = 0; i < ids.length; i++) {
-        var city = manifest.cities[ids[i]];
-        var b = city.bounds; // [south, west, north, east]
-        if (lat >= b[0] && lat <= b[2] && lon >= b[1] && lon <= b[3]) {
-            return { id: ids[i], city: city };
-        }
-    }
-    return null;
-}
-
-function tilesInRadius(city, lat, lon, radiusKm) {
-    var radiusDeg = radiusKm / 111; // rough km-to-degrees
-    var selected = [];
-    for (var i = 0; i < city.tiles.length; i++) {
-        var t = city.tiles[i];
-        var b = t.bounds; // [south, west, north, east]
-        var tCenterLat = (b[0] + b[2]) / 2;
-        var tCenterLon = (b[1] + b[3]) / 2;
-        var dlat = tCenterLat - lat;
-        var dlon = (tCenterLon - lon) * Math.cos(lat * Math.PI / 180);
-        var dist = Math.sqrt(dlat * dlat + dlon * dlon);
-        if (dist < radiusDeg) selected.push(t);
-    }
-    return selected;
-}
-
-function compactToGeoJSON(compact) {
-    // Convert compact [id, highway, name, [[lon,lat],...]] to GeoJSON FeatureCollection
-    var features = [];
-    for (var i = 0; i < compact.length; i++) {
-        var c = compact[i];
-        features.push({
-            type: "Feature",
-            properties: { id: c[0], highway: c[1], surface: "", name: c[2] },
-            geometry: { type: "LineString", coordinates: c[3] },
-        });
-    }
-    return { type: "FeatureCollection", features: features };
-}
-
-async function loadTilesForLocation(lat, lon) {
-    var manifest = await fetchManifest();
-    if (!manifest) return false;
-
-    var match = findCityForLocation(manifest, lat, lon);
-    if (!match) return false;
-
-    var cityId = match.id;
-    var city = match.city;
-    var tiles = tilesInRadius(city, lat, lon, 5);
-    if (tiles.length === 0) return false;
-
-    // Check which tiles need fetching (not already in IndexedDB with current version)
-    var toFetch = [];
-    for (var i = 0; i < tiles.length; i++) {
-        var cacheKey = "tile:" + cityId + ":" + tiles[i].file + ":" + manifest.version;
-        var cached = await cacheGet(cacheKey);
-        if (cached) {
-            applyPaths(cached, { skipRender: true });
-        } else {
-            toFetch.push(tiles[i]);
-        }
-    }
-
-    if (toFetch.length === 0) {
-        console.log("All " + tiles.length + " tiles loaded from cache");
-        return true;
-    }
-
-    // Collect suburb names for banner
-    var suburbs = [];
-    for (var i = 0; i < toFetch.length; i++) {
-        for (var s = 0; s < toFetch[i].suburbs.length; s++) {
-            if (suburbs.indexOf(toFetch[i].suburbs[s]) === -1) suburbs.push(toFetch[i].suburbs[s]);
-        }
-    }
-    showBanner("Loading " + suburbs.join(", ") + "...", "loading");
-
-    // Fetch tiles in parallel
-    var loaded = 0;
-    var total = toFetch.length;
-    var promises = toFetch.map(function (tile) {
-        var url = TILES_BASE + "tiles/" + cityId + "/" + tile.file;
-        return fetch(url).then(function (resp) {
-            if (!resp.ok) throw new Error("HTTP " + resp.status);
-            return resp.json();
-        }).then(function (data) {
-            // Convert compact tile format to GeoJSON
-            var geojson = Array.isArray(data) ? compactToGeoJSON(data) : data;
-            applyPaths(geojson, { skipRender: true });
-            var cacheKey = "tile:" + cityId + ":" + tile.file + ":" + manifest.version;
-            cacheSet(cacheKey, geojson);
-            loaded++;
-            if (loaded < total) {
-                showBanner("Loaded " + loaded + "/" + total + " areas...", "loading");
-            }
-        }).catch(function (e) {
-            console.warn("Tile fetch failed: " + tile.file, e.message);
-        });
-    });
-
-    await Promise.all(promises);
-    showBanner("");
-    console.log("Loaded " + loaded + "/" + total + " tiles for " + city.name);
-    return true;
-}
-
-async function loadTilesOrPaths(lat, lon) {
-    var tilesLoaded = await loadTilesForLocation(lat, lon);
-    if (!tilesLoaded) await loadPaths(lat, lon);
-}
-
-function showCityRequest() {
-    // Show "Request your city" link in side menu when outside cached cities
-    var el = document.getElementById("city-request-link");
-    if (el) el.classList.remove("hidden");
-}
-
-function hideCityRequest() {
-    var el = document.getElementById("city-request-link");
-    if (el) el.classList.add("hidden");
-}
+//
+// Load order (see index.html): routing.js → storage.js → tiles.js → app.js.
+// Pure domain code lives in routing.js; IndexedDB wrappers in storage.js; tile
+// + Overpass loading and graph extension in tiles.js.
 
 // ── State ──────────────────────────────────────────────
 var state = {
@@ -234,161 +28,6 @@ var state = {
     useMiles: false,
     lastElevationData: [], // cached elevation results for GPX export
 };
-
-// ── Road-type weights (runner preference) ────────────
-// Multipliers penalise busy roads so Dijkstra favours footpaths/quiet streets.
-// Only affects path selection — displayed distance uses actual haversine.
-var ROAD_WEIGHT = {
-    footway: 1.0, path: 1.0, cycleway: 1.0, pedestrian: 1.0, crossing: 1.0,
-    living_street: 1.1, residential: 1.1,
-    service: 1.2, unclassified: 1.2,
-    tertiary: 1.3, tertiary_link: 1.3,
-    steps: 1.5,
-    secondary: 1.6, secondary_link: 1.6,
-    primary: 2.0, primary_link: 2.0,
-    trunk: 2.5, trunk_link: 2.5,
-};
-
-// ── Routing graph ──────────────────────────────────────
-function nodeKey(lat, lon) {
-    return lat.toFixed(6) + "," + lon.toFixed(6);
-}
-
-function buildGraph(geojson) {
-    var adj = {};
-    function addEdge(k1, lat1, lon1, k2, lat2, lon2) {
-        var d = haversine(lat1, lon1, lat2, lon2);
-        if (!adj[k1]) adj[k1] = [];
-        if (!adj[k2]) adj[k2] = [];
-        adj[k1].push({ key: k2, lat: lat2, lon: lon2, dist: d });
-        adj[k2].push({ key: k1, lat: lat1, lon: lon1, dist: d });
-    }
-    for (var f = 0; f < geojson.features.length; f++) {
-        var coords = geojson.features[f].geometry.coordinates;
-        for (var c = 1; c < coords.length; c++) {
-            addEdge(
-                nodeKey(coords[c-1][1], coords[c-1][0]), coords[c-1][1], coords[c-1][0],
-                nodeKey(coords[c][1], coords[c][0]), coords[c][1], coords[c][0]
-            );
-        }
-    }
-    return adj;
-}
-
-// ── Binary min-heap for Dijkstra ──────────────────────
-function MinHeap() {
-    this.data = [];
-}
-MinHeap.prototype.push = function (item) {
-    this.data.push(item);
-    var i = this.data.length - 1;
-    while (i > 0) {
-        var parent = (i - 1) >> 1;
-        if (this.data[parent].d <= this.data[i].d) break;
-        var tmp = this.data[parent]; this.data[parent] = this.data[i]; this.data[i] = tmp;
-        i = parent;
-    }
-};
-MinHeap.prototype.pop = function () {
-    var top = this.data[0];
-    var last = this.data.pop();
-    if (this.data.length > 0) {
-        this.data[0] = last;
-        var i = 0, len = this.data.length;
-        while (true) {
-            var left = 2 * i + 1, right = 2 * i + 2, smallest = i;
-            if (left < len && this.data[left].d < this.data[smallest].d) smallest = left;
-            if (right < len && this.data[right].d < this.data[smallest].d) smallest = right;
-            if (smallest === i) break;
-            var tmp = this.data[smallest]; this.data[smallest] = this.data[i]; this.data[i] = tmp;
-            i = smallest;
-        }
-    }
-    return top;
-};
-MinHeap.prototype.size = function () { return this.data.length; };
-
-function dijkstra(graph, startKey, endKey) {
-    if (!graph[startKey] || !graph[endKey]) return null;
-    if (startKey === endKey) return { dist: 0, path: [startKey] };
-    var dist = {}, prev = {}, visited = {};
-    var heap = new MinHeap();
-    dist[startKey] = 0;
-    heap.push({ key: startKey, d: 0 });
-    while (heap.size() > 0) {
-        var current = heap.pop();
-        if (visited[current.key]) continue;
-        visited[current.key] = true;
-        if (current.key === endKey) break;
-        var neighbors = graph[current.key] || [];
-        for (var n = 0; n < neighbors.length; n++) {
-            var nb = neighbors[n];
-            if (visited[nb.key]) continue;
-            var newDist = dist[current.key] + nb.dist;
-            if (dist[nb.key] === undefined || newDist < dist[nb.key]) {
-                dist[nb.key] = newDist;
-                prev[nb.key] = current.key;
-                heap.push({ key: nb.key, d: newDist });
-            }
-        }
-    }
-    if (dist[endKey] === undefined) return null;
-    var path = [];
-    var cur = endKey;
-    while (cur) { path.unshift(cur); cur = prev[cur]; }
-    return { dist: dist[endKey], path: path };
-}
-
-// ── Spatial grid for fast nearest-node lookup ─────────
-var GRID_CELL = 0.005; // ~500m cells
-var spatialGrid = {};
-
-function gridKey(lat, lon) {
-    return (Math.floor(lat / GRID_CELL) * GRID_CELL).toFixed(4) + ":" + (Math.floor(lon / GRID_CELL) * GRID_CELL).toFixed(4);
-}
-
-function gridInsert(nk, lat, lon) {
-    var gk = gridKey(lat, lon);
-    if (!spatialGrid[gk]) spatialGrid[gk] = [];
-    spatialGrid[gk].push({ key: nk, lat: lat, lon: lon });
-}
-
-function closestNode(graph, lat, lon) {
-    var bestKey = null, bestDist = Infinity;
-    var cLat = Math.floor(lat / GRID_CELL) * GRID_CELL;
-    var cLon = Math.floor(lon / GRID_CELL) * GRID_CELL;
-    // Search 3x3 neighborhood of grid cells
-    for (var dLat = -1; dLat <= 1; dLat++) {
-        for (var dLon = -1; dLon <= 1; dLon++) {
-            var gk = (cLat + dLat * GRID_CELL).toFixed(4) + ":" + (cLon + dLon * GRID_CELL).toFixed(4);
-            var bucket = spatialGrid[gk];
-            if (!bucket) continue;
-            for (var i = 0; i < bucket.length; i++) {
-                var d = haversine(lat, lon, bucket[i].lat, bucket[i].lon);
-                if (d < bestDist) { bestDist = d; bestKey = bucket[i].key; }
-            }
-        }
-    }
-    // Fallback to full scan if grid miss (shouldn't happen often)
-    if (!bestKey) {
-        var keys = Object.keys(graph);
-        for (var i = 0; i < keys.length; i++) {
-            var parts = keys[i].split(",");
-            var d = haversine(lat, lon, parseFloat(parts[0]), parseFloat(parts[1]));
-            if (d < bestDist) { bestDist = d; bestKey = keys[i]; }
-        }
-    }
-    return bestKey;
-}
-
-function pathToCoords(path) {
-    var coords = [];
-    for (var i = 0; i < path.length; i++) {
-        var parts = path[i].split(",");
-        coords.push([parseFloat(parts[0]), parseFloat(parts[1])]);
-    }
-    return coords;
-}
 
 // ── Map init ───────────────────────────────────────────
 function initMap() {
@@ -420,70 +59,6 @@ function initMap() {
     });
 }
 
-async function loadTilesInViewport() {
-    var manifest = await fetchManifest();
-    if (!manifest || !state.map) return;
-
-    var bounds = state.map.getBounds();
-    var center = bounds.getCenter();
-    var match = findCityForLocation(manifest, center.lat, center.lng);
-    if (!match) return;
-
-    var city = match.city;
-    var cityId = match.id;
-    var south = bounds.getSouth(), north = bounds.getNorth();
-    var west = bounds.getWest(), east = bounds.getEast();
-
-    // Find tiles whose bounds intersect the viewport
-    var toFetch = [];
-    for (var i = 0; i < city.tiles.length; i++) {
-        var tb = city.tiles[i].bounds; // [south, west, north, east]
-        // AABB intersection test
-        if (tb[2] < south || tb[0] > north || tb[3] < west || tb[1] > east) continue;
-        var cacheKey = "tile:" + cityId + ":" + city.tiles[i].file + ":" + manifest.version;
-        var cached = await cacheGet(cacheKey);
-        if (cached) {
-            applyPaths(cached, { skipRender: true });
-        } else {
-            toFetch.push(city.tiles[i]);
-        }
-        if (toFetch.length >= 20) break; // cap concurrent fetches
-    }
-
-    if (toFetch.length === 0) return;
-
-    var suburbs = [];
-    for (var i = 0; i < toFetch.length; i++) {
-        for (var s = 0; s < toFetch[i].suburbs.length; s++) {
-            if (suburbs.indexOf(toFetch[i].suburbs[s]) === -1) suburbs.push(toFetch[i].suburbs[s]);
-        }
-    }
-    showBanner("Loading " + suburbs.slice(0, 5).join(", ") + (suburbs.length > 5 ? "..." : "") + "", "loading");
-
-    var loaded = 0;
-    var promises = toFetch.map(function (tile) {
-        var url = TILES_BASE + "tiles/" + cityId + "/" + tile.file;
-        return fetch(url).then(function (resp) {
-            if (!resp.ok) throw new Error("HTTP " + resp.status);
-            return resp.json();
-        }).then(function (data) {
-            var geojson = Array.isArray(data) ? compactToGeoJSON(data) : data;
-            applyPaths(geojson, { skipRender: true });
-            var cacheKey = "tile:" + cityId + ":" + tile.file + ":" + manifest.version;
-            cacheSet(cacheKey, geojson);
-            loaded++;
-        }).catch(function (e) {
-            console.warn("Viewport tile fetch failed: " + tile.file, e.message);
-        });
-    });
-
-    await Promise.all(promises);
-    // Only clear banner if we showed it (avoid clearing route error banners)
-    var bannerEl = document.getElementById("info-banner");
-    if (bannerEl.dataset.type === "loading") showBanner("");
-    if (loaded > 0) console.log("Viewport preloaded " + loaded + " tiles");
-}
-
 // ── Build gradient legend in side menu ────────────────
 function buildMenuLegend() {
     var container = document.getElementById("menu-legend");
@@ -510,29 +85,26 @@ function buildMenuLegend() {
 }
 
 // ── Numbered markers ───────────────────────────────────
+function numberedMarkerIcon(num) {
+    return L.divIcon({
+        html: '<div class="wp-marker">' + num + '</div>',
+        className: "",
+        iconSize: [28, 28],
+        iconAnchor: [14, 14],
+    });
+}
+
 function createNumberedMarker(lat, lon, num) {
-    var el = document.createElement("div");
-    el.style.cssText =
-        "background:#2e86de;color:#fff;border:2px solid #fff;border-radius:50%;" +
-        "width:28px;height:28px;display:flex;align-items:center;justify-content:center;" +
-        "font-size:13px;font-weight:bold;box-shadow:0 2px 6px rgba(0,0,0,0.4);";
-    el.textContent = num;
-    var icon = L.divIcon({ html: el.outerHTML, className: "", iconSize: [28, 28], iconAnchor: [14, 14] });
-    return L.marker([lat, lon], { icon: icon, draggable: true }).addTo(state.map);
+    return L.marker([lat, lon], { icon: numberedMarkerIcon(num), draggable: true }).addTo(state.map);
 }
 
 function updateMarkerNumber(marker, num) {
-    var el = document.createElement("div");
-    el.style.cssText =
-        "background:#2e86de;color:#fff;border:2px solid #fff;border-radius:50%;" +
-        "width:28px;height:28px;display:flex;align-items:center;justify-content:center;" +
-        "font-size:13px;font-weight:bold;box-shadow:0 2px 6px rgba(0,0,0,0.4);";
-    el.textContent = num;
-    marker.setIcon(L.divIcon({ html: el.outerHTML, className: "", iconSize: [28, 28], iconAnchor: [14, 14] }));
+    marker.setIcon(numberedMarkerIcon(num));
 }
 
 // ── Autocomplete (Photon) ──────────────────────────────
 var autocompleteTimer = null;
+var autocompleteController = null;
 
 function setAutocompleteOpen(open) {
     var wrapper = document.querySelector(".menu-search");
@@ -590,14 +162,21 @@ function updateActiveItem(items, idx, input) {
 
 async function fetchSuggestions(query) {
     var list = document.getElementById("autocomplete-list");
+    // Cancel any in-flight suggestion request so slow responses can't overwrite fast ones.
+    if (autocompleteController) autocompleteController.abort();
+    autocompleteController = new AbortController();
+    var ctl = autocompleteController;
     try {
         var center = state.map ? state.map.getCenter() : { lat: -31.95, lng: 115.86 };
         var resp = await fetch(
             "https://photon.komoot.io/api/?q=" + encodeURIComponent(query) +
-            "&limit=5&lat=" + center.lat + "&lon=" + center.lng
+            "&limit=5&lat=" + center.lat + "&lon=" + center.lng,
+            { signal: ctl.signal }
         );
         if (!resp.ok) return;
         var data = await resp.json();
+        // Ignore this response if a newer request has started.
+        if (ctl !== autocompleteController) return;
         var features = data.features || [];
         while (list.firstChild) list.removeChild(list.firstChild);
         if (features.length === 0) { setAutocompleteOpen(false); return; }
@@ -629,7 +208,10 @@ async function fetchSuggestions(query) {
             })(features[i], i);
         }
         setAutocompleteOpen(true);
-    } catch (e) { console.warn("Autocomplete failed:", e.message); }
+    } catch (e) {
+        if (e.name === "AbortError") return;
+        console.warn("Autocomplete failed:", e.message);
+    }
 }
 
 // ── Geocode (via Photon) ───────────────────────────────
@@ -639,9 +221,10 @@ async function geocodeAddress(opts) {
     setAutocompleteOpen(false);
     try {
         var center = state.map ? state.map.getCenter() : { lat: -31.95, lng: 115.86 };
-        var resp = await fetch(
+        var resp = await fetchWithTimeout(
             "https://photon.komoot.io/api/?q=" + encodeURIComponent(q) +
-            "&limit=1&lat=" + center.lat + "&lon=" + center.lng
+            "&limit=1&lat=" + center.lat + "&lon=" + center.lng,
+            null, 10000
         );
         if (!resp.ok) { showBanner("Address not found"); return; }
         var data = await resp.json();
@@ -654,196 +237,18 @@ async function geocodeAddress(opts) {
 
 function goToLocation(lat, lon) {
     // Clear existing waypoints — this sets a new starting point
-    for (var i = 0; i < state.waypoints.length; i++) state.map.removeLayer(state.waypoints[i].marker);
-    state.waypoints = [];
+    clearRouteLayers(false);
     updateRoute();
 
     state.startLat = lat;
     state.startLon = lon;
     state.map.setView([lat, lon], 15);
     closeMenu();
-    loadTilesOrPaths(lat, lon).then(function () {
+    resetGraphIfCityChanged(lat, lon).then(function () {
+        return loadTilesOrPaths(lat, lon);
+    }).then(function () {
         if (state.graph) addWaypointAt(lat, lon, { exactPosition: true });
     });
-}
-
-// ── Load paths (direct Overpass API) ───────────────────
-function radiusFromZoom() {
-    if (!state.map) return 2000;
-    var z = state.map.getZoom();
-    if (z >= 16) return 1000;
-    if (z >= 14) return 2000;
-    if (z >= 12) return 5000;
-    return 10000;
-}
-
-async function loadPaths(lat, lon) {
-    var radius = radiusFromZoom();
-    var cacheKey = "paths:" + lat.toFixed(3) + ":" + lon.toFixed(3) + ":" + radius;
-
-    showBanner("Loading paths...", "loading");
-
-    // Check cache
-    var cached = await cacheGet(cacheKey, PATHS_TTL);
-    if (cached) {
-        applyPaths(cached, { skipRender: true });
-        showBanner("");
-        return;
-    }
-
-    var query = '[out:json][timeout:30];\n(\n' +
-        '  way["highway"="footway"](around:' + radius + ',' + lat + ',' + lon + ');\n' +
-        '  way["highway"="cycleway"](around:' + radius + ',' + lat + ',' + lon + ');\n' +
-        '  way["highway"="path"](around:' + radius + ',' + lat + ',' + lon + ');\n' +
-        '  way["highway"="residential"](around:' + radius + ',' + lat + ',' + lon + ');\n' +
-        '  way["highway"="living_street"](around:' + radius + ',' + lat + ',' + lon + ');\n' +
-        '  way["highway"="pedestrian"](around:' + radius + ',' + lat + ',' + lon + ');\n' +
-        '  way["highway"="service"](around:' + radius + ',' + lat + ',' + lon + ');\n' +
-        '  way["highway"="unclassified"](around:' + radius + ',' + lat + ',' + lon + ');\n' +
-        '  way["highway"="tertiary"](around:' + radius + ',' + lat + ',' + lon + ');\n' +
-        '  way["highway"="tertiary_link"](around:' + radius + ',' + lat + ',' + lon + ');\n' +
-        '  way["highway"="secondary"](around:' + radius + ',' + lat + ',' + lon + ');\n' +
-        '  way["highway"="secondary_link"](around:' + radius + ',' + lat + ',' + lon + ');\n' +
-        '  way["highway"="primary"](around:' + radius + ',' + lat + ',' + lon + ');\n' +
-        '  way["highway"="primary_link"](around:' + radius + ',' + lat + ',' + lon + ');\n' +
-        '  way["highway"="trunk"](around:' + radius + ',' + lat + ',' + lon + ');\n' +
-        '  way["highway"="trunk_link"](around:' + radius + ',' + lat + ',' + lon + ');\n' +
-        '  way["highway"="crossing"](around:' + radius + ',' + lat + ',' + lon + ');\n' +
-        '  way["highway"="steps"](around:' + radius + ',' + lat + ',' + lon + ');\n' +
-        ');\nout body;\n>;\nout skel qt;';
-
-    var maxRetries = 3, delay = 2000;
-    for (var attempt = 0; attempt <= maxRetries; attempt++) {
-        try {
-            var resp = await fetch("https://overpass-api.de/api/interpreter", {
-                method: "POST",
-                body: "data=" + encodeURIComponent(query),
-                headers: { "Content-Type": "application/x-www-form-urlencoded" },
-            });
-            if (resp.status === 429 || resp.status >= 500) {
-                if (attempt < maxRetries) {
-                    showBanner("Path server busy, retrying (" + (attempt + 1) + "/" + maxRetries + ")...", "loading");
-                    await new Promise(function (r) { setTimeout(r, delay * Math.pow(2, attempt)); });
-                    continue;
-                }
-            }
-            if (!resp.ok) throw new Error("HTTP " + resp.status);
-            var raw = await resp.json();
-            var geojson = osmToGeoJSON(raw);
-            await cacheSet(cacheKey, geojson);
-            applyPaths(geojson, { skipRender: true });
-            showBanner("");
-            return;
-        } catch (e) {
-            if (attempt < maxRetries) {
-                showBanner("Retrying path load (" + (attempt + 1) + "/" + maxRetries + ")...", "loading");
-                await new Promise(function (r) { setTimeout(r, delay * Math.pow(2, attempt)); });
-                continue;
-            }
-            showBanner("Failed to load paths: " + e.message);
-        }
-    }
-}
-
-function osmToGeoJSON(data) {
-    var nodes = {}, features = [];
-    for (var i = 0; i < (data.elements || []).length; i++) {
-        var el = data.elements[i];
-        if (el.type === "node") nodes[el.id] = [el.lon, el.lat];
-    }
-    for (var i = 0; i < (data.elements || []).length; i++) {
-        var el = data.elements[i];
-        if (el.type !== "way") continue;
-        var coords = [];
-        for (var j = 0; j < (el.nodes || []).length; j++) {
-            if (nodes[el.nodes[j]]) coords.push(nodes[el.nodes[j]]);
-        }
-        if (coords.length < 2) continue;
-        var tags = el.tags || {};
-        features.push({
-            type: "Feature",
-            properties: { id: el.id, highway: tags.highway || "", surface: tags.surface || "", name: tags.name || "" },
-            geometry: { type: "LineString", coordinates: coords },
-        });
-    }
-    return { type: "FeatureCollection", features: features };
-}
-
-var pathStyles = {
-    run: ["footway", "cycleway", "path", "pedestrian", "steps"],
-    style: function (feature) {
-        if (pathStyles.run.indexOf(feature.properties.highway) !== -1) return { color: "#6ee7b7", weight: 2, opacity: 0.35 };
-        return { color: "#6ee7b7", weight: 1, opacity: 0.08 };
-    },
-    tooltip: function (feature, layer) {
-        var p = feature.properties;
-        var parts = [];
-        if (p.name) parts.push(p.name);
-        else parts.push(p.highway || "path");
-        if (p.surface) parts.push(p.surface);
-        layer.bindTooltip(parts.join(" · "), { sticky: true });
-    },
-};
-
-function applyPaths(geojson, opts) {
-    // Track seen feature IDs to avoid duplicates
-    if (!state.seenIds) state.seenIds = {};
-
-    var newFeatures = [];
-    for (var i = 0; i < geojson.features.length; i++) {
-        var id = geojson.features[i].properties.id;
-        if (!state.seenIds[id]) {
-            state.seenIds[id] = true;
-            newFeatures.push(geojson.features[i]);
-        }
-    }
-
-    if (newFeatures.length === 0) return;
-
-    // Merge into pathFeatures
-    if (!state.pathFeatures) {
-        state.pathFeatures = { type: "FeatureCollection", features: newFeatures };
-    } else {
-        state.pathFeatures.features.push.apply(state.pathFeatures.features, newFeatures);
-    }
-
-    // Add new features to map layer (skip for tile-loaded data — OSM tiles show streets already)
-    if (!(opts && opts.skipRender)) {
-        if (!state.pathLayer) {
-            state.pathLayer = L.geoJSON(null, {
-                style: pathStyles.style,
-                onEachFeature: pathStyles.tooltip,
-            }).addTo(state.map);
-        }
-        var newGeo = { type: "FeatureCollection", features: newFeatures };
-        state.pathLayer.addData(newGeo);
-    }
-
-    // Extend the routing graph (don't rebuild — just add new edges)
-    if (!state.graph) state.graph = {};
-    if (!state.edgeSet) state.edgeSet = {};
-    var adj = state.graph;
-    for (var f = 0; f < newFeatures.length; f++) {
-        var coords = newFeatures[f].geometry.coordinates;
-        var hw = newFeatures[f].properties.highway || "";
-        var weight = ROAD_WEIGHT[hw] || 1.2;
-        for (var c = 1; c < coords.length; c++) {
-            var lat1 = coords[c-1][1], lon1 = coords[c-1][0];
-            var lat2 = coords[c][1], lon2 = coords[c][0];
-            var k1 = nodeKey(lat1, lon1), k2 = nodeKey(lat2, lon2);
-            // Deduplicate edges
-            var edgeId = k1 < k2 ? k1 + "|" + k2 : k2 + "|" + k1;
-            if (state.edgeSet[edgeId]) continue;
-            state.edgeSet[edgeId] = true;
-            var d = haversine(lat1, lon1, lat2, lon2) * weight;
-            if (!adj[k1]) { adj[k1] = []; gridInsert(k1, lat1, lon1); }
-            if (!adj[k2]) { adj[k2] = []; gridInsert(k2, lat2, lon2); }
-            adj[k1].push({ key: k2, lat: lat2, lon: lon2, dist: d });
-            adj[k2].push({ key: k1, lat: lat1, lon: lon1, dist: d });
-        }
-    }
-
-    console.log("Graph: " + Object.keys(adj).length + " nodes (+" + newFeatures.length + " ways)");
 }
 
 // ── Elevation (direct Open-Topo-Data API) ──────────────
@@ -864,7 +269,7 @@ async function fetchElevation(points) {
         var lats = batch.map(function (p) { return p.lat.toFixed(5); }).join(",");
         var lons = batch.map(function (p) { return p.lon.toFixed(5); }).join(",");
         try {
-            var resp = await fetch("https://api.open-meteo.com/v1/elevation?latitude=" + lats + "&longitude=" + lons);
+            var resp = await fetchWithTimeout("https://api.open-meteo.com/v1/elevation?latitude=" + lats + "&longitude=" + lons, null, 20000);
             if (!resp.ok) throw new Error("HTTP " + resp.status);
             var data = await resp.json();
             var elevArr = data.elevation || [];
@@ -968,47 +373,11 @@ function removeWaypoint(idx) {
     updateRoute();
 }
 
-// ── Gap filling ────────────────────────────────────────
-async function fillGapAndRetry(fromWp, toWp) {
-    // Load paths at intermediate points between two waypoints
-    var dist = haversine(fromWp.lat, fromWp.lon, toWp.lat, toWp.lon);
-    var steps = Math.max(1, Math.ceil(dist / 1500)); // one load every ~1.5km
-    var loaded = false;
-
-    showBanner("Expanding route coverage...", "loading");
-    for (var s = 0; s <= steps; s++) {
-        var t = steps === 0 ? 0.5 : s / steps;
-        var midLat = fromWp.lat + t * (toWp.lat - fromWp.lat);
-        var midLon = fromWp.lon + t * (toWp.lon - fromWp.lon);
-        if (steps > 1) showBanner("Expanding route coverage (" + (s + 1) + "/" + (steps + 1) + ")...", "loading");
-        await loadTilesOrPaths(midLat, midLon);
-        loaded = true;
-    }
-
-    if (!loaded) return null;
-
-    // Re-snap waypoints to potentially closer nodes in expanded graph
-    var newFromKey = closestNode(state.graph, fromWp.lat, fromWp.lon);
-    var newToKey = closestNode(state.graph, toWp.lat, toWp.lon);
-    if (newFromKey) fromWp.nodeKey = newFromKey;
-    if (newToKey) toWp.nodeKey = newToKey;
-
-    return dijkstra(state.graph, fromWp.nodeKey, toWp.nodeKey);
-}
-
 // ── Route drawing ──────────────────────────────────────
 var _routeGen = 0;
 async function updateRoute() {
     var gen = ++_routeGen;
-    for (var r = 0; r < state.routeLines.length; r++) state.map.removeLayer(state.routeLines[r]);
-    state.routeLines = [];
-    state.routeSegments = [];
-    if (state.closingLine) { state.map.removeLayer(state.closingLine); state.closingLine = null; }
-    for (var g = 0; g < state.gradientLines.length; g++) state.map.removeLayer(state.gradientLines[g]);
-    state.gradientLines = [];
-    if (state.routeOutline) { state.map.removeLayer(state.routeOutline); state.routeOutline = null; }
-    for (var mp = 0; mp < state.midpointMarkers.length; mp++) state.map.removeLayer(state.midpointMarkers[mp]);
-    state.midpointMarkers = [];
+    clearRouteLayers(true); // keep waypoints; we're redrawing the geometry between them
 
     if (state.waypoints.length < 2) { updateDistance(); updateElevation([]); return; }
 
@@ -1084,12 +453,7 @@ function debouncedFetchElevation(coords) {
 
 // ── Midpoint markers (drag to insert waypoint) ─────────
 function addMidpointMarkers() {
-    // Clear old midpoints
-    for (var m = 0; m < state.midpointMarkers.length; m++) {
-        state.map.removeLayer(state.midpointMarkers[m]);
-    }
-    state.midpointMarkers = [];
-
+    clearLayerArray("midpointMarkers");
     if (state.waypoints.length < 2) return;
 
     // Add midpoint between each consecutive pair
@@ -1144,13 +508,8 @@ function addMidpointMarkers() {
                 midLon = (from.lon + to.lon) / 2;
             }
 
-            var el = document.createElement("div");
-            el.style.cssText =
-                "background:rgba(110,231,183,0.4);border:2px dashed #6ee7b7;border-radius:50%;" +
-                "width:18px;height:18px;cursor:grab;";
-
             var icon = L.divIcon({
-                html: el.outerHTML,
+                html: '<div class="wp-midpoint"></div>',
                 className: "",
                 iconSize: [18, 18],
                 iconAnchor: [9, 9],
@@ -1222,8 +581,7 @@ function updateDistance() {
 
 // ── Distance markers ───────────────────────────────────
 function updateDistanceMarkers() {
-    for (var m = 0; m < state.distanceMarkers.length; m++) state.map.removeLayer(state.distanceMarkers[m]);
-    state.distanceMarkers = [];
+    clearLayerArray("distanceMarkers");
     var interval = state.useMiles ? 1609.344 : 1000; // 1 mile or 1 km
     var suffix = state.useMiles ? "mi" : "k";
     if (state.totalDistMetres < interval) return;
@@ -1248,12 +606,15 @@ function updateDistanceMarkers() {
             var ratio = 1 - (accumulated - nextMark) / d;
             var lat = coords[i-1][0] + ratio * (coords[i][0] - coords[i-1][0]);
             var lon = coords[i-1][1] + ratio * (coords[i][1] - coords[i-1][1]);
-            var el = document.createElement("div");
-            el.style.cssText = "background:#fff;color:#1a1d28;border-radius:8px;padding:1px 5px;font-size:10px;font-weight:700;box-shadow:0 1px 4px rgba(0,0,0,0.5);";
-            el.textContent = markNum + suffix;
             var mkr = L.marker([lat, lon], {
-                icon: L.divIcon({ html: el.outerHTML, className: "", iconSize: [30,16], iconAnchor: [15,8] }),
-                interactive: false, zIndexOffset: -100,
+                icon: L.divIcon({
+                    html: '<div class="distance-pill">' + (markNum + suffix) + '</div>',
+                    className: "",
+                    iconSize: [30, 16],
+                    iconAnchor: [15, 8],
+                }),
+                interactive: false,
+                zIndexOffset: -100,
             }).addTo(state.map);
             state.distanceMarkers.push(mkr);
             markNum++;
@@ -1281,41 +642,12 @@ async function fetchRouteElevation(coords) {
     }
 }
 
-function sampleRoute(coords, intervalMetres) {
-    var points = [coords[0]], accumulated = 0;
-    for (var i = 1; i < coords.length; i++) {
-        var d = haversine(coords[i-1][0], coords[i-1][1], coords[i][0], coords[i][1]);
-        accumulated += d;
-        if (accumulated >= intervalMetres) { points.push(coords[i]); accumulated = 0; }
-    }
-    var last = coords[coords.length-1], lastS = points[points.length-1];
-    if (last[0] !== lastS[0] || last[1] !== lastS[1]) points.push(last);
-    return points;
-}
-
-function smoothElevations(elevData) {
-    if (elevData.length < 2) return elevData;
-    var alpha = 0.6;
-    var smoothed = [elevData[0]];
-    for (var i = 1; i < elevData.length; i++) {
-        var prev = smoothed[i-1].elevation;
-        var curr = elevData[i].elevation;
-        smoothed.push({ lat: elevData[i].lat, lon: elevData[i].lon, elevation: alpha * curr + (1 - alpha) * prev });
-    }
-    // Reverse pass to remove lag
-    for (var i = smoothed.length - 2; i >= 0; i--) {
-        smoothed[i] = { lat: smoothed[i].lat, lon: smoothed[i].lon, elevation: alpha * smoothed[i].elevation + (1 - alpha) * smoothed[i+1].elevation };
-    }
-    return smoothed;
-}
-
 function colourRouteByGradient(elevData) {
     elevData = smoothElevations(elevData);
     if (elevData.length < 2) return;
-    for (var r = 0; r < state.routeLines.length; r++) state.map.removeLayer(state.routeLines[r]);
-    state.routeLines = [];
-    if (state.closingLine) { state.map.removeLayer(state.closingLine); state.closingLine = null; }
-    if (state.routeOutline) { state.map.removeLayer(state.routeOutline); state.routeOutline = null; }
+    clearLayerArray("routeLines");
+    clearLayerSingle("closingLine");
+    clearLayerSingle("routeOutline");
 
     // Build [lat, lon, grade%] array for hotline
     // First point has no grade — use 0 (flat)
@@ -1411,12 +743,26 @@ function updateElevation(elevData) {
         return "rgba(220,38,38,0.18)";
     }
 
+    var labels = distances.map(function (d) { return (d/1000).toFixed(1); });
+    if (state.elevationChart) {
+        // Reuse the chart — cheaper than destroy/rebuild and avoids canvas flash.
+        var chart = state.elevationChart;
+        chart.data.labels = labels;
+        chart.data.datasets[0].data = elevations;
+        // Segment callbacks close over segGradients via the outer scope of the
+        // previous build; rebind them against the fresh array on each update.
+        chart.data.datasets[0].segment = {
+            borderColor: function (ctx) { return gradeColor(segGradients[ctx.p1DataIndex]); },
+            backgroundColor: function (ctx) { return gradeFill(segGradients[ctx.p1DataIndex]); },
+        };
+        chart.update("none");
+        return;
+    }
     var ctx = document.getElementById("elevation-canvas").getContext("2d");
-    if (state.elevationChart) state.elevationChart.destroy();
     state.elevationChart = new Chart(ctx, {
         type: "line",
         data: {
-            labels: distances.map(function (d) { return (d/1000).toFixed(1); }),
+            labels: labels,
             datasets: [{
                 data: elevations, borderColor: "#6ee7b7", backgroundColor: "rgba(110,231,183,0.1)",
                 fill: true, pointRadius: 0, tension: 0.3, borderWidth: 2,
@@ -1486,11 +832,41 @@ async function exportGPX() {
 }
 
 // ── Utils ──────────────────────────────────────────────
-function haversine(lat1, lon1, lat2, lon2) {
-    var R = 6371000, toRad = function(x) { return x * Math.PI / 180; };
-    var dLat = toRad(lat2-lat1), dLon = toRad(lon2-lon1);
-    var a = Math.sin(dLat/2)*Math.sin(dLat/2) + Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLon/2)*Math.sin(dLon/2);
-    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+// Abort any external fetch after ms to prevent stuck-spinner states.
+function fetchWithTimeout(url, opts, ms) {
+    var ctl = new AbortController();
+    var t = setTimeout(function () { ctl.abort(); }, ms || 20000);
+    var merged = Object.assign({}, opts || {}, { signal: ctl.signal });
+    return fetch(url, merged).finally(function () { clearTimeout(t); });
+}
+
+// Remove every entry in a state-held layer array and reset the array.
+function clearLayerArray(arrName) {
+    var arr = state[arrName];
+    if (!arr) return;
+    for (var i = 0; i < arr.length; i++) state.map.removeLayer(arr[i]);
+    state[arrName] = [];
+}
+
+// Remove a single layer held on state and null the slot.
+function clearLayerSingle(fieldName) {
+    if (state[fieldName]) { state.map.removeLayer(state[fieldName]); state[fieldName] = null; }
+}
+
+// Wipe route geometry and markers. `keepWaypoints=true` leaves waypoint markers
+// untouched (used during route recomputation); false clears everything.
+function clearRouteLayers(keepWaypoints) {
+    clearLayerArray("routeLines");
+    clearLayerArray("gradientLines");
+    clearLayerArray("midpointMarkers");
+    clearLayerArray("distanceMarkers");
+    clearLayerSingle("closingLine");
+    clearLayerSingle("routeOutline");
+    state.routeSegments = [];
+    if (!keepWaypoints) {
+        for (var i = 0; i < state.waypoints.length; i++) state.map.removeLayer(state.waypoints[i].marker);
+        state.waypoints = [];
+    }
 }
 
 function showBanner(msg, type) {
@@ -1528,8 +904,7 @@ document.getElementById("reverse-btn").addEventListener("click", function () {
     updateRoute();
 });
 document.getElementById("clear-btn").addEventListener("click", function () {
-    for (var i = 0; i < state.waypoints.length; i++) state.map.removeLayer(state.waypoints[i].marker);
-    state.waypoints = [];
+    clearRouteLayers(false);
     updateRoute();
 });
 document.getElementById("export-btn").addEventListener("click", function () {
@@ -1554,14 +929,15 @@ function showGpsDot(lat, lon) {
 document.getElementById("locate-btn").addEventListener("click", function () {
     function startHere(lat, lon) {
         // Clear existing route
-        for (var i = 0; i < state.waypoints.length; i++) state.map.removeLayer(state.waypoints[i].marker);
-        state.waypoints = [];
+        clearRouteLayers(false);
         updateRoute();
         state.startLat = lat;
         state.startLon = lon;
         state.map.setView([lat, lon], 15);
         showGpsDot(lat, lon);
-        loadTilesOrPaths(lat, lon).then(function () {
+        resetGraphIfCityChanged(lat, lon).then(function () {
+            return loadTilesOrPaths(lat, lon);
+        }).then(function () {
             if (state.graph) addWaypointAt(lat, lon, { exactPosition: true });
         });
     }
@@ -1610,13 +986,36 @@ document.getElementById("dm-export").addEventListener("click", function (e) {
 document.getElementById("dm-share").addEventListener("click", function (e) {
     e.stopPropagation(); closeDistMenu();
     var url = window.location.href;
+    function fallback() {
+        // Put the URL in a read-only input appended to the banner so the user
+        // can triple-tap/select-all and copy. No blocking prompt().
+        var banner = document.getElementById("info-banner");
+        banner.textContent = "";
+        var label = document.createElement("span");
+        label.textContent = "Copy: ";
+        var input = document.createElement("input");
+        input.type = "text";
+        input.readOnly = true;
+        input.value = url;
+        input.className = "share-input";
+        banner.appendChild(label);
+        banner.appendChild(input);
+        banner.dataset.type = "share";
+        banner.className = "info-banner share";
+        banner.style.display = "block";
+        input.focus();
+        input.select();
+        setTimeout(function () {
+            if (banner.dataset.type === "share") showBanner("");
+        }, 8000);
+    }
     if (navigator.clipboard) {
         navigator.clipboard.writeText(url).then(function () {
             showBanner("Link copied!");
             setTimeout(function () { showBanner(""); }, 2000);
-        });
+        }).catch(fallback);
     } else {
-        prompt("Copy this link:", url);
+        fallback();
     }
 });
 document.addEventListener("keydown", function (e) {
@@ -1651,7 +1050,7 @@ document.getElementById("unit-toggle").addEventListener("click", function () {
 // ── Auto-detect miles for US/UK/MM/LR ─────────────────
 var MILES_COUNTRIES = ["US", "GB", "MM", "LR"];
 function autoDetectUnits(lat, lon) {
-    fetch("https://photon.komoot.io/reverse?lat=" + lat + "&lon=" + lon + "&limit=1")
+    fetchWithTimeout("https://photon.komoot.io/reverse?lat=" + lat + "&lon=" + lon + "&limit=1", null, 10000)
         .then(function (r) { return r.json(); })
         .then(function (data) {
             var feat = (data.features || [])[0];
@@ -1669,10 +1068,10 @@ function autoDetectUnits(lat, lon) {
 
 // ── New route ─────────────────────────────────────────
 document.getElementById("save-route-btn").addEventListener("click", saveNamedRoute);
-// ── Route persistence ─────────────────────────────────
+// ── Route persistence (session autosave, IndexedDB) ───
 function saveRoute() {
     if (state.waypoints.length === 0) {
-        localStorage.removeItem("lw:savedRoute");
+        autosaveClear();
         return;
     }
     var data = {
@@ -1682,15 +1081,7 @@ function saveRoute() {
         mode: state.mode,
         zoom: state.map.getZoom(),
     };
-    try { localStorage.setItem("lw:savedRoute", JSON.stringify(data)); } catch (e) {}
-}
-
-function loadSavedRoute() {
-    try {
-        var raw = localStorage.getItem("lw:savedRoute");
-        if (!raw) return null;
-        return JSON.parse(raw);
-    } catch (e) { return null; }
+    autosaveSet(data);
 }
 
 // ── Install prompt ────────────────────────────────────
@@ -1734,18 +1125,19 @@ function updateShareHash() {
 }
 
 function loadFromHash() {
-    var hash = window.location.hash.replace("#", "");
+    var hash = window.location.hash.replace(/^#/, "");
     if (!hash) return false;
-    var params = {};
-    hash.split("&").forEach(function (part) { var kv = part.split("="); params[kv[0]] = kv[1]; });
-    if (!params.r) return false;
-    var points = params.r.split(";").map(function (p) {
+    var params = new URLSearchParams(hash);
+    var r = params.get("r");
+    if (!r) return false;
+    var points = r.split(";").map(function (p) {
         var parts = p.split(",");
         return { lat: parseFloat(parts[0]), lon: parseFloat(parts[1]) };
     });
     if (points.length < 2) return false;
-    if (params.m === "outback" || params.m === "loop" || params.m === "oneway") {
-        state.mode = params.m;
+    var m = params.get("m");
+    if (m === "outback" || m === "loop" || m === "oneway") {
+        state.mode = m;
         setModeButton();
         updateReverseVisibility();
     }
@@ -1796,7 +1188,7 @@ function saveNamedRoute() {
 
     var startWp = state.waypoints[0];
     if (navigator.onLine) {
-        fetch("https://photon.komoot.io/reverse?lat=" + startWp.lat + "&lon=" + startWp.lon + "&limit=1")
+        fetchWithTimeout("https://photon.komoot.io/reverse?lat=" + startWp.lat + "&lon=" + startWp.lon + "&limit=1", null, 10000)
             .then(function (r) { return r.json(); })
             .then(function (data) {
                 var feat = (data.features || [])[0];
@@ -1881,18 +1273,7 @@ async function restoreSavedRoute(id) {
         if (!route) { showBanner("Route not found"); return; }
 
         // Clear existing state
-        for (var i = 0; i < state.waypoints.length; i++) state.map.removeLayer(state.waypoints[i].marker);
-        state.waypoints = [];
-        for (var r = 0; r < state.routeLines.length; r++) state.map.removeLayer(state.routeLines[r]);
-        state.routeLines = [];
-        for (var g = 0; g < state.gradientLines.length; g++) state.map.removeLayer(state.gradientLines[g]);
-        state.gradientLines = [];
-        if (state.routeOutline) { state.map.removeLayer(state.routeOutline); state.routeOutline = null; }
-        if (state.closingLine) { state.map.removeLayer(state.closingLine); state.closingLine = null; }
-        for (var mp = 0; mp < state.midpointMarkers.length; mp++) state.map.removeLayer(state.midpointMarkers[mp]);
-        state.midpointMarkers = [];
-        for (var dm = 0; dm < state.distanceMarkers.length; dm++) state.map.removeLayer(state.distanceMarkers[dm]);
-        state.distanceMarkers = [];
+        clearRouteLayers(false);
 
         // Restore mode
         state.mode = route.mode || "loop";
@@ -1901,6 +1282,9 @@ async function restoreSavedRoute(id) {
 
         // Restore map position
         state.map.setView([route.center.lat, route.center.lon], route.zoom || 14);
+
+        // Reset graph if restoring into a different city than current session.
+        await resetGraphIfCityChanged(route.center.lat, route.center.lon);
 
         // Restore path network from tiles or Overpass
         await loadTilesOrPaths(route.center.lat, route.center.lon);
@@ -2022,62 +1406,75 @@ showWelcome();
 updateOnlineStatus();
 setupInstallPrompt();
 
-// Migrate old localStorage cache to IndexedDB, then render saved lists
-migrateLocalStorage().then(function () {
+// Migrate old localStorage to IndexedDB first so autosaveGet sees migrated data.
+(async function () {
+    await migrateLocalStorage();
     renderSavedRoutes();
-});
 
-var sharedPoints = loadFromHash();
-var savedRoute = !sharedPoints ? loadSavedRoute() : null;
+    var sharedPoints = loadFromHash();
+    var savedRoute = !sharedPoints ? await autosaveGet() : null;
 
-if (sharedPoints) {
-    // Restore from share link
-    var center = sharedPoints[0];
-    state.map.setView([center.lat, center.lon], 14);
-    autoDetectUnits(center.lat, center.lon);
-    loadTilesOrPaths(center.lat, center.lon).then(async function () {
-        for (var i = 0; i < sharedPoints.length; i++) await addWaypointAt(sharedPoints[i].lat, sharedPoints[i].lon, { exactPosition: i === 0 });
-    });
-} else if (savedRoute && savedRoute.waypoints && savedRoute.waypoints.length > 0) {
-    // Restore last session's route
-    if (savedRoute.mode) {
-        state.mode = savedRoute.mode;
-        setModeButton();
-        updateReverseVisibility();
+    if (sharedPoints) {
+        // Restore from share link
+        var center = sharedPoints[0];
+        state.map.setView([center.lat, center.lon], 14);
+        autoDetectUnits(center.lat, center.lon);
+        await resetGraphIfCityChanged(center.lat, center.lon);
+        await loadTilesOrPaths(center.lat, center.lon);
+        for (var i = 0; i < sharedPoints.length; i++) {
+            await addWaypointAt(sharedPoints[i].lat, sharedPoints[i].lon, { exactPosition: i === 0 });
+        }
+        return;
     }
-    var sw = savedRoute.waypoints;
-    var ctr = sw[0];
-    state.map.setView([ctr.lat, ctr.lon], savedRoute.zoom || 14);
-    autoDetectUnits(ctr.lat, ctr.lon);
-    loadTilesOrPaths(ctr.lat, ctr.lon).then(async function () {
-        for (var i = 0; i < sw.length; i++) await addWaypointAt(sw[i].lat, sw[i].lon, { exactPosition: i === 0 });
-    });
-} else if (navigator.geolocation) {
-    // Fresh start — geolocate
-    navigator.geolocation.getCurrentPosition(
-        function (pos) {
-            var lat = pos.coords.latitude;
-            var lon = pos.coords.longitude;
-            state.startLat = lat;
-            state.startLon = lon;
-            autoDetectUnits(lat, lon);
-            state.map.setView([lat, lon], 15);
-            showGpsDot(lat, lon);
-            loadTilesForLocation(lat, lon).then(function (loaded) {
-                if (!loaded) {
-                    showCityRequest();
-                    return loadPaths(lat, lon);
-                }
-            }).then(function () {
-                if (state.graph) addWaypointAt(lat, lon, { exactPosition: true });
-            });
-        },
-        function () {
-            // Geolocation failed — prompt user to search
-            openMenu();
-            var input = document.getElementById("address-input");
-            if (input) { input.focus(); input.placeholder = "Search for your location to get started"; }
-        },
-        { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
-    );
-}
+
+    if (savedRoute && savedRoute.waypoints && savedRoute.waypoints.length > 0) {
+        // Restore last session's route
+        if (savedRoute.mode) {
+            state.mode = savedRoute.mode;
+            setModeButton();
+            updateReverseVisibility();
+        }
+        var sw = savedRoute.waypoints;
+        var ctr = sw[0];
+        state.map.setView([ctr.lat, ctr.lon], savedRoute.zoom || 14);
+        autoDetectUnits(ctr.lat, ctr.lon);
+        await resetGraphIfCityChanged(ctr.lat, ctr.lon);
+        await loadTilesOrPaths(ctr.lat, ctr.lon);
+        for (var i = 0; i < sw.length; i++) {
+            await addWaypointAt(sw[i].lat, sw[i].lon, { exactPosition: i === 0 });
+        }
+        return;
+    }
+
+    if (navigator.geolocation) {
+        // Fresh start — geolocate
+        navigator.geolocation.getCurrentPosition(
+            function (pos) {
+                var lat = pos.coords.latitude;
+                var lon = pos.coords.longitude;
+                state.startLat = lat;
+                state.startLon = lon;
+                autoDetectUnits(lat, lon);
+                state.map.setView([lat, lon], 15);
+                showGpsDot(lat, lon);
+                resetGraphIfCityChanged(lat, lon).then(function () {
+                    return loadTilesForLocation(lat, lon);
+                }).then(function (loaded) {
+                    if (!loaded) {
+                        showCityRequest();
+                        return loadPaths(lat, lon);
+                    }
+                }).then(function () {
+                    if (state.graph) addWaypointAt(lat, lon, { exactPosition: true });
+                });
+            },
+            function () {
+                // Geolocation failed — prompt user to search
+                openMenu();
+                var input = document.getElementById("address-input");
+                if (input) { input.focus(); input.placeholder = "Search for your location to get started"; }
+            },
+            { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
+        );
+    }
+})();
