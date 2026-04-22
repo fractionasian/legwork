@@ -22,11 +22,12 @@ const OVERPASS_ENDPOINTS = [
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 async function fetchJSON(url, opts, retries = 3) {
+    // User-Agent alone resolves the 406 from Overpass; avoid Accept so strict
+    // mirrors don't reject on content-negotiation.
     const mergedOpts = {
         ...opts,
         headers: {
             "User-Agent": USER_AGENT,
-            "Accept": "application/json",
             ...(opts && opts.headers ? opts.headers : {}),
         },
     };
@@ -44,7 +45,8 @@ async function fetchJSON(url, opts, retries = 3) {
             if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${url}`);
             return resp.json();
         } catch (e) {
-            if (attempt < retries && (e.code === 'ECONNRESET' || e.code === 'ETIMEDOUT' || e.message.includes('fetch failed'))) {
+            // Retry any network-layer error. HTTP-level errors were handled above.
+            if (attempt < retries) {
                 const delay = 10000 * Math.pow(2, attempt);
                 console.log(`  ${e.message}, retrying in ${delay/1000}s...`);
                 await sleep(delay);
@@ -53,6 +55,7 @@ async function fetchJSON(url, opts, retries = 3) {
             throw e;
         }
     }
+    throw new Error(`fetchJSON: retry loop exhausted for ${url}`);
 }
 
 function osmToGeoJSON(data) {
@@ -178,6 +181,8 @@ async function buildCity(city, dataDir, options) {
     console.log(`  Grid: ${rows}x${cols} = ${Object.keys(tiles).length} non-empty tiles`);
 
     const tileDir = path.join(dataDir, "tiles", city.id);
+    // Clear old tiles so a shrunk bounds doesn't leave orphaned .json files.
+    if (fs.existsSync(tileDir)) fs.rmSync(tileDir, { recursive: true, force: true });
     fs.mkdirSync(tileDir, { recursive: true });
 
     const tileMeta = [];
@@ -240,7 +245,8 @@ function parseArgs(argv) {
         } else if (a === "--skip-geocode") {
             args.skipGeocode = true;
         } else if (a === "--help" || a === "-h") {
-            console.log("Usage: build-tiles.js [--city <id>[,<id>...]] [--skip-geocode]");
+            console.log("Usage: build-tiles.js [--city|--cities <id>[,<id>...]] [--skip-geocode]");
+            console.log("       build-tiles.js [--city=<id>[,<id>...]] [--skip-geocode]");
             process.exit(0);
         } else {
             console.error(`Unknown argument: ${a}`);
@@ -305,13 +311,18 @@ async function main() {
             tiles: result.tiles,
         };
         if (i < cities.length - 1) {
-            console.log("\n  Waiting 30s before next city...");
+            // Spacing Overpass queries — individual endpoints rate-limit per-IP.
+            console.log("\n  Waiting 30s before next Overpass query...");
             await sleep(30000);
         }
     }
 
-    const content = JSON.stringify(manifest.cities);
-    manifest.version = crypto.createHash("md5").update(content).digest("hex").substring(0, 8);
+    // Sort city keys alphabetically before hashing so partial rebuilds produce
+    // a stable version hash when content hasn't changed.
+    const orderedCities = {};
+    for (const id of Object.keys(manifest.cities).sort()) orderedCities[id] = manifest.cities[id];
+    manifest.cities = orderedCities;
+    manifest.version = crypto.createHash("md5").update(JSON.stringify(orderedCities)).digest("hex").substring(0, 8);
 
     fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
     console.log(`\nManifest written: ${manifestPath}`);
