@@ -1,8 +1,12 @@
+// CACHE_NAME is auto-bumped by .github/workflows/bump-sw.yml on push to main.
 var CACHE_NAME = "legwork-v6";
 var APP_SHELL = [
     "./",
     "./index.html",
     "./app.js",
+    "./routing.js",
+    "./storage.js",
+    "./tiles.js",
     "./style.css",
     "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css",
     "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js",
