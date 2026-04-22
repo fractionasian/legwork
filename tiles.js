@@ -255,7 +255,9 @@ async function loadPaths(lat, lon) {
                 await new Promise(function (r) { setTimeout(r, delay * Math.pow(2, attempt)); });
                 continue;
             }
-            showBanner("Failed to load paths: " + e.message);
+            showBannerWithRetry("Failed to load paths: " + e.message, function () {
+                loadPaths(lat, lon);
+            });
         }
     }
 }

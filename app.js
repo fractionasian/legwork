@@ -116,11 +116,18 @@ function setAutocompleteOpen(open) {
 function setupAutocomplete() {
     var input = document.getElementById("address-input");
     var list = document.getElementById("autocomplete-list");
+    var clearBtn = document.getElementById("address-clear");
     var activeIdx = -1;
+
+    function syncClearBtn() {
+        if (!clearBtn) return;
+        clearBtn.classList.toggle("hidden", input.value.length === 0);
+    }
 
     input.addEventListener("input", function () {
         clearTimeout(autocompleteTimer);
         activeIdx = -1;
+        syncClearBtn();
         var q = input.value.trim();
         if (q.length < 3) { setAutocompleteOpen(false); return; }
         autocompleteTimer = setTimeout(function () { fetchSuggestions(q); }, 300);
@@ -143,6 +150,12 @@ function setupAutocomplete() {
             e.preventDefault();
             items[activeIdx].dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
         }
+    });
+    if (clearBtn) clearBtn.addEventListener("click", function () {
+        input.value = "";
+        syncClearBtn();
+        setAutocompleteOpen(false);
+        input.focus();
     });
 }
 
@@ -697,6 +710,14 @@ function colourRouteByGradient(elevData) {
         outlineWidth: 1,
         outlineColor: '#000',
     }).addTo(state.map);
+    // Fade in the hotline canvas to mask the flicker when the plain green route
+    // is replaced by the gradient-coloured version.
+    var canvas = hotline.getElement && hotline.getElement();
+    if (canvas) {
+        canvas.style.opacity = "0";
+        canvas.style.transition = "opacity 220ms ease";
+        requestAnimationFrame(function () { canvas.style.opacity = "1"; });
+    }
     state.gradientLines.push(hotline);
 }
 
@@ -893,6 +914,25 @@ function showBanner(msg, type) {
     el.style.display = msg ? "block" : "none";
 }
 
+// Error banner with an inline "Retry" chip. onRetry fires with the banner
+// cleared; caller re-triggers the failing operation.
+function showBannerWithRetry(msg, onRetry) {
+    var el = document.getElementById("info-banner");
+    el.textContent = "";
+    el.className = "info-banner error";
+    el.dataset.type = "error";
+    el.style.display = "block";
+    var text = document.createElement("span");
+    text.textContent = msg + " ";
+    var btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "banner-retry";
+    btn.textContent = "Retry";
+    btn.addEventListener("click", function () { showBanner(""); onRetry(); });
+    el.appendChild(text);
+    el.appendChild(btn);
+}
+
 // ── Event bindings ─────────────────────────────────────
 document.getElementById("address-input").addEventListener("keydown", function (e) { if (e.key === "Enter") geocodeAddress(); });
 var MODE_LABELS = { loop: "\u21BB Loop", outback: "\u21C4 Out & Back", oneway: "\u2192 One Way" };
@@ -918,6 +958,11 @@ document.getElementById("reverse-btn").addEventListener("click", function () {
     state.waypoints.reverse();
     for (var i = 0; i < state.waypoints.length; i++) updateMarkerNumber(state.waypoints[i].marker, i + 1);
     updateRoute();
+    showBanner("Route reversed", "hint");
+    setTimeout(function () {
+        var el = document.getElementById("info-banner");
+        if (el.dataset.type === "hint" && el.textContent === "Route reversed") showBanner("");
+    }, 1500);
 });
 document.getElementById("clear-btn").addEventListener("click", function () {
     clearRouteLayers(false);
@@ -1062,6 +1107,29 @@ if (tipsBtn) tipsBtn.addEventListener("click", function () {
     closeMenu();
     openWelcomeModal();
 });
+
+// Elevation-panel collapse toggle — remembered across sessions via localStorage.
+var elevationCollapsed = false;
+try { elevationCollapsed = localStorage.getItem("lw:elevCollapsed") === "1"; } catch (e) {}
+function applyElevationCollapsed() {
+    var panel = document.getElementById("elevation-panel");
+    var toggle = document.getElementById("elevation-toggle");
+    if (!panel || !toggle) return;
+    panel.classList.toggle("collapsed", elevationCollapsed);
+    toggle.setAttribute("aria-expanded", elevationCollapsed ? "false" : "true");
+    toggle.setAttribute("aria-label", elevationCollapsed ? "Expand elevation chart" : "Collapse elevation chart");
+    // Chevron points down when expanded (▾), up when collapsed (▴).
+    toggle.textContent = elevationCollapsed ? "▴" : "▾";
+    // Chart.js needs a redraw when its container changes size.
+    if (state.elevationChart) state.elevationChart.resize();
+}
+var elevToggle = document.getElementById("elevation-toggle");
+if (elevToggle) elevToggle.addEventListener("click", function () {
+    elevationCollapsed = !elevationCollapsed;
+    try { localStorage.setItem("lw:elevCollapsed", elevationCollapsed ? "1" : "0"); } catch (e) {}
+    applyElevationCollapsed();
+});
+applyElevationCollapsed();
 
 // ── Unit toggle (in menu) ─────────────────────────────
 document.getElementById("unit-toggle").addEventListener("click", function () {
@@ -1374,6 +1442,20 @@ async function renderSavedRoutes() {
             detail.className = "saved-item-detail";
             var parts = [];
             if (route.distance) parts.push(route.distance);
+            // Mode chip — short label without the leading unicode symbol.
+            var modeShort = { loop: "loop", outback: "out & back", oneway: "one way" }[route.mode] || route.mode;
+            if (modeShort) parts.push(modeShort);
+            // Ascent from stored elevation samples, if any.
+            if (route.elevationData && route.elevationData.length > 1) {
+                var ascent = 0, pending = 0;
+                for (var ei = 1; ei < route.elevationData.length; ei++) {
+                    var diff = route.elevationData[ei].elevation - route.elevationData[ei-1].elevation;
+                    pending += diff;
+                    if (pending > 2) { ascent += pending; pending = 0; }
+                    else if (pending < -2) { pending = 0; }
+                }
+                if (ascent > 0) parts.push("\u2191" + Math.round(ascent) + "m");
+            }
             parts.push(new Date(route.ts).toLocaleDateString());
             detail.textContent = parts.join(" \u00b7 ");
             info.appendChild(label);

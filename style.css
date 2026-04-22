@@ -274,7 +274,7 @@ button.menu-item {
 
 .menu-search input[type="text"] {
     width: 100%;
-    padding: 10px 12px;
+    padding: 10px 32px 10px 12px;
     border: 1px solid #3a3d4a;
     border-radius: 6px;
     background: #12141c;
@@ -286,6 +286,36 @@ button.menu-item {
 .menu-search input[type="text"]:focus {
     outline: none;
     border-color: #6ee7b7;
+}
+
+.address-clear {
+    position: absolute;
+    right: 24px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 22px;
+    height: 22px;
+    background: transparent;
+    border: none;
+    border-radius: 50%;
+    color: #6b6e7a;
+    font-size: 12px;
+    line-height: 1;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    transition: background 0.15s, color 0.15s;
+}
+
+.address-clear:hover {
+    background: #252836;
+    color: #d0d0d0;
+}
+
+.address-clear.hidden {
+    display: none;
 }
 
 .menu-search .autocomplete-list {
@@ -553,6 +583,8 @@ button.menu-item:disabled {
 
 .elevation-stats {
     display: none;
+    align-items: center;
+    justify-content: space-between;
     gap: 12px;
     padding: 6px 12px;
     background: rgba(26, 29, 40, 0.92);
@@ -562,9 +594,38 @@ button.menu-item:disabled {
     border-top: 1px solid #2a2d3a;
 }
 
-.elevation-stats span {
+.elevation-stats-row {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    min-width: 0;
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.elevation-stats-row span {
     color: #6ee7b7;
     font-weight: 600;
+}
+
+.elevation-toggle {
+    flex-shrink: 0;
+    background: transparent;
+    border: none;
+    color: #808390;
+    font-size: 14px;
+    line-height: 1;
+    padding: 2px 6px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+}
+
+.elevation-toggle:hover {
+    background: #252836;
+    color: #d0d0d0;
 }
 
 #elevation-container {
@@ -573,6 +634,10 @@ button.menu-item:disabled {
     backdrop-filter: blur(8px);
     padding: 2px 10px 6px;
     display: none;
+}
+
+.elevation-panel.collapsed #elevation-container {
+    display: none !important;
 }
 
 #elevation-canvas {
@@ -617,6 +682,25 @@ button.menu-item:disabled {
     background: #1a2a24;
     color: #a8e0c4;
     border-bottom-color: #2a3a34;
+}
+
+.banner-retry {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 2px 10px;
+    background: transparent;
+    border: 1px solid currentColor;
+    border-radius: 4px;
+    color: inherit;
+    font: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+
+.banner-retry:hover {
+    background: rgba(255, 255, 255, 0.08);
 }
 
 .info-banner.offline {

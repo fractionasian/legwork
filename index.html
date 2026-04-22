@@ -47,6 +47,7 @@
         <div class="menu-body">
             <div class="menu-search" role="combobox" aria-expanded="false" aria-haspopup="listbox" aria-owns="autocomplete-list">
                 <input type="text" id="address-input" placeholder="Set starting point..." autocomplete="off" aria-label="Search address" aria-autocomplete="list" aria-controls="autocomplete-list" />
+                <button id="address-clear" class="address-clear hidden" type="button" aria-label="Clear search">&#10005;</button>
                 <div class="autocomplete-list" id="autocomplete-list" role="listbox" aria-label="Address suggestions"></div>
             </div>
             <button id="save-route-btn" class="menu-item">Save route</button>
@@ -79,9 +80,12 @@
         <div id="map" role="application" aria-label="Route planning map"></div>
         <div class="elevation-panel" id="elevation-panel">
             <div class="elevation-stats" id="elevation-stats">
-                Ascent: <span id="stat-ascent">&#8212;</span> &nbsp;
-                Descent: <span id="stat-descent">&#8212;</span> &nbsp;
-                Max gradient: <span id="stat-gradient">&#8212;</span>
+                <span class="elevation-stats-row">
+                    Ascent: <span id="stat-ascent">&#8212;</span> &nbsp;
+                    Descent: <span id="stat-descent">&#8212;</span> &nbsp;
+                    Max gradient: <span id="stat-gradient">&#8212;</span>
+                </span>
+                <button id="elevation-toggle" class="elevation-toggle" aria-label="Collapse elevation chart" aria-expanded="true">&#9662;</button>
             </div>
             <div id="elevation-container">
                 <canvas id="elevation-canvas"></canvas>
