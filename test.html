@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Legwork — routing.js tests</title>
+    <style>
+        body { font-family: ui-monospace, Menlo, Consolas, monospace; background: #0f1117; color: #e8e9ef; padding: 24px; max-width: 800px; margin: 0 auto; }
+        h1 { font-size: 18px; margin: 0 0 16px; }
+        .summary { padding: 8px 12px; border-radius: 4px; margin-bottom: 16px; font-size: 14px; }
+        .summary.pass { background: #1a3a24; color: #6ee7b7; }
+        .summary.fail { background: #3a2020; color: #f5a0a0; }
+        .case { padding: 6px 10px; border-left: 3px solid #333; margin: 4px 0; font-size: 13px; }
+        .case.pass { border-left-color: #6ee7b7; color: #a0a4b8; }
+        .case.fail { border-left-color: #f87171; color: #f5a0a0; background: rgba(248,113,113,0.08); }
+        .case .detail { color: #888; font-size: 12px; margin-top: 4px; }
+    </style>
+</head>
+<body>
+    <h1>Legwork — routing.js tests</h1>
+    <div id="summary" class="summary">Running...</div>
+    <div id="results"></div>
+
+    <script src="routing.js"></script>
+    <script>
+    var passed = 0, failed = 0;
+    var results = document.getElementById("results");
+
+    function test(name, fn) {
+        try {
+            fn();
+            passed++;
+            var el = document.createElement("div");
+            el.className = "case pass";
+            el.textContent = "PASS · " + name;
+            results.appendChild(el);
+        } catch (e) {
+            failed++;
+            var el = document.createElement("div");
+            el.className = "case fail";
+            var title = document.createElement("div");
+            title.textContent = "FAIL · " + name;
+            var detail = document.createElement("div");
+            detail.className = "detail";
+            detail.textContent = e.message;
+            el.appendChild(title);
+            el.appendChild(detail);
+            results.appendChild(el);
+        }
+    }
+
+    function assert(cond, msg) { if (!cond) throw new Error(msg || "assertion failed"); }
+    function near(a, b, eps) { return Math.abs(a - b) <= (eps || 1e-6); }
+
+    // ── haversine ─────────────────────────────────────
+    test("haversine: same point is 0", function () {
+        assert(near(haversine(-31.95, 115.86, -31.95, 115.86), 0));
+    });
+    test("haversine: ~1 deg lat ≈ 111km", function () {
+        var d = haversine(0, 0, 1, 0);
+        assert(d > 110000 && d < 112000, "got " + d);
+    });
+    test("haversine: Perth → Sydney ≈ 3290 km", function () {
+        var d = haversine(-31.95, 115.86, -33.87, 151.21);
+        assert(d > 3_250_000 && d < 3_350_000, "got " + d);
+    });
+
+    // ── nodeKey / pathToCoords round-trip ─────────────
+    test("nodeKey + pathToCoords round-trip", function () {
+        var k = nodeKey(-31.95001, 115.860123);
+        var coords = pathToCoords([k]);
+        assert(near(coords[0][0], -31.95001, 1e-5));
+        assert(near(coords[0][1], 115.860123, 1e-5));
+    });
+    test("nodeKey truncates to 6 dp", function () {
+        assert(nodeKey(1.1234567, 2.7654321) === "1.123457,2.765432");
+    });
+
+    // ── MinHeap ───────────────────────────────────────
+    test("MinHeap: pops in ascending order", function () {
+        var h = new MinHeap();
+        [5, 1, 9, 3, 7, 2, 8, 4, 6].forEach(function (d) { h.push({ d: d }); });
+        var out = [];
+        while (h.size() > 0) out.push(h.pop().d);
+        assert(JSON.stringify(out) === JSON.stringify([1,2,3,4,5,6,7,8,9]));
+    });
+    test("MinHeap: single push/pop", function () {
+        var h = new MinHeap();
+        h.push({ d: 42 });
+        assert(h.pop().d === 42);
+        assert(h.size() === 0);
+    });
+
+    // ── Dijkstra ──────────────────────────────────────
+    // Graph: A —1— B —2— C, plus A —5— C
+    //   shortest A→C should go via B (cost 3), not direct (cost 5).
+    test("Dijkstra: picks shorter path via B", function () {
+        var graph = {
+            A: [{ key: "B", dist: 1 }, { key: "C", dist: 5 }],
+            B: [{ key: "A", dist: 1 }, { key: "C", dist: 2 }],
+            C: [{ key: "A", dist: 5 }, { key: "B", dist: 2 }],
+        };
+        var r = dijkstra(graph, "A", "C");
+        assert(r !== null);
+        assert(r.dist === 3);
+        assert(JSON.stringify(r.path) === JSON.stringify(["A", "B", "C"]));
+    });
+    test("Dijkstra: same start/end returns 0-dist singleton", function () {
+        var r = dijkstra({ A: [] }, "A", "A");
+        assert(r.dist === 0 && r.path.length === 1 && r.path[0] === "A");
+    });
+    test("Dijkstra: unreachable returns null", function () {
+        var graph = { A: [{ key: "B", dist: 1 }], B: [{ key: "A", dist: 1 }], C: [] };
+        assert(dijkstra(graph, "A", "C") === null);
+    });
+    test("Dijkstra: missing endpoint returns null", function () {
+        assert(dijkstra({ A: [] }, "A", "Z") === null);
+        assert(dijkstra({ A: [] }, "Z", "A") === null);
+    });
+
+    // ── spatial grid / closestNode ────────────────────
+    test("gridInsert + closestNode: exact hit", function () {
+        spatialGrid = {}; // reset
+        gridInsert("-31.950000,115.860000", -31.95, 115.86);
+        gridInsert("-31.951000,115.861000", -31.951, 115.861);
+        var k = closestNode({ /* unused */ }, -31.9501, 115.8601);
+        assert(k === "-31.950000,115.860000");
+    });
+    test("closestNode: expands past inner ring if empty", function () {
+        spatialGrid = {};
+        // Put a node ~1.1km away — fits in ring 2 (at ~500–1000m cell size).
+        gridInsert("-31.960000,115.860000", -31.96, 115.86);
+        var k = closestNode({}, -31.95, 115.86);
+        assert(k === "-31.960000,115.860000", "expected ring expansion to find far node, got " + k);
+    });
+
+    // ── GeoJSON conversions ───────────────────────────
+    test("osmToGeoJSON: builds LineString from nodes+ways", function () {
+        var data = {
+            elements: [
+                { type: "node", id: 1, lat: -31.95, lon: 115.86 },
+                { type: "node", id: 2, lat: -31.951, lon: 115.861 },
+                { type: "way", id: 100, nodes: [1, 2], tags: { highway: "footway" } },
+            ],
+        };
+        var gj = osmToGeoJSON(data);
+        assert(gj.features.length === 1);
+        assert(gj.features[0].properties.highway === "footway");
+        assert(gj.features[0].geometry.coordinates.length === 2);
+        assert(near(gj.features[0].geometry.coordinates[0][0], 115.86));
+    });
+    test("osmToGeoJSON: skips ways with <2 resolved nodes", function () {
+        var data = {
+            elements: [
+                { type: "node", id: 1, lat: 0, lon: 0 },
+                { type: "way", id: 100, nodes: [1, 999], tags: {} }, // 999 missing
+            ],
+        };
+        assert(osmToGeoJSON(data).features.length === 0);
+    });
+    test("compactToGeoJSON: unpacks compact tile format", function () {
+        var gj = compactToGeoJSON([[1, "footway", "Main St", [[115.86, -31.95], [115.87, -31.95]]]]);
+        assert(gj.features.length === 1);
+        assert(gj.features[0].properties.name === "Main St");
+        assert(gj.features[0].geometry.coordinates.length === 2);
+    });
+
+    // ── sampleRoute ───────────────────────────────────
+    test("sampleRoute: always includes first and last point", function () {
+        var coords = [[0, 0], [0, 0.001], [0, 0.002], [0, 0.003]];
+        var s = sampleRoute(coords, 50);
+        assert(s[0] === coords[0]);
+        assert(s[s.length - 1] === coords[coords.length - 1]);
+    });
+    test("sampleRoute: reduces point count at coarse intervals", function () {
+        // ~1km total route broken into 10 points, sample every 500m ⇒ 2–3 kept.
+        var coords = [];
+        for (var i = 0; i <= 10; i++) coords.push([0, i * 0.001]); // ~111m apart
+        var s = sampleRoute(coords, 500);
+        assert(s.length < coords.length, "expected fewer samples, got " + s.length);
+        assert(s.length >= 2);
+    });
+
+    // ── smoothElevations ──────────────────────────────
+    test("smoothElevations: short input passes through", function () {
+        var r = smoothElevations([{ lat: 0, lon: 0, elevation: 5 }]);
+        assert(r.length === 1 && r[0].elevation === 5);
+    });
+    test("smoothElevations: reduces a spike", function () {
+        var data = [
+            { lat: 0, lon: 0, elevation: 10 },
+            { lat: 0, lon: 0, elevation: 10 },
+            { lat: 0, lon: 0, elevation: 100 }, // spike
+            { lat: 0, lon: 0, elevation: 10 },
+            { lat: 0, lon: 0, elevation: 10 },
+        ];
+        var s = smoothElevations(data);
+        assert(s[2].elevation < 100 && s[2].elevation > 10, "spike not reduced: " + s[2].elevation);
+    });
+
+    // ── ROAD_WEIGHT ───────────────────────────────────
+    test("ROAD_WEIGHT: footway is cheaper than trunk", function () {
+        assert(ROAD_WEIGHT.footway < ROAD_WEIGHT.trunk);
+        assert(ROAD_WEIGHT.path === 1.0);
+        assert(ROAD_WEIGHT.trunk === 2.5);
+    });
+
+    // ── Summary ───────────────────────────────────────
+    var summary = document.getElementById("summary");
+    if (failed === 0) {
+        summary.className = "summary pass";
+        summary.textContent = passed + " passed, 0 failed.";
+    } else {
+        summary.className = "summary fail";
+        summary.textContent = passed + " passed, " + failed + " FAILED.";
+    }
+    </script>
+</body>
+</html>
