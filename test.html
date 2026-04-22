@@ -157,11 +157,23 @@
         };
         assert(osmToGeoJSON(data).features.length === 0);
     });
-    test("compactToGeoJSON: unpacks compact tile format", function () {
+    test("compactToGeoJSON: unpacks v1 (legacy Array) tile format", function () {
         var gj = compactToGeoJSON([[1, "footway", "Main St", [[115.86, -31.95], [115.87, -31.95]]]]);
         assert(gj.features.length === 1);
         assert(gj.features[0].properties.name === "Main St");
+        assert(gj.features[0].properties.surface === "");
         assert(gj.features[0].geometry.coordinates.length === 2);
+        assert(!gj.nodeAttrs);
+    });
+    test("compactToGeoJSON: unpacks v2 tile format with surface + nodeAttrs", function () {
+        var gj = compactToGeoJSON({
+            v: 2,
+            features: [[1, "path", "Bibbulmun", [[115.86, -31.95], [115.87, -31.95]], "gravel"]],
+            nodeAttrs: { "-31.950000,115.860000": { barrier: true } },
+        });
+        assert(gj.features.length === 1);
+        assert(gj.features[0].properties.surface === "gravel");
+        assert(gj.nodeAttrs && gj.nodeAttrs["-31.950000,115.860000"].barrier === true);
     });
 
     // ── sampleRoute ───────────────────────────────────
