@@ -163,6 +163,21 @@ async function resetGraphIfCityChanged(lat, lon) {
     var newId = match ? match.id : null;
     if (newId === _currentCityId) return;
     _currentCityId = newId;
+    // Fire a custom Umami event at the semantic moment "user resolved into a
+    // (new) city bucket". Drives the curated cities.json list — hot unknown
+    // buckets become candidates for the next pre-cache build. Coarse 0.5°
+    // bucketing on unknowns keeps it privacy-preserving.
+    try {
+        if (window.umami && typeof window.umami.track === "function") {
+            if (newId) {
+                window.umami.track("city-resolved", { city: newId });
+            } else {
+                var bLat = (Math.round(lat * 2) / 2).toFixed(1);
+                var bLon = (Math.round(lon * 2) / 2).toFixed(1);
+                window.umami.track("city-unknown", { bucket: bLat + "," + bLon });
+            }
+        }
+    } catch (e) { /* never let telemetry break the app */ }
     state.graph = null;
     state.pathFeatures = null;
     state.seenIds = {};
