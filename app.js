@@ -489,7 +489,11 @@ async function updateRoute() {
 
     addMidpointMarkers();
     updateDistance();
-    debouncedFetchElevation(allRouteCoords);
+    var elevCoords = allRouteCoords;
+    if (state.mode === "outback" && allRouteCoords.length > 1) {
+        elevCoords = allRouteCoords.concat(allRouteCoords.slice().reverse().slice(1));
+    }
+    debouncedFetchElevation(elevCoords);
     updateShareHash();
     saveRoute();
 }
