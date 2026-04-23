@@ -634,20 +634,20 @@ button.menu-item:disabled {
 .elevation-toggle {
     flex-shrink: 0;
     position: relative;
-    background: transparent;
-    border: none;
-    color: #808390;
-    font-size: 14px;
+    background: #252836;
+    border: 1px solid #2a2d3a;
+    color: #d0d0d0;
+    font-size: 20px;
     line-height: 1;
-    padding: 6px 10px;
-    margin: -6px 0;
-    border-radius: 4px;
+    padding: 4px 14px;
+    margin: -4px 0;
+    border-radius: 6px;
     cursor: pointer;
-    transition: background 0.15s, color 0.15s;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
     /* Expand the touch target above the visible pill so the collapsed strip
        has a finger-sized hitbox that clears the Leaflet attribution row. */
     min-height: 32px;
-    min-width: 40px;
+    min-width: 48px;
 }
 
 .elevation-toggle::before {
@@ -657,8 +657,9 @@ button.menu-item:disabled {
 }
 
 .elevation-toggle:hover {
-    background: #252836;
-    color: #d0d0d0;
+    background: #2f3342;
+    border-color: #3a3e4d;
+    color: #ffffff;
 }
 
 #elevation-container {
