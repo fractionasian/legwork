@@ -265,6 +265,118 @@
         assert(gj.nodeAttrs[key] && gj.nodeAttrs[key].barrier === true);
     });
 
+    // ── Recommender helpers ───────────────────────────
+    test("projectFromPoint: ~111km north ≈ +1° lat", function () {
+        var p = projectFromPoint(0, 0, 0, 111000); // bearing 0 = north
+        assert(near(p[0], 1, 0.01), "lat: " + p[0]);
+        assert(near(p[1], 0, 0.01), "lon: " + p[1]);
+    });
+    test("projectFromPoint: east projection moves longitude", function () {
+        var p = projectFromPoint(0, 0, Math.PI / 2, 111000);
+        assert(near(p[0], 0, 0.01), "lat shouldn't drift much: " + p[0]);
+        assert(p[1] > 0.5, "lon should increase: " + p[1]);
+    });
+
+    test("seededRandom: deterministic for same seed", function () {
+        var a = seededRandom(42), b = seededRandom(42);
+        for (var i = 0; i < 5; i++) assert(a() === b(), "seq should match");
+    });
+    test("seededRandom: different seeds diverge", function () {
+        var a = seededRandom(1), b = seededRandom(2);
+        assert(a() !== b());
+    });
+
+    test("edgeIdOf: order-independent", function () {
+        assert(edgeIdOf("a", "b") === edgeIdOf("b", "a"));
+    });
+
+    test("dijkstra: edgePenalty discourages an edge", function () {
+        var graph = {
+            A: [{ key: "B", dist: 1 }, { key: "C", dist: 5 }],
+            B: [{ key: "A", dist: 1 }, { key: "C", dist: 2 }],
+            C: [{ key: "A", dist: 5 }, { key: "B", dist: 2 }],
+        };
+        // No penalty: shortest A→C is via B (cost 3).
+        var bare = dijkstra(graph, "A", "C");
+        assert(bare.path.length === 3 && bare.path[1] === "B");
+        // Penalise A-B 100×: shortest now goes direct A→C (cost 5).
+        var penalty = {}; penalty[edgeIdOf("A", "B")] = 100;
+        var p = dijkstra(graph, "A", "C", penalty);
+        assert(p.path.length === 2, "expected direct path, got " + JSON.stringify(p.path));
+    });
+
+    // ── Recommender end-to-end on a tiny synthetic graph ─
+    // Build a small grid graph so generateCandidate has somewhere to route.
+    test("recommendRoute: produces a loop on a grid graph", function () {
+        spatialGrid = {};
+        var graph = {};
+        var edgeMeta = {};
+        // 5x5 grid of nodes, each cell ~111m apart. All footways.
+        var nodes = [];
+        for (var i = 0; i < 5; i++) {
+            for (var j = 0; j < 5; j++) {
+                var lat = -31.95 - i * 0.001, lon = 115.86 + j * 0.001;
+                var k = nodeKey(lat, lon);
+                nodes.push({ k: k, lat: lat, lon: lon, i: i, j: j });
+                graph[k] = [];
+                gridInsert(k, lat, lon);
+            }
+        }
+        function addEdge(a, b) {
+            var d = haversine(a.lat, a.lon, b.lat, b.lon);
+            graph[a.k].push({ key: b.k, lat: b.lat, lon: b.lon, dist: d });
+            graph[b.k].push({ key: a.k, lat: a.lat, lon: a.lon, dist: d });
+            edgeMeta[edgeIdOf(a.k, a.k < b.k ? b.k : a.k) === edgeIdOf(a.k, b.k) ? edgeIdOf(a.k, b.k) : edgeIdOf(b.k, a.k)] = { hw: "footway", named: false };
+            edgeMeta[edgeIdOf(a.k, b.k)] = { hw: "footway", named: false };
+        }
+        for (var n = 0; n < nodes.length; n++) {
+            for (var m = n + 1; m < nodes.length; m++) {
+                if ((nodes[n].i === nodes[m].i && Math.abs(nodes[n].j - nodes[m].j) === 1) ||
+                    (nodes[n].j === nodes[m].j && Math.abs(nodes[n].i - nodes[m].i) === 1)) {
+                    addEdge(nodes[n], nodes[m]);
+                }
+            }
+        }
+        // Start at the centre.
+        var startKey = nodeKey(-31.952, 115.862);
+        // Aim for a small loop — ~600m total, well within the grid.
+        var result = recommendRoute(graph, edgeMeta, startKey, { distanceM: 600, mode: "loop", seed: 1, count: 4 });
+        assert(result.candidates.length > 0, "no candidates produced");
+        var top = result.candidates[0];
+        assert(top.anchorKeys.length >= 2, "loop should have ≥2 anchors");
+        assert(top.displayDist > 200 && top.displayDist < 1500, "displayDist out of range: " + top.displayDist);
+        assert(top.score > 0, "score should be positive: " + top.score);
+        assert(top.scoreBreakdown.walkwayFrac > 0.9, "footway-only graph should score high walkway: " + top.scoreBreakdown.walkwayFrac);
+    });
+
+    test("recommendRoute: out-and-back has 1 anchor", function () {
+        spatialGrid = {};
+        var graph = {};
+        var edgeMeta = {};
+        // Single straight line of 5 nodes ~111m apart.
+        var prev = null;
+        for (var i = 0; i < 5; i++) {
+            var lat = -31.95 - i * 0.001, lon = 115.86;
+            var k = nodeKey(lat, lon);
+            graph[k] = [];
+            gridInsert(k, lat, lon);
+            if (prev) {
+                var d = haversine(prev.lat, prev.lon, lat, lon);
+                graph[k].push({ key: prev.k, lat: prev.lat, lon: prev.lon, dist: d });
+                graph[prev.k].push({ key: k, lat: lat, lon: lon, dist: d });
+                edgeMeta[edgeIdOf(prev.k, k)] = { hw: "footway", named: false };
+            }
+            prev = { k: k, lat: lat, lon: lon };
+        }
+        var startKey = nodeKey(-31.95, 115.86);
+        var result = recommendRoute(graph, edgeMeta, startKey, { distanceM: 600, mode: "outback", seed: 1, count: 4 });
+        // It might or might not find a candidate depending on heading, so just
+        // assert that any candidate has exactly 1 anchor.
+        if (result.candidates.length > 0) {
+            assert(result.candidates[0].anchorKeys.length === 1, "outback should have 1 anchor");
+        }
+    });
+
     // ── Summary ───────────────────────────────────────
     var summary = document.getElementById("summary");
     if (failed === 0) {
