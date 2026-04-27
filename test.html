@@ -349,6 +349,30 @@
         assert(top.scoreBreakdown.walkwayFrac > 0.9, "footway-only graph should score high walkway: " + top.scoreBreakdown.walkwayFrac);
     });
 
+    test("scoreCandidate: quiet vibe penalises main roads more than surprise", function () {
+        // Long mock path so length-match doesn't crater the score, all on
+        // a primary road so quiet should bite harder than surprise.
+        var graph = {}, edgeMeta = {};
+        var k1 = "0.000000,0.000000", k2 = "0.022500,0.000000"; // ~2.5km apart
+        graph[k1] = [{ key: k2, dist: 1 }]; graph[k2] = [{ key: k1, dist: 1 }];
+        edgeMeta[edgeIdOf(k1, k2)] = { hw: "primary", named: false };
+        var actualLen = haversine(0, 0, 0.0225, 0);
+        var sSurprise = scoreCandidate({ paths: [[k1, k2]], displayDist: actualLen }, actualLen, edgeMeta, graph, "surprise");
+        var sQuiet = scoreCandidate({ paths: [[k1, k2]], displayDist: actualLen }, actualLen, edgeMeta, graph, "quiet");
+        assert(sQuiet < sSurprise, "quiet should punish main road more: surprise=" + sSurprise + " quiet=" + sQuiet);
+    });
+
+    test("scoreCandidate: popular vibe rewards named footways more than surprise", function () {
+        var graph = {}, edgeMeta = {};
+        var k1 = "0.000000,0.000000", k2 = "0.022500,0.000000";
+        graph[k1] = [{ key: k2, dist: 1 }]; graph[k2] = [{ key: k1, dist: 1 }];
+        edgeMeta[edgeIdOf(k1, k2)] = { hw: "footway", named: true };
+        var actualLen = haversine(0, 0, 0.0225, 0);
+        var sSurprise = scoreCandidate({ paths: [[k1, k2]], displayDist: actualLen }, actualLen, edgeMeta, graph, "surprise");
+        var sPopular = scoreCandidate({ paths: [[k1, k2]], displayDist: actualLen }, actualLen, edgeMeta, graph, "popular");
+        assert(sPopular > sSurprise, "popular should reward named footway more: surprise=" + sSurprise + " popular=" + sPopular);
+    });
+
     test("recommendRoute: out-and-back has 1 anchor", function () {
         spatialGrid = {};
         var graph = {};
