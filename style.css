@@ -845,6 +845,105 @@ button.menu-item:disabled {
     background: #3a8063;
 }
 
+/* ── Plan-a-route modal ───────────────────────────── */
+.plan-hint {
+    color: #808390;
+    font-size: 13px;
+    margin: -6px 0 16px;
+}
+
+.plan-row {
+    margin-bottom: 14px;
+}
+
+.plan-label {
+    display: block;
+    color: #b0b0b0;
+    font-size: 13px;
+    margin-bottom: 6px;
+}
+
+.plan-label-hint {
+    color: #6e7280;
+    font-weight: 400;
+    font-size: 12px;
+    margin-left: 4px;
+}
+
+.plan-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.modal .plan-chip {
+    width: auto;
+    padding: 8px 14px;
+    background: #252836;
+    color: #d0d0d0;
+    border: 1px solid #3a3d4a;
+    border-radius: 999px;
+    font-size: 14px;
+    font-weight: 500;
+}
+
+.modal .plan-chip:hover {
+    background: #2d3142;
+}
+
+.modal .plan-chip.selected {
+    background: #2d6a4f;
+    color: #fff;
+    border-color: #3a8063;
+}
+
+.modal .plan-chip-hidden {
+    display: none;
+}
+
+.plan-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 20px;
+}
+
+.modal .plan-cancel {
+    background: #3a3d4a;
+    flex: 0 0 auto;
+    width: 90px;
+}
+
+.modal .plan-cancel:hover {
+    background: #4a4d5a;
+}
+
+.modal .plan-go {
+    flex: 1;
+}
+
+/* ── Shuffle chip (floats above the elevation panel) ─ */
+.shuffle-chip {
+    position: absolute;
+    /* Sits above the elevation panel; the panel itself is z-800. */
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 96px);
+    right: 12px;
+    z-index: 850;
+    background: #2d6a4f;
+    color: #fff;
+    border: 1px solid #3a8063;
+    border-radius: 999px;
+    padding: 8px 16px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+    user-select: none;
+}
+
+.shuffle-chip:hover { background: #3a8063; }
+.shuffle-chip.hidden { display: none; }
+.shuffle-chip:active { transform: translateY(1px); }
+
 @media (hover: none), (pointer: coarse) {
     .desktop-only { display: none; }
 }

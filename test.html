@@ -265,6 +265,221 @@
         assert(gj.nodeAttrs[key] && gj.nodeAttrs[key].barrier === true);
     });
 
+    // ── Recommender helpers ───────────────────────────
+    test("projectFromPoint: ~111km north ≈ +1° lat", function () {
+        var p = projectFromPoint(0, 0, 0, 111000); // bearing 0 = north
+        assert(near(p[0], 1, 0.01), "lat: " + p[0]);
+        assert(near(p[1], 0, 0.01), "lon: " + p[1]);
+    });
+    test("projectFromPoint: east projection moves longitude", function () {
+        var p = projectFromPoint(0, 0, Math.PI / 2, 111000);
+        assert(near(p[0], 0, 0.01), "lat shouldn't drift much: " + p[0]);
+        assert(p[1] > 0.5, "lon should increase: " + p[1]);
+    });
+
+    test("seededRandom: deterministic for same seed", function () {
+        var a = seededRandom(42), b = seededRandom(42);
+        for (var i = 0; i < 5; i++) assert(a() === b(), "seq should match");
+    });
+    test("seededRandom: different seeds diverge", function () {
+        var a = seededRandom(1), b = seededRandom(2);
+        assert(a() !== b());
+    });
+
+    test("edgeIdOf: order-independent", function () {
+        assert(edgeIdOf("a", "b") === edgeIdOf("b", "a"));
+    });
+
+    test("dijkstra: edgePenalty discourages an edge", function () {
+        var graph = {
+            A: [{ key: "B", dist: 1 }, { key: "C", dist: 5 }],
+            B: [{ key: "A", dist: 1 }, { key: "C", dist: 2 }],
+            C: [{ key: "A", dist: 5 }, { key: "B", dist: 2 }],
+        };
+        // No penalty: shortest A→C is via B (cost 3).
+        var bare = dijkstra(graph, "A", "C");
+        assert(bare.path.length === 3 && bare.path[1] === "B");
+        // Penalise A-B 100×: shortest now goes direct A→C (cost 5).
+        var penalty = {}; penalty[edgeIdOf("A", "B")] = 100;
+        var p = dijkstra(graph, "A", "C", penalty);
+        assert(p.path.length === 2, "expected direct path, got " + JSON.stringify(p.path));
+    });
+
+    // ── Recommender end-to-end on a tiny synthetic graph ─
+    // Build a small grid graph so generateCandidate has somewhere to route.
+    test("recommendRoute: produces a loop on a grid graph", function () {
+        spatialGrid = {};
+        var graph = {};
+        var edgeMeta = {};
+        // 5x5 grid of nodes, each cell ~111m apart. All footways.
+        var nodes = [];
+        for (var i = 0; i < 5; i++) {
+            for (var j = 0; j < 5; j++) {
+                var lat = -31.95 - i * 0.001, lon = 115.86 + j * 0.001;
+                var k = nodeKey(lat, lon);
+                nodes.push({ k: k, lat: lat, lon: lon, i: i, j: j });
+                graph[k] = [];
+                gridInsert(k, lat, lon);
+            }
+        }
+        function addEdge(a, b) {
+            var d = haversine(a.lat, a.lon, b.lat, b.lon);
+            graph[a.k].push({ key: b.k, lat: b.lat, lon: b.lon, dist: d });
+            graph[b.k].push({ key: a.k, lat: a.lat, lon: a.lon, dist: d });
+            edgeMeta[edgeIdOf(a.k, a.k < b.k ? b.k : a.k) === edgeIdOf(a.k, b.k) ? edgeIdOf(a.k, b.k) : edgeIdOf(b.k, a.k)] = { hw: "footway", named: false };
+            edgeMeta[edgeIdOf(a.k, b.k)] = { hw: "footway", named: false };
+        }
+        for (var n = 0; n < nodes.length; n++) {
+            for (var m = n + 1; m < nodes.length; m++) {
+                if ((nodes[n].i === nodes[m].i && Math.abs(nodes[n].j - nodes[m].j) === 1) ||
+                    (nodes[n].j === nodes[m].j && Math.abs(nodes[n].i - nodes[m].i) === 1)) {
+                    addEdge(nodes[n], nodes[m]);
+                }
+            }
+        }
+        // Start at the centre.
+        var startKey = nodeKey(-31.952, 115.862);
+        // Aim for a small loop — ~600m total, well within the grid.
+        var result = recommendRoute(graph, edgeMeta, startKey, { distanceM: 600, mode: "loop", seed: 1, count: 4 });
+        assert(result.candidates.length > 0, "no candidates produced");
+        var top = result.candidates[0];
+        assert(top.anchorKeys.length >= 2, "loop should have ≥2 anchors");
+        assert(top.displayDist > 200 && top.displayDist < 1500, "displayDist out of range: " + top.displayDist);
+        assert(top.score > 0, "score should be positive: " + top.score);
+        assert(top.scoreBreakdown.walkwayFrac > 0.9, "footway-only graph should score high walkway: " + top.scoreBreakdown.walkwayFrac);
+    });
+
+    test("scoreCandidate: quiet vibe penalises main roads more than surprise", function () {
+        // Long mock path so length-match doesn't crater the score, all on
+        // a primary road so quiet should bite harder than surprise.
+        var graph = {}, edgeMeta = {};
+        var k1 = "0.000000,0.000000", k2 = "0.022500,0.000000"; // ~2.5km apart
+        graph[k1] = [{ key: k2, dist: 1 }]; graph[k2] = [{ key: k1, dist: 1 }];
+        edgeMeta[edgeIdOf(k1, k2)] = { hw: "primary", named: false };
+        var actualLen = haversine(0, 0, 0.0225, 0);
+        var sSurprise = scoreCandidate({ paths: [[k1, k2]], displayDist: actualLen }, actualLen, edgeMeta, graph, "surprise");
+        var sQuiet = scoreCandidate({ paths: [[k1, k2]], displayDist: actualLen }, actualLen, edgeMeta, graph, "quiet");
+        assert(sQuiet < sSurprise, "quiet should punish main road more: surprise=" + sSurprise + " quiet=" + sQuiet);
+    });
+
+    // ── Geometry helpers for scenic scoring ───────────
+    test("pointInPolygon: square interior is inside", function () {
+        var sq = [[0, 0], [0, 1], [1, 1], [1, 0]];
+        assert(pointInPolygon(0.5, 0.5, sq) === true);
+    });
+    test("pointInPolygon: outside the square", function () {
+        var sq = [[0, 0], [0, 1], [1, 1], [1, 0]];
+        assert(pointInPolygon(2, 0.5, sq) === false);
+        assert(pointInPolygon(0.5, -0.1, sq) === false);
+    });
+    test("polygonBBox: tight bounds", function () {
+        var bb = polygonBBox([[1, 2], [3, 4], [-1, 5]]);
+        assert(bb[0] === -1 && bb[1] === 2 && bb[2] === 3 && bb[3] === 5);
+    });
+    test("polygonArea: ~10000 m² square at the equator", function () {
+        // 100m x 100m square — 100m ≈ 0.0009 deg at the equator
+        var d = 0.0009; // ~100m
+        var area = polygonArea([[0, 0], [0, d], [d, d], [d, 0]]);
+        assert(area > 9000 && area < 11000, "area = " + area);
+    });
+    test("distPointToSegMetres: perpendicular distance ≈ 100m", function () {
+        // Segment along latitude 0, point ~100m north
+        var d = distPointToSegMetres(0.0009, 0.5, 0, 0, 0, 1);
+        assert(d > 90 && d < 110, "d = " + d);
+    });
+    test("distPointToSegMetres: endpoint when projection is outside segment", function () {
+        // Segment from (0,0) to (0,0.001); point at (0,0.005) — beyond B end
+        var d = distPointToSegMetres(0, 0.005, 0, 0, 0, 0.001);
+        // Distance from (0,0.005) to nearest endpoint (0,0.001) ≈ 444 m
+        assert(d > 400 && d < 500, "d = " + d);
+    });
+
+    test("scoreCandidate: green vibe boosts a park-traversing route", function () {
+        var graph = {}, edgeMeta = {};
+        var k1 = "0.000000,0.000000", k2 = "0.022500,0.000000"; // ~2.5km apart
+        graph[k1] = [{ key: k2, dist: 1 }]; graph[k2] = [{ key: k1, dist: 1 }];
+        edgeMeta[edgeIdOf(k1, k2)] = { hw: "footway", named: false };
+        var actualLen = haversine(0, 0, 0.0225, 0);
+        // Park covering the midpoint
+        var sceneIdx = indexScenic({
+            parks: [[[0.005, -0.005], [0.005, 0.005], [0.020, 0.005], [0.020, -0.005]]],
+            waters: [],
+            landmarks: [],
+        });
+        var sSurprise = scoreCandidate({ paths: [[k1, k2]], displayDist: actualLen }, actualLen, edgeMeta, graph, "surprise", sceneIdx);
+        var sGreen = scoreCandidate({ paths: [[k1, k2]], displayDist: actualLen }, actualLen, edgeMeta, graph, "green", sceneIdx);
+        assert(sGreen > sSurprise, "green should boost park route: surprise=" + sSurprise + " green=" + sGreen);
+    });
+
+    test("scoreCandidate: water vibe boosts a route near water", function () {
+        var graph = {}, edgeMeta = {};
+        var k1 = "0.000000,0.000000", k2 = "0.022500,0.000000";
+        graph[k1] = [{ key: k2, dist: 1 }]; graph[k2] = [{ key: k1, dist: 1 }];
+        edgeMeta[edgeIdOf(k1, k2)] = { hw: "footway", named: false };
+        var actualLen = haversine(0, 0, 0.0225, 0);
+        // Water polyline running parallel to the route, ~80m offset
+        // (within the 100m buffer near_water uses).
+        var sceneIdx = indexScenic({
+            parks: [],
+            waters: [[[0.0004, -0.0007], [0.022, -0.0007]]],
+            landmarks: [],
+        });
+        var sSurprise = scoreCandidate({ paths: [[k1, k2]], displayDist: actualLen }, actualLen, edgeMeta, graph, "surprise", sceneIdx);
+        var sWater = scoreCandidate({ paths: [[k1, k2]], displayDist: actualLen }, actualLen, edgeMeta, graph, "water", sceneIdx);
+        assert(sWater > sSurprise, "water should boost waterside route: surprise=" + sSurprise + " water=" + sWater);
+    });
+
+    test("scoreCandidate: scenic vibes degrade gracefully without sceneIdx", function () {
+        var graph = {}, edgeMeta = {};
+        var k1 = "0.000000,0.000000", k2 = "0.022500,0.000000";
+        graph[k1] = [{ key: k2, dist: 1 }]; graph[k2] = [{ key: k1, dist: 1 }];
+        edgeMeta[edgeIdOf(k1, k2)] = { hw: "footway", named: false };
+        var actualLen = haversine(0, 0, 0.0225, 0);
+        // No sceneIdx — green vibe should produce a finite score (just no boost).
+        var s = scoreCandidate({ paths: [[k1, k2]], displayDist: actualLen }, actualLen, edgeMeta, graph, "green");
+        assert(isFinite(s), "expected finite score, got " + s);
+        assert(s > 0, "expected positive score, got " + s);
+    });
+
+    test("scoreCandidate: popular vibe rewards named footways more than surprise", function () {
+        var graph = {}, edgeMeta = {};
+        var k1 = "0.000000,0.000000", k2 = "0.022500,0.000000";
+        graph[k1] = [{ key: k2, dist: 1 }]; graph[k2] = [{ key: k1, dist: 1 }];
+        edgeMeta[edgeIdOf(k1, k2)] = { hw: "footway", named: true };
+        var actualLen = haversine(0, 0, 0.0225, 0);
+        var sSurprise = scoreCandidate({ paths: [[k1, k2]], displayDist: actualLen }, actualLen, edgeMeta, graph, "surprise");
+        var sPopular = scoreCandidate({ paths: [[k1, k2]], displayDist: actualLen }, actualLen, edgeMeta, graph, "popular");
+        assert(sPopular > sSurprise, "popular should reward named footway more: surprise=" + sSurprise + " popular=" + sPopular);
+    });
+
+    test("recommendRoute: out-and-back has 1 anchor", function () {
+        spatialGrid = {};
+        var graph = {};
+        var edgeMeta = {};
+        // Single straight line of 5 nodes ~111m apart.
+        var prev = null;
+        for (var i = 0; i < 5; i++) {
+            var lat = -31.95 - i * 0.001, lon = 115.86;
+            var k = nodeKey(lat, lon);
+            graph[k] = [];
+            gridInsert(k, lat, lon);
+            if (prev) {
+                var d = haversine(prev.lat, prev.lon, lat, lon);
+                graph[k].push({ key: prev.k, lat: prev.lat, lon: prev.lon, dist: d });
+                graph[prev.k].push({ key: k, lat: lat, lon: lon, dist: d });
+                edgeMeta[edgeIdOf(prev.k, k)] = { hw: "footway", named: false };
+            }
+            prev = { k: k, lat: lat, lon: lon };
+        }
+        var startKey = nodeKey(-31.95, 115.86);
+        var result = recommendRoute(graph, edgeMeta, startKey, { distanceM: 600, mode: "outback", seed: 1, count: 4 });
+        // It might or might not find a candidate depending on heading, so just
+        // assert that any candidate has exactly 1 anchor.
+        if (result.candidates.length > 0) {
+            assert(result.candidates[0].anchorKeys.length === 1, "outback should have 1 anchor");
+        }
+    });
+
     // ── Summary ───────────────────────────────────────
     var summary = document.getElementById("summary");
     if (failed === 0) {

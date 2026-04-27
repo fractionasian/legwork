@@ -181,8 +181,11 @@ async function resetGraphIfCityChanged(lat, lon) {
     state.graph = null;
     state.pathFeatures = null;
     state.seenIds = {};
-    state.edgeSet = {};
+    state.edgeMeta = {};
     state.nodeAttrs = {};
+    state.sceneIdx = null;
+    state.sceneIdxFor = null;
+    state.sceneIdxLoading = null;
     spatialGrid = {};
     if (state.pathLayer) {
         state.map.removeLayer(state.pathLayer);
@@ -265,6 +268,87 @@ async function loadPois(lat, lon) {
         console.warn("POI fetch failed:", e.message);
         return null;
     }
+}
+
+// ── Scenic data (parks, water, landmarks) ─────────────
+// Lazy fetch, called when the recommender plan modal opens. Same cache
+// pattern as loadPois — coarse lat/lon key, long TTL because parks and
+// rivers don't move. Used by the recommender's Green / Water / Landmarks
+// vibe chips (see docs/design/route-recommender.md §5).
+var SCENIC_TTL = 30 * 24 * 3600 * 1000;
+
+async function loadScenic(lat, lon) {
+    var radius = 5000;
+    var key = "scenic1:" + lat.toFixed(2) + ":" + lon.toFixed(2);
+    var cached = await cacheGet(key, SCENIC_TTL);
+    if (cached) return cached;
+
+    // `out geom` inlines way coordinates so polygons & polylines come back
+    // self-contained — no separate node-recurse pass needed. Multipolygon
+    // relations are skipped for now (most urban parks tag the polygon
+    // directly on the way; relation-only cases are tolerable miss).
+    var query = '[out:json][timeout:30];(' +
+        'way["leisure"="park"](around:' + radius + ',' + lat + ',' + lon + ');' +
+        'way["leisure"="nature_reserve"](around:' + radius + ',' + lat + ',' + lon + ');' +
+        'way["landuse"="recreation_ground"](around:' + radius + ',' + lat + ',' + lon + ');' +
+        'way["landuse"="forest"](around:' + radius + ',' + lat + ',' + lon + ');' +
+        'way["natural"="water"](around:' + radius + ',' + lat + ',' + lon + ');' +
+        'way["natural"="beach"](around:' + radius + ',' + lat + ',' + lon + ');' +
+        'way["natural"="coastline"](around:' + radius + ',' + lat + ',' + lon + ');' +
+        'way["waterway"="river"](around:' + radius + ',' + lat + ',' + lon + ');' +
+        'node["tourism"~"^(viewpoint|artwork|monument|memorial|attraction)$"](around:' + radius + ',' + lat + ',' + lon + ');' +
+        'node["historic"](around:' + radius + ',' + lat + ',' + lon + ');' +
+        ');out geom;';
+
+    try {
+        var resp = await fetchWithTimeout("https://overpass-api.de/api/interpreter", {
+            method: "POST",
+            body: "data=" + encodeURIComponent(query),
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        }, 30000);
+        if (!resp.ok) return null;
+        var raw = await resp.json();
+        var parsed = parseScenic(raw);
+        cacheSet(key, parsed);
+        return parsed;
+    } catch (e) {
+        console.warn("Scenic fetch failed:", e.message);
+        return null;
+    }
+}
+
+// Convert Overpass `out geom` response into compact arrays of polygons,
+// polylines, and points. Drops geometry shorter than 2 points so we don't
+// crash on degenerate ways.
+function parseScenic(raw) {
+    var parks = [];      // closed polygons (greenspaces)
+    var waters = [];     // polygons (lakes, beaches) + polylines (rivers, coast)
+    var landmarks = [];  // points
+    var elements = raw.elements || [];
+    for (var i = 0; i < elements.length; i++) {
+        var el = elements[i];
+        if (el.type === "node") {
+            if (!el.tags) continue;
+            var kind = el.tags.tourism ? "tourism" : (el.tags.historic ? "historic" : null);
+            if (!kind) continue;
+            // Wikipedia/Wikidata tags promote a landmark to "famous". Useful
+            // for the recommender's popularityScore (see §4.3) — track here
+            // even though the chip itself doesn't filter on it.
+            var famous = !!(el.tags.wikipedia || el.tags.wikidata);
+            landmarks.push({ lat: el.lat, lon: el.lon, kind: kind, famous: famous });
+            continue;
+        }
+        if (el.type !== "way" || !el.geometry || el.geometry.length < 2) continue;
+        var coords = el.geometry.map(function (g) { return [g.lat, g.lon]; });
+        var t = el.tags || {};
+        var isPark = t.leisure === "park" || t.leisure === "nature_reserve" ||
+                     t.landuse === "recreation_ground" || t.landuse === "forest";
+        var isWater = t.natural === "water" || t.natural === "beach" ||
+                      t.natural === "coastline" || t.waterway === "river";
+        if (isPark) parks.push(coords);
+        else if (isWater) waters.push(coords);
+    }
+    return { parks: parks, waters: waters, landmarks: landmarks };
 }
 
 // ── Overpass fallback ─────────────────────────────────
@@ -410,12 +494,13 @@ function applyPaths(geojson, opts) {
     }
 
     if (!state.graph) state.graph = {};
-    if (!state.edgeSet) state.edgeSet = {};
+    if (!state.edgeMeta) state.edgeMeta = {};
     var adj = state.graph;
     for (var f = 0; f < newFeatures.length; f++) {
         var props = newFeatures[f].properties;
         var coords = newFeatures[f].geometry.coordinates;
         var hw = props.highway || "";
+        var named = !!(props.name && props.name.length);
         // Combine base road weight + way-level preferences (P1 named trails, P5 soft surfaces).
         var baseWeight = (ROAD_WEIGHT[hw] || 1.2) * wayPrefMultiplier(hw, props.surface || "", props.name || "");
         for (var c = 1; c < coords.length; c++) {
@@ -423,8 +508,10 @@ function applyPaths(geojson, opts) {
             var lat2 = coords[c][1], lon2 = coords[c][0];
             var k1 = nodeKey(lat1, lon1), k2 = nodeKey(lat2, lon2);
             var edgeId = k1 < k2 ? k1 + "|" + k2 : k2 + "|" + k1;
-            if (state.edgeSet[edgeId]) continue;
-            state.edgeSet[edgeId] = true;
+            if (state.edgeMeta[edgeId]) continue;
+            // edgeMeta doubles as a dedup set (truthy presence) and the
+            // per-edge attribute lookup the recommender's scorer needs.
+            state.edgeMeta[edgeId] = { hw: hw, named: named };
             // Node-level preferences (P2 traffic signals, P3 marked crossings, P4 barriers)
             // apply to both endpoints; the worst penalty / best bonus dominates via product.
             var nodeMult = nodePrefMultiplier(state.nodeAttrs[k1]) * nodePrefMultiplier(state.nodeAttrs[k2]);
