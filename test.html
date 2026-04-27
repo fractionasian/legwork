@@ -362,6 +362,85 @@
         assert(sQuiet < sSurprise, "quiet should punish main road more: surprise=" + sSurprise + " quiet=" + sQuiet);
     });
 
+    // ── Geometry helpers for scenic scoring ───────────
+    test("pointInPolygon: square interior is inside", function () {
+        var sq = [[0, 0], [0, 1], [1, 1], [1, 0]];
+        assert(pointInPolygon(0.5, 0.5, sq) === true);
+    });
+    test("pointInPolygon: outside the square", function () {
+        var sq = [[0, 0], [0, 1], [1, 1], [1, 0]];
+        assert(pointInPolygon(2, 0.5, sq) === false);
+        assert(pointInPolygon(0.5, -0.1, sq) === false);
+    });
+    test("polygonBBox: tight bounds", function () {
+        var bb = polygonBBox([[1, 2], [3, 4], [-1, 5]]);
+        assert(bb[0] === -1 && bb[1] === 2 && bb[2] === 3 && bb[3] === 5);
+    });
+    test("polygonArea: ~10000 m² square at the equator", function () {
+        // 100m x 100m square — 100m ≈ 0.0009 deg at the equator
+        var d = 0.0009; // ~100m
+        var area = polygonArea([[0, 0], [0, d], [d, d], [d, 0]]);
+        assert(area > 9000 && area < 11000, "area = " + area);
+    });
+    test("distPointToSegMetres: perpendicular distance ≈ 100m", function () {
+        // Segment along latitude 0, point ~100m north
+        var d = distPointToSegMetres(0.0009, 0.5, 0, 0, 0, 1);
+        assert(d > 90 && d < 110, "d = " + d);
+    });
+    test("distPointToSegMetres: endpoint when projection is outside segment", function () {
+        // Segment from (0,0) to (0,0.001); point at (0,0.005) — beyond B end
+        var d = distPointToSegMetres(0, 0.005, 0, 0, 0, 0.001);
+        // Distance from (0,0.005) to nearest endpoint (0,0.001) ≈ 444 m
+        assert(d > 400 && d < 500, "d = " + d);
+    });
+
+    test("scoreCandidate: green vibe boosts a park-traversing route", function () {
+        var graph = {}, edgeMeta = {};
+        var k1 = "0.000000,0.000000", k2 = "0.022500,0.000000"; // ~2.5km apart
+        graph[k1] = [{ key: k2, dist: 1 }]; graph[k2] = [{ key: k1, dist: 1 }];
+        edgeMeta[edgeIdOf(k1, k2)] = { hw: "footway", named: false };
+        var actualLen = haversine(0, 0, 0.0225, 0);
+        // Park covering the midpoint
+        var sceneIdx = indexScenic({
+            parks: [[[0.005, -0.005], [0.005, 0.005], [0.020, 0.005], [0.020, -0.005]]],
+            waters: [],
+            landmarks: [],
+        });
+        var sSurprise = scoreCandidate({ paths: [[k1, k2]], displayDist: actualLen }, actualLen, edgeMeta, graph, "surprise", sceneIdx);
+        var sGreen = scoreCandidate({ paths: [[k1, k2]], displayDist: actualLen }, actualLen, edgeMeta, graph, "green", sceneIdx);
+        assert(sGreen > sSurprise, "green should boost park route: surprise=" + sSurprise + " green=" + sGreen);
+    });
+
+    test("scoreCandidate: water vibe boosts a route near water", function () {
+        var graph = {}, edgeMeta = {};
+        var k1 = "0.000000,0.000000", k2 = "0.022500,0.000000";
+        graph[k1] = [{ key: k2, dist: 1 }]; graph[k2] = [{ key: k1, dist: 1 }];
+        edgeMeta[edgeIdOf(k1, k2)] = { hw: "footway", named: false };
+        var actualLen = haversine(0, 0, 0.0225, 0);
+        // Water polyline running parallel to the route, ~80m offset
+        // (within the 100m buffer near_water uses).
+        var sceneIdx = indexScenic({
+            parks: [],
+            waters: [[[0.0004, -0.0007], [0.022, -0.0007]]],
+            landmarks: [],
+        });
+        var sSurprise = scoreCandidate({ paths: [[k1, k2]], displayDist: actualLen }, actualLen, edgeMeta, graph, "surprise", sceneIdx);
+        var sWater = scoreCandidate({ paths: [[k1, k2]], displayDist: actualLen }, actualLen, edgeMeta, graph, "water", sceneIdx);
+        assert(sWater > sSurprise, "water should boost waterside route: surprise=" + sSurprise + " water=" + sWater);
+    });
+
+    test("scoreCandidate: scenic vibes degrade gracefully without sceneIdx", function () {
+        var graph = {}, edgeMeta = {};
+        var k1 = "0.000000,0.000000", k2 = "0.022500,0.000000";
+        graph[k1] = [{ key: k2, dist: 1 }]; graph[k2] = [{ key: k1, dist: 1 }];
+        edgeMeta[edgeIdOf(k1, k2)] = { hw: "footway", named: false };
+        var actualLen = haversine(0, 0, 0.0225, 0);
+        // No sceneIdx — green vibe should produce a finite score (just no boost).
+        var s = scoreCandidate({ paths: [[k1, k2]], displayDist: actualLen }, actualLen, edgeMeta, graph, "green");
+        assert(isFinite(s), "expected finite score, got " + s);
+        assert(s > 0, "expected positive score, got " + s);
+    });
+
     test("scoreCandidate: popular vibe rewards named footways more than surprise", function () {
         var graph = {}, edgeMeta = {};
         var k1 = "0.000000,0.000000", k2 = "0.022500,0.000000";

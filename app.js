@@ -1414,6 +1414,54 @@ function loadFromHash() {
 // advances through the ranked list; regenerates with a new seed when
 // exhausted.
 state.recommender = null;
+state.sceneIdx = null;       // spatial index over scenic data (parks, water, landmarks)
+state.sceneIdxFor = null;    // "lat.toFixed(2):lon.toFixed(2)" — invalidates on city change
+state.sceneIdxLoading = null;
+
+// Kick off scenic-data fetch in the background. Resolves to the spatial
+// index (or null on failure). Caller doesn't have to await — chips are
+// shown optimistically and refined once data arrives.
+async function ensureScenic(lat, lon) {
+    var key = lat.toFixed(2) + ":" + lon.toFixed(2);
+    if (state.sceneIdx && state.sceneIdxFor === key) return state.sceneIdx;
+    if (state.sceneIdxLoading && state.sceneIdxFor === key) return state.sceneIdxLoading;
+    state.sceneIdxFor = key;
+    state.sceneIdxLoading = (async function () {
+        var raw = await loadScenic(lat, lon);
+        if (!raw) return null;
+        var idx = indexScenic(raw);
+        if (state.sceneIdxFor === key) state.sceneIdx = idx; // user hasn't moved
+        return idx;
+    })();
+    return state.sceneIdxLoading;
+}
+
+function applyScenicChipVisibility(sceneIdx, lat, lon) {
+    var chips = {
+        green: document.querySelector('#plan-vibe-chips .plan-chip[data-vibe="green"]'),
+        water: document.querySelector('#plan-vibe-chips .plan-chip[data-vibe="water"]'),
+        landmarks: document.querySelector('#plan-vibe-chips .plan-chip[data-vibe="landmarks"]'),
+    };
+    var visible = { green: true, water: true, landmarks: true };
+    if (sceneIdx) {
+        // Park area within ~5km (10 cells × 500m). Spec §5.2: hide if total
+        // park area within range < 0.1 km² (100,000 m²).
+        var parkArea = 0;
+        var parks = scenicNeighbours(sceneIdx.parks, lat, lon, 10);
+        for (var p = 0; p < parks.length; p++) parkArea += parks[p].area || 0;
+        visible.green = parkArea >= 100000;
+        // Any water within ~8km
+        visible.water = scenicNeighbours(sceneIdx.waters, lat, lon, 16).length > 0;
+        // ≥4 landmarks within ~3km
+        visible.landmarks = scenicNeighbours(sceneIdx.landmarks, lat, lon, 6).length >= 4;
+    }
+    Object.keys(chips).forEach(function (k) {
+        if (!chips[k]) return;
+        chips[k].classList.toggle("plan-chip-hidden", !visible[k]);
+        // If a hidden chip is currently selected, fall back to Surprise.
+        if (!visible[k] && chips[k].classList.contains("selected")) selectPlanVibe("surprise");
+    });
+}
 
 function planDistancePresets() {
     return state.useMiles
@@ -1486,6 +1534,17 @@ function openPlanModal() {
     if (state.startLat != null && state.startLon != null) hint.textContent = "From your last starting point.";
     else hint.textContent = "From the centre of the current map view.";
     document.getElementById("plan-modal").classList.remove("hidden");
+
+    // Apply current visibility state immediately, then refine when scenic
+    // data finishes loading. First open shows all chips; subsequent opens
+    // (sceneIdx already cached) show the filtered set right away.
+    var startLatLon = planStartLatLon();
+    applyScenicChipVisibility(state.sceneIdx, startLatLon[0], startLatLon[1]);
+    ensureScenic(startLatLon[0], startLatLon[1]).then(function (idx) {
+        var modal = document.getElementById("plan-modal");
+        if (!modal || modal.classList.contains("hidden")) return; // closed before data arrived
+        applyScenicChipVisibility(idx, startLatLon[0], startLatLon[1]);
+    });
 }
 
 function closePlanModal() {
@@ -1519,7 +1578,11 @@ async function runRecommender(opts) {
         if (!startKey) { showBanner("Couldn't find any paths near that point", ""); return; }
     }
 
-    var result = recommendRoute(state.graph, state.edgeMeta || {}, startKey, opts);
+    // Scenic data may have loaded by now (kicked off when the modal
+    // opened); pass it through for Green / Water / Landmarks scoring.
+    // null is fine — the scorer treats those vibes as zero-bonus.
+    var optsWithScene = Object.assign({}, opts, { sceneIdx: state.sceneIdx });
+    var result = recommendRoute(state.graph, state.edgeMeta || {}, startKey, optsWithScene);
     if (!result.candidates || result.candidates.length === 0) {
         showBanner("Couldn't generate a route — try a different distance or location", "");
         return;
@@ -1547,7 +1610,8 @@ async function shuffleRecommendation() {
         // Exhausted current batch — regenerate with rotated seed.
         showBanner("Finding more routes...", "loading");
         var newSeed = (rec.seed + 0x9E3779B1) >>> 0;
-        var result = recommendRoute(state.graph, state.edgeMeta || {}, rec.startKey, Object.assign({}, rec.opts, { seed: newSeed }));
+        var shuffleOpts = Object.assign({}, rec.opts, { seed: newSeed, sceneIdx: state.sceneIdx });
+        var result = recommendRoute(state.graph, state.edgeMeta || {}, rec.startKey, shuffleOpts);
         showBanner("");
         if (!result.candidates || result.candidates.length === 0) {
             showBanner("Out of fresh ideas — try a different distance", "");

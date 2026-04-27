@@ -897,6 +897,10 @@ button.menu-item:disabled {
     border-color: #3a8063;
 }
 
+.modal .plan-chip-hidden {
+    display: none;
+}
+
 .plan-actions {
     display: flex;
     gap: 8px;

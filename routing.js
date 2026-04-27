@@ -316,6 +316,183 @@ var MAINROAD_HW = { primary: 1, primary_link: 1, trunk: 1, trunk_link: 1, second
 
 function edgeIdOf(a, b) { return a < b ? a + "|" + b : b + "|" + a; }
 
+// ── Geometry helpers for scenic scoring ──────────────
+// All distances assume the points are within ≤ a few km, so an
+// equirectangular projection at the local latitude is accurate to
+// better than 0.5% and avoids per-point haversine.
+
+function pointInPolygon(lat, lon, poly) {
+    // Standard ray-casting; poly is [[lat, lon], ...]. Closed or not.
+    var inside = false;
+    for (var i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+        var xi = poly[i][1], yi = poly[i][0];
+        var xj = poly[j][1], yj = poly[j][0];
+        var intersect = ((yi > lat) !== (yj > lat)) &&
+                        (lon < (xj - xi) * (lat - yi) / (yj - yi + 1e-12) + xi);
+        if (intersect) inside = !inside;
+    }
+    return inside;
+}
+
+function polygonBBox(poly) {
+    var minLat = Infinity, maxLat = -Infinity, minLon = Infinity, maxLon = -Infinity;
+    for (var i = 0; i < poly.length; i++) {
+        if (poly[i][0] < minLat) minLat = poly[i][0];
+        if (poly[i][0] > maxLat) maxLat = poly[i][0];
+        if (poly[i][1] < minLon) minLon = poly[i][1];
+        if (poly[i][1] > maxLon) maxLon = poly[i][1];
+    }
+    return [minLat, minLon, maxLat, maxLon];
+}
+
+function polygonArea(poly) {
+    // Shoelace in equirectangular metres, signed → take abs.
+    if (poly.length < 3) return 0;
+    var R = 6371000, deg = Math.PI / 180;
+    var lat0 = poly[0][0];
+    var cosLat0 = Math.cos(lat0 * deg);
+    var area = 0;
+    for (var i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+        var x1 = (poly[i][1] - poly[0][1]) * cosLat0 * deg * R;
+        var y1 = (poly[i][0] - poly[0][0]) * deg * R;
+        var x2 = (poly[j][1] - poly[0][1]) * cosLat0 * deg * R;
+        var y2 = (poly[j][0] - poly[0][0]) * deg * R;
+        area += x2 * y1 - x1 * y2;
+    }
+    return Math.abs(area) / 2;
+}
+
+function distPointToSegMetres(lat, lon, aLat, aLon, bLat, bLon) {
+    // Local equirectangular projection at the midpoint of the segment.
+    var R = 6371000, deg = Math.PI / 180;
+    var midLat = (aLat + bLat) / 2;
+    var cosLat = Math.cos(midLat * deg);
+    var px = (lon - aLon) * cosLat * deg * R;
+    var py = (lat - aLat) * deg * R;
+    var bx = (bLon - aLon) * cosLat * deg * R;
+    var by = (bLat - aLat) * deg * R;
+    var len2 = bx * bx + by * by;
+    if (len2 < 1) return Math.sqrt(px * px + py * py);
+    var t = (px * bx + py * by) / len2;
+    if (t < 0) t = 0; else if (t > 1) t = 1;
+    var qx = t * bx, qy = t * by;
+    var dx = px - qx, dy = py - qy;
+    return Math.sqrt(dx * dx + dy * dy);
+}
+
+function distPointToPolyline(lat, lon, polyline) {
+    var best = Infinity;
+    for (var i = 1; i < polyline.length; i++) {
+        var d = distPointToSegMetres(lat, lon, polyline[i-1][0], polyline[i-1][1], polyline[i][0], polyline[i][1]);
+        if (d < best) best = d;
+    }
+    return best;
+}
+
+// Bin scenic geometries into a coarse grid so per-edge lookups are O(1)
+// instead of O(N). One index covers parks, waters, landmarks.
+var SCENIC_CELL = 0.005; // ~500 m
+
+function scenicGridKey(lat, lon) {
+    return (Math.floor(lat / SCENIC_CELL) * SCENIC_CELL).toFixed(4) + ":" +
+           (Math.floor(lon / SCENIC_CELL) * SCENIC_CELL).toFixed(4);
+}
+
+function indexScenic(scenic) {
+    if (!scenic) return null;
+    var idx = { parks: {}, waters: {}, landmarks: {}, raw: scenic };
+    function bin(map, key, item) {
+        if (!map[key]) map[key] = [];
+        map[key].push(item);
+    }
+    function binBBox(map, bbox, item) {
+        // Bin by every cell the bbox touches — bbox-of-polygon is small for
+        // typical parks (<2 cells in both axes), so duplication is bounded.
+        var lat0 = Math.floor(bbox[0] / SCENIC_CELL);
+        var lat1 = Math.floor(bbox[2] / SCENIC_CELL);
+        var lon0 = Math.floor(bbox[1] / SCENIC_CELL);
+        var lon1 = Math.floor(bbox[3] / SCENIC_CELL);
+        for (var la = lat0; la <= lat1; la++) {
+            for (var lo = lon0; lo <= lon1; lo++) {
+                var k = (la * SCENIC_CELL).toFixed(4) + ":" + (lo * SCENIC_CELL).toFixed(4);
+                bin(map, k, item);
+            }
+        }
+    }
+    for (var p = 0; p < scenic.parks.length; p++) {
+        var poly = scenic.parks[p];
+        var bb = polygonBBox(poly);
+        binBBox(idx.parks, bb, { poly: poly, bbox: bb, area: polygonArea(poly) });
+    }
+    for (var w = 0; w < scenic.waters.length; w++) {
+        var line = scenic.waters[w];
+        binBBox(idx.waters, polygonBBox(line), { line: line });
+    }
+    for (var l = 0; l < scenic.landmarks.length; l++) {
+        var ln = scenic.landmarks[l];
+        bin(idx.landmarks, scenicGridKey(ln.lat, ln.lon), ln);
+    }
+    return idx;
+}
+
+// Looks up neighbouring grid cells for a point and yields candidate items.
+function scenicNeighbours(map, lat, lon, radiusCells) {
+    var out = [];
+    var seen = {};
+    var lat0 = Math.floor(lat / SCENIC_CELL);
+    var lon0 = Math.floor(lon / SCENIC_CELL);
+    for (var dla = -radiusCells; dla <= radiusCells; dla++) {
+        for (var dlo = -radiusCells; dlo <= radiusCells; dlo++) {
+            var k = ((lat0 + dla) * SCENIC_CELL).toFixed(4) + ":" + ((lon0 + dlo) * SCENIC_CELL).toFixed(4);
+            var bucket = map[k];
+            if (!bucket) continue;
+            for (var i = 0; i < bucket.length; i++) {
+                if (bucket[i]._uid && seen[bucket[i]._uid]) continue;
+                if (!bucket[i]._uid) bucket[i]._uid = ++_uidSeq;
+                seen[bucket[i]._uid] = 1;
+                out.push(bucket[i]);
+            }
+        }
+    }
+    return out;
+}
+var _uidSeq = 0;
+
+// ── Per-edge scenic flag computation ─────────────────
+// Uses the edge midpoint as the sample. Cheap, sufficient for soft
+// preference scoring — no need to test every interior coord.
+
+function edgeScenicFlags(midLat, midLon, sceneIdx) {
+    if (!sceneIdx) return { in_park: false, near_water: false, landmark_count: 0 };
+
+    var in_park = false;
+    var parkCandidates = scenicNeighbours(sceneIdx.parks, midLat, midLon, 1);
+    for (var p = 0; p < parkCandidates.length; p++) {
+        var bb = parkCandidates[p].bbox;
+        if (midLat < bb[0] || midLat > bb[2] || midLon < bb[1] || midLon > bb[3]) continue;
+        if (pointInPolygon(midLat, midLon, parkCandidates[p].poly)) { in_park = true; break; }
+    }
+
+    var near_water = false;
+    var waterCandidates = scenicNeighbours(sceneIdx.waters, midLat, midLon, 1);
+    for (var w = 0; w < waterCandidates.length && !near_water; w++) {
+        if (distPointToPolyline(midLat, midLon, waterCandidates[w].line) <= 100) near_water = true;
+    }
+
+    var landmark_count = 0;
+    var landmarkCandidates = scenicNeighbours(sceneIdx.landmarks, midLat, midLon, 1);
+    for (var l = 0; l < landmarkCandidates.length; l++) {
+        var lm = landmarkCandidates[l];
+        // Local equirectangular distance — fast & accurate enough.
+        var R = 6371000, deg = Math.PI / 180;
+        var dLat = (lm.lat - midLat) * deg * R;
+        var dLon = (lm.lon - midLon) * Math.cos(midLat * deg) * deg * R;
+        if (dLat * dLat + dLon * dLon <= 80 * 80) landmark_count++;
+    }
+
+    return { in_park: in_park, near_water: near_water, landmark_count: landmark_count };
+}
+
 function pathRawDistance(path) {
     var total = 0;
     for (var i = 1; i < path.length; i++) {
@@ -413,18 +590,20 @@ function generateCandidate(graph, startKey, startLat, startLon, distanceM, mode,
 // Compute the score components that drive sample-and-rank. Pulls
 // per-edge metadata from edgeMeta (populated by applyPaths). The
 // optional `vibe` parameter biases the coefficient mix per the
-// route-recommender spec §5 — "surprise" leaves the default mix,
-// "quiet" triples the main-road penalty, "popular" triples the
-// popularityScore weighting.
-function scoreCandidate(candidate, distanceM, edgeMeta, graph, vibe) {
+// route-recommender spec §5; the optional `sceneIdx` enables Green /
+// Water / Landmarks scoring when scenic data is loaded.
+function scoreCandidate(candidate, distanceM, edgeMeta, graph, vibe, sceneIdx) {
     if (!candidate) return -Infinity;
 
     var walkwayDist = 0, mainRoadDist = 0, namedDist = 0, totalRaw = 0, centralitySum = 0, edgeCount = 0;
+    var parkDist = 0, waterDist = 0, landmarkSum = 0;
     for (var pi = 0; pi < candidate.paths.length; pi++) {
         var path = candidate.paths[pi];
         for (var i = 1; i < path.length; i++) {
             var p1 = path[i-1].split(","), p2 = path[i].split(",");
-            var d = haversine(parseFloat(p1[0]), parseFloat(p1[1]), parseFloat(p2[0]), parseFloat(p2[1]));
+            var lat1 = parseFloat(p1[0]), lon1 = parseFloat(p1[1]);
+            var lat2 = parseFloat(p2[0]), lon2 = parseFloat(p2[1]);
+            var d = haversine(lat1, lon1, lat2, lon2);
             totalRaw += d;
             var eid = edgeIdOf(path[i-1], path[i]);
             var meta = edgeMeta && edgeMeta[eid];
@@ -433,12 +612,17 @@ function scoreCandidate(candidate, distanceM, edgeMeta, graph, vibe) {
                 else if (MAINROAD_HW[meta.hw]) mainRoadDist += d;
                 if (meta.named && WALKWAY_HW[meta.hw]) namedDist += d;
             }
-            // Centrality proxy: degree of both endpoints. Capped so a
-            // single super-hub doesn't dominate.
             var deg1 = (graph[path[i-1]] || []).length;
             var deg2 = (graph[path[i]] || []).length;
             centralitySum += Math.min(deg1, 8) + Math.min(deg2, 8);
             edgeCount++;
+            if (sceneIdx) {
+                var midLat = (lat1 + lat2) / 2, midLon = (lon1 + lon2) / 2;
+                var flags = edgeScenicFlags(midLat, midLon, sceneIdx);
+                if (flags.in_park) parkDist += d;
+                if (flags.near_water) waterDist += d;
+                if (flags.landmark_count > 0) landmarkSum += Math.min(flags.landmark_count, 3);
+            }
         }
     }
     if (totalRaw < 1) return -Infinity;
@@ -446,15 +630,22 @@ function scoreCandidate(candidate, distanceM, edgeMeta, graph, vibe) {
     var walkwayFrac = walkwayDist / totalRaw;
     var mainRoadFrac = mainRoadDist / totalRaw;
     var namedFrac = namedDist / totalRaw;
+    var parkFrac = parkDist / totalRaw;
+    var waterFrac = waterDist / totalRaw;
+    var landmarkBonus = edgeCount > 0 ? landmarkSum / edgeCount : 0; // 0..3
     var avgCentrality = edgeCount > 0 ? (centralitySum / (edgeCount * 2 * 8)) : 0; // normalised 0..1
 
     // Vibe coefficients. Default ("surprise") uses the calibrated mix.
-    // Quiet triples the main-road penalty so the ranker actively avoids
-    // arterials. Popular triples the popularityScore weighting so named
-    // trails + connectivity hubs dominate among similar-length candidates.
+    // Quiet triples the main-road penalty; Popular triples the
+    // popularityScore weighting; Green/Water/Landmarks each add a
+    // dedicated bonus term that's zero unless scenic data is loaded.
     var mainRoadCoef = 0.5, popularityMult = 1;
+    var greenBonus = 0, waterBonus = 0, landmarkChipBonus = 0;
     if (vibe === "quiet") mainRoadCoef = 1.5;
-    if (vibe === "popular") popularityMult = 3;
+    else if (vibe === "popular") popularityMult = 3;
+    else if (vibe === "green") greenBonus = 0.6 * parkFrac;
+    else if (vibe === "water") waterBonus = 0.6 * waterFrac;
+    else if (vibe === "landmarks") landmarkChipBonus = 0.4 * Math.min(landmarkBonus, 1);
 
     // baseQuality: walkways good, main roads bad. Scaled so a pure
     // footway loop scores ~1.0 and a pure-trunk-road loop scores ~-0.5.
@@ -464,6 +655,7 @@ function scoreCandidate(candidate, distanceM, edgeMeta, graph, vibe) {
     // OSM-derived proxies — see route-recommender.md §4.3. Held small
     // (≤0.35 contribution at default mult) so it nudges, never dominates.
     var popularityScore = popularityMult * (0.25 * namedFrac + 0.10 * avgCentrality);
+    var sceneScore = greenBonus + waterBonus + landmarkChipBonus;
 
     // Triangular length match centred on D, falls to 0.3 at ±25%, 0 at ±40%.
     var lengthRatio = candidate.displayDist / distanceM;
@@ -473,14 +665,18 @@ function scoreCandidate(candidate, distanceM, edgeMeta, graph, vibe) {
     else if (dev <= 0.4) lengthMatch = (0.4 - dev) / 0.4 + 0.1;
     else lengthMatch = 0;
 
-    var score = lengthMatch * (baseQuality + popularityScore + 0.5);
+    var score = lengthMatch * (baseQuality + popularityScore + sceneScore + 0.5);
     candidate.scoreBreakdown = {
         baseQuality: baseQuality,
         popularityScore: popularityScore,
+        sceneScore: sceneScore,
         lengthMatch: lengthMatch,
         walkwayFrac: walkwayFrac,
         mainRoadFrac: mainRoadFrac,
         namedFrac: namedFrac,
+        parkFrac: parkFrac,
+        waterFrac: waterFrac,
+        landmarkBonus: landmarkBonus,
         vibe: vibe || "surprise",
     };
     candidate.score = score;
@@ -512,7 +708,7 @@ function recommendRoute(graph, edgeMeta, startKey, opts) {
     if (candidates.length === 0) return { candidates: [], reason: "no-candidates" };
 
     for (var ci = 0; ci < candidates.length; ci++) {
-        scoreCandidate(candidates[ci], distanceM, edgeMeta, graph, vibe);
+        scoreCandidate(candidates[ci], distanceM, edgeMeta, graph, vibe, opts.sceneIdx);
     }
     candidates.sort(function (a, b) { return b.score - a.score; });
     // Drop near-duplicate candidates (≥70% shared edges with a higher-
