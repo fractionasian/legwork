@@ -863,6 +863,13 @@ button.menu-item:disabled {
     margin-bottom: 6px;
 }
 
+.plan-label-hint {
+    color: #6e7280;
+    font-weight: 400;
+    font-size: 12px;
+    margin-left: 4px;
+}
+
 .plan-chips {
     display: flex;
     flex-wrap: wrap;

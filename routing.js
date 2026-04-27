@@ -328,7 +328,11 @@ function pathRawDistance(path) {
 // One generation attempt. Returns null if it can't snap an anchor or
 // route between anchors. Caller retries with adjusted slack / heading.
 function generateCandidate(graph, startKey, startLat, startLon, distanceM, mode, baseHeading, rng) {
-    var anchorCount = mode === "outback" ? 1 : (distanceM <= 5000 ? 2 : 3);
+    // 3 anchors form a quadrilateral loop (perimeter ≈ 5.66r) which lands
+    // close to the target distance after Dijkstra overhead. 2-anchor
+    // triangles (≈5.20r) systematically undershoot by ~8% — see the
+    // accuracy harness in scripts/test-recommender-accuracy.js.
+    var anchorCount = mode === "outback" ? 1 : 3;
 
     for (var attempt = 0; attempt < 4; attempt++) {
         // Loop circumference ~ D ⇒ radius D/(2π). Out-and-back: half D.
@@ -407,8 +411,12 @@ function generateCandidate(graph, startKey, startLat, startLon, distanceM, mode,
 }
 
 // Compute the score components that drive sample-and-rank. Pulls
-// per-edge metadata from edgeMeta (populated by applyPaths).
-function scoreCandidate(candidate, distanceM, edgeMeta, graph) {
+// per-edge metadata from edgeMeta (populated by applyPaths). The
+// optional `vibe` parameter biases the coefficient mix per the
+// route-recommender spec §5 — "surprise" leaves the default mix,
+// "quiet" triples the main-road penalty, "popular" triples the
+// popularityScore weighting.
+function scoreCandidate(candidate, distanceM, edgeMeta, graph, vibe) {
     if (!candidate) return -Infinity;
 
     var walkwayDist = 0, mainRoadDist = 0, namedDist = 0, totalRaw = 0, centralitySum = 0, edgeCount = 0;
@@ -440,14 +448,22 @@ function scoreCandidate(candidate, distanceM, edgeMeta, graph) {
     var namedFrac = namedDist / totalRaw;
     var avgCentrality = edgeCount > 0 ? (centralitySum / (edgeCount * 2 * 8)) : 0; // normalised 0..1
 
+    // Vibe coefficients. Default ("surprise") uses the calibrated mix.
+    // Quiet triples the main-road penalty so the ranker actively avoids
+    // arterials. Popular triples the popularityScore weighting so named
+    // trails + connectivity hubs dominate among similar-length candidates.
+    var mainRoadCoef = 0.5, popularityMult = 1;
+    if (vibe === "quiet") mainRoadCoef = 1.5;
+    if (vibe === "popular") popularityMult = 3;
+
     // baseQuality: walkways good, main roads bad. Scaled so a pure
     // footway loop scores ~1.0 and a pure-trunk-road loop scores ~-0.5.
-    var baseQuality = walkwayFrac - 0.5 * mainRoadFrac;
+    var baseQuality = walkwayFrac - mainRoadCoef * mainRoadFrac;
 
     // popularityScore: named-footway fraction + centrality. Both are
     // OSM-derived proxies — see route-recommender.md §4.3. Held small
-    // (≤0.35 contribution) so it nudges, never dominates.
-    var popularityScore = 0.25 * namedFrac + 0.10 * avgCentrality;
+    // (≤0.35 contribution at default mult) so it nudges, never dominates.
+    var popularityScore = popularityMult * (0.25 * namedFrac + 0.10 * avgCentrality);
 
     // Triangular length match centred on D, falls to 0.3 at ±25%, 0 at ±40%.
     var lengthRatio = candidate.displayDist / distanceM;
@@ -465,6 +481,7 @@ function scoreCandidate(candidate, distanceM, edgeMeta, graph) {
         walkwayFrac: walkwayFrac,
         mainRoadFrac: mainRoadFrac,
         namedFrac: namedFrac,
+        vibe: vibe || "surprise",
     };
     candidate.score = score;
     return score;
@@ -480,6 +497,7 @@ function recommendRoute(graph, edgeMeta, startKey, opts) {
     var mode = opts.mode || "loop";
     var seed = (opts.seed | 0) || Math.floor(Math.random() * 0x7fffffff);
     var count = opts.count || 6;
+    var vibe = opts.vibe || "surprise";
 
     var rng = seededRandom(seed);
     var startParts = startKey.split(",");
@@ -494,7 +512,7 @@ function recommendRoute(graph, edgeMeta, startKey, opts) {
     if (candidates.length === 0) return { candidates: [], reason: "no-candidates" };
 
     for (var ci = 0; ci < candidates.length; ci++) {
-        scoreCandidate(candidates[ci], distanceM, edgeMeta, graph);
+        scoreCandidate(candidates[ci], distanceM, edgeMeta, graph, vibe);
     }
     candidates.sort(function (a, b) { return b.score - a.score; });
     // Drop near-duplicate candidates (≥70% shared edges with a higher-

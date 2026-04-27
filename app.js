@@ -1463,12 +1463,25 @@ function selectPlanMode(mode) {
     }
 }
 
+function selectedPlanVibe() {
+    var sel = document.querySelector("#plan-vibe-chips .plan-chip.selected");
+    return sel ? sel.dataset.vibe : "surprise";
+}
+
+function selectPlanVibe(vibe) {
+    var chips = document.querySelectorAll("#plan-vibe-chips .plan-chip");
+    for (var i = 0; i < chips.length; i++) {
+        chips[i].classList.toggle("selected", chips[i].dataset.vibe === vibe);
+    }
+}
+
 function openPlanModal() {
     buildPlanChips();
     // Inherit existing mode unless it's oneway (which doesn't make sense
     // for a generated route — there's no destination to head to).
     var initialMode = state.mode === "outback" ? "outback" : "loop";
     selectPlanMode(initialMode);
+    selectPlanVibe("surprise");
     var hint = document.getElementById("plan-hint");
     if (state.startLat != null && state.startLon != null) hint.textContent = "From your last starting point.";
     else hint.textContent = "From the centre of the current map view.";
@@ -1580,11 +1593,18 @@ for (var pmi = 0; pmi < planModeChips.length; pmi++) {
         chip.addEventListener("click", function () { selectPlanMode(chip.dataset.mode); });
     })(planModeChips[pmi]);
 }
+var planVibeChips = document.querySelectorAll("#plan-vibe-chips .plan-chip");
+for (var pvi = 0; pvi < planVibeChips.length; pvi++) {
+    (function (chip) {
+        chip.addEventListener("click", function () { selectPlanVibe(chip.dataset.vibe); });
+    })(planVibeChips[pvi]);
+}
 document.getElementById("plan-go").addEventListener("click", function () {
     var distanceM = selectedPlanDistance();
     var mode = selectedPlanMode();
+    var vibe = selectedPlanVibe();
     closePlanModal();
-    runRecommender({ distanceM: distanceM, mode: mode });
+    runRecommender({ distanceM: distanceM, mode: mode, vibe: vibe });
 });
 document.getElementById("shuffle-chip").addEventListener("click", shuffleRecommendation);
 document.getElementById("shuffle-chip").addEventListener("keydown", function (e) {
