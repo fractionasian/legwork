@@ -93,8 +93,22 @@ score = lengthMatch × vibeMultiplier × baseQuality
 
 - `lengthMatch`: triangular function peaking at 1.0 when `actual = D`,
   falling to 0.5 at `D ± 25%`, 0 beyond.
-- `baseQuality`: weighted sum of `(walkway %) + (named-trail %) - (main-road %)`.
+- `baseQuality`: weighted sum of `(walkway %) + (named-trail %) - (main-road %) + popularityScore`.
   Always applied; encodes "feels runnable".
+- `popularityScore`: a free-data proxy for "where do people actually run".
+  Strava's heatmap is the gold standard but its data is paywalled and
+  ToS-restricted. We approximate with signals already in OSM:
+  - Membership in a `route=foot/hiking/running` relation (×1.0 boost
+    per metre — a recognised trail).
+  - Presence of a `name=*` tag on a footway/path (×0.4).
+  - Proximity (≤80 m) to a landmark whose node carries `wikipedia=*`
+    or `wikidata=*` — i.e. famous, not just any monument (×0.3 per
+    landmark, capped at 3).
+  - Graph degree-centrality of edge endpoints (high-connectivity nodes
+    correlate with foot-traffic hubs; ×0–0.2 sliding).
+  All four are proxies, not ground truth. The composite term is
+  deliberately small relative to `baseQuality`'s walkway/main-road
+  contribution — popularity nudges, never dominates.
 - `vibeMultiplier`: 1.0 by default. Each vibe chip overrides this —
   see §5.
 
@@ -118,6 +132,7 @@ time and hidden when the surrounding tile lacks the data they need (see
 | 🏛️ Landmarks | passes ≥2 `tourism=viewpoint/artwork/monument/memorial` or `historic=*` nodes | scenic-spec landmark nodes |
 | 🤫 Quiet | minimises edges with `maxspeed > 50` or `highway=primary/trunk`; bonuses `traffic_calming=*` and `living_street` | already in graph |
 | 🏞️ Flat | minimises total ascent | elevation grid (see §6.2) |
+| 🔥 Popular | amplifies `popularityScore` (§4.3) ×3, so named trails + Wikipedia-tagged corridors dominate | already in graph (no new fetch) |
 
 Names are deliberately feel-based, not location-based — Water covers
 rivers and lakes too, so it works in Canberra (Lake Burley Griffin) and
@@ -135,12 +150,18 @@ When the recommender sheet opens, scan the currently loaded tile data:
 - 🌳 Green: hide if total park area within `D / 2` is < 0.1 km².
 - 🤫 Quiet: always show (urban-centric chip; the tag data is universal).
 - 🏞️ Flat: always show.
+- 🔥 Popular: hide if no `route=foot/hiking/running` relation members
+  AND no Wikipedia-tagged landmarks within `D` of the start. Reasoning:
+  with neither signal present, all candidates score identically and
+  the chip is a placebo.
 - 🎲 Surprise: always show.
 
-This means a runner starting in Perth CBD sees `🎲 🌳 💧 🏛️ 🤫 🏞️`
-(everything — Swan River, Kings Park, lots of heritage). A runner in
-the suburbs of Mt Lawley sees `🎲 🌳 🤫 🏞️` (Hyde Park is close enough,
-no water). A runner deep in the Pilbara backblocks sees `🎲 🤫 🏞️`.
+This means a runner starting in Perth CBD sees
+`🎲 🌳 💧 🏛️ 🤫 🏞️ 🔥` (everything — Swan River, Kings Park, lots of
+heritage, the Heritage Trail relation, Wikipedia-tagged buildings). A
+runner in the suburbs of Mt Lawley sees `🎲 🌳 🤫 🏞️` (Hyde Park is
+close enough, no water, no famous landmarks). A runner deep in the
+Pilbara backblocks sees `🎲 🤫 🏞️`.
 
 ### 5.3 No persisted state
 
@@ -169,6 +190,14 @@ What's new:
 
 - `natural=water` and `waterway=river` lines, for the Water chip. One
   extra Overpass stanza, ~50–200 KB per typical city tile.
+- `wikipedia=*` and `wikidata=*` tags on landmark nodes (already
+  fetched via the scenic-spec landmark stanza — just retain them in
+  properties, no query change). Used by `popularityScore` (§4.3) and
+  the 🔥 Popular chip to distinguish "famous" landmarks from "any
+  landmark". Adds zero payload — these tags ride along on nodes we
+  already pull.
+- Graph degree-centrality is computed on the existing graph at build
+  time; no new fetch.
 
 ### 6.2 Elevation grid (Flat chip)
 
@@ -244,7 +273,9 @@ a waypoint-synthesiser.
 
 - Implement §4.1 loop + out-and-back generators with multi-attempt slack
   adjustment.
-- Implement §4.3 score function with `baseQuality` only (no vibes yet).
+- Implement §4.3 score function with `baseQuality` only — including the
+  full `popularityScore` term, since named-trail membership and edge
+  centrality are already cheap to compute.
 - Implement Shuffle (cycle ranked candidates, regenerate when exhausted).
 - Wire entry point (long-press OR distance-menu affordance, pick one).
 - No vibe chips. Hard-code Surprise behaviour.
@@ -256,12 +287,15 @@ visibly prefer footways over arterials.
 ### Phase 2 — Vibes minus Flat (~200 LoC)
 
 - Add chip row to recommender sheet. Surprise / Green / Water /
-  Landmarks / Quiet.
+  Landmarks / Quiet / Popular.
 - Context-aware chip visibility.
 - Score-function `vibeMultiplier` per chip.
 
 Depends on the route-preferences spec's scenic-data stanza already being
-in place. If it isn't yet, ship Phase 2 as part of (or after) it.
+in place (for Green / Water / Landmarks). 🔥 Popular has no extra data
+dependency — it just amplifies the `popularityScore` term already
+computed in Phase 1, so it can ship with this phase or earlier if Green
+/ Water / Landmarks slip.
 
 ### Phase 3 — Flat chip (~250 LoC)
 
@@ -335,6 +369,17 @@ needed in `build-tiles.js`. One-time cost per cached city.
 proxy for "feels safe / pleasant to run". If users misread it as a
 literal noise-meter feature, rename to "Calm streets" or similar. Worth
 testing with one or two real users.
+
+### 9.9 Popular ≠ Strava heatmap
+
+The 🔥 Popular chip is an OSM-derived proxy: it boosts named trails,
+Wikipedia-tagged corridors, and high-centrality edges. It is **not**
+a heatmap and will sometimes pick "obvious tourist" routes over
+"locals' favourite shortcut" because the OSM signal is biased toward
+named/famous things. Honest framing in the chip tooltip ("favours
+recognised running corridors") avoids over-promising. The companion
+*Popular routes nearby* spec covers the discovery side of this need
+with curated route ingestion — different feature, different shape.
 
 ## 10. Acceptance criteria (Phase 1)
 
