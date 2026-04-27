@@ -95,7 +95,7 @@ MinHeap.prototype.pop = function () {
 };
 MinHeap.prototype.size = function () { return this.data.length; };
 
-function dijkstra(graph, startKey, endKey) {
+function dijkstra(graph, startKey, endKey, edgePenalty) {
     if (!graph[startKey] || !graph[endKey]) return null;
     if (startKey === endKey) return { dist: 0, path: [startKey] };
     var dist = {}, prev = {}, visited = {};
@@ -111,7 +111,16 @@ function dijkstra(graph, startKey, endKey) {
         for (var n = 0; n < neighbors.length; n++) {
             var nb = neighbors[n];
             if (visited[nb.key]) continue;
-            var newDist = dist[current.key] + nb.dist;
+            var stepCost = nb.dist;
+            // Optional per-edge multiplier — used by the recommender's loop
+            // closing leg to discourage but not forbid edge re-use, so a
+            // dead-end peninsula can still get out.
+            if (edgePenalty) {
+                var eid = current.key < nb.key ? current.key + "|" + nb.key : nb.key + "|" + current.key;
+                var mult = edgePenalty[eid];
+                if (mult) stepCost *= mult;
+            }
+            var newDist = dist[current.key] + stepCost;
             if (dist[nb.key] === undefined || newDist < dist[nb.key]) {
                 dist[nb.key] = newDist;
                 prev[nb.key] = current.key;
@@ -269,6 +278,255 @@ function sampleRoute(coords, intervalMetres) {
     var last = coords[coords.length - 1], lastS = points[points.length - 1];
     if (last[0] !== lastS[0] || last[1] !== lastS[1]) points.push(last);
     return points;
+}
+
+// ── Route recommender ────────────────────────────────
+// Synthesises waypoints to hit a target distance from a chosen start.
+// Spec: docs/design/route-recommender.md. MVP scope: jittered-circle
+// loop generator, single-anchor out-and-back, sample-and-rank with
+// baseQuality + popularityScore + lengthMatch. No vibe chips yet.
+
+// Project a lat/lon by an initial bearing (radians) and great-circle
+// distance (metres). Used to pick anchor points around a start.
+function projectFromPoint(lat, lon, bearing, distanceM) {
+    var R = 6371000;
+    var d = distanceM / R;
+    var lat1 = lat * Math.PI / 180;
+    var lon1 = lon * Math.PI / 180;
+    var lat2 = Math.asin(Math.sin(lat1) * Math.cos(d) + Math.cos(lat1) * Math.sin(d) * Math.cos(bearing));
+    var lon2 = lon1 + Math.atan2(Math.sin(bearing) * Math.sin(d) * Math.cos(lat1), Math.cos(d) - Math.sin(lat1) * Math.sin(lat2));
+    return [lat2 * 180 / Math.PI, lon2 * 180 / Math.PI];
+}
+
+// Mulberry32 — small deterministic RNG so Shuffle is reproducible per
+// seed and the same Plan request returns the same six candidates.
+function seededRandom(seed) {
+    var s = (seed >>> 0) || 1;
+    return function () {
+        s = (s + 0x6D2B79F5) >>> 0;
+        var t = s;
+        t = Math.imul(t ^ (t >>> 15), t | 1);
+        t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+}
+
+var WALKWAY_HW = { footway: 1, path: 1, cycleway: 1, pedestrian: 1, steps: 1, track: 1 };
+var MAINROAD_HW = { primary: 1, primary_link: 1, trunk: 1, trunk_link: 1, secondary: 1, secondary_link: 1 };
+
+function edgeIdOf(a, b) { return a < b ? a + "|" + b : b + "|" + a; }
+
+function pathRawDistance(path) {
+    var total = 0;
+    for (var i = 1; i < path.length; i++) {
+        var p1 = path[i-1].split(","), p2 = path[i].split(",");
+        total += haversine(parseFloat(p1[0]), parseFloat(p1[1]), parseFloat(p2[0]), parseFloat(p2[1]));
+    }
+    return total;
+}
+
+// One generation attempt. Returns null if it can't snap an anchor or
+// route between anchors. Caller retries with adjusted slack / heading.
+function generateCandidate(graph, startKey, startLat, startLon, distanceM, mode, baseHeading, rng) {
+    var anchorCount = mode === "outback" ? 1 : (distanceM <= 5000 ? 2 : 3);
+
+    for (var attempt = 0; attempt < 4; attempt++) {
+        // Loop circumference ~ D ⇒ radius D/(2π). Out-and-back: half D.
+        // Slack tightens on overshoot, loosens on undershoot.
+        var slack = 0.85 + (attempt * 0.05);
+        var radius = mode === "outback" ? (distanceM * 0.5 * slack) : (distanceM / (2 * Math.PI) * slack);
+
+        var anchorKeys = [];
+        var failed = false;
+        for (var a = 0; a < anchorCount; a++) {
+            var angle = baseHeading + a * (2 * Math.PI / anchorCount);
+            var jitter = 0.85 + rng() * 0.3;
+            var coords = projectFromPoint(startLat, startLon, angle, radius * jitter);
+            var aKey = closestNode(graph, coords[0], coords[1]);
+            if (!aKey) { failed = true; break; }
+            var aParts = aKey.split(",");
+            var snapDist = haversine(coords[0], coords[1], parseFloat(aParts[0]), parseFloat(aParts[1]));
+            if (snapDist > 350) {
+                // Perturb heading and try again — sometimes a road just isn't
+                // there in the first chosen direction.
+                var coords2 = projectFromPoint(startLat, startLon, angle + 0.35, radius * jitter);
+                aKey = closestNode(graph, coords2[0], coords2[1]);
+                if (!aKey) { failed = true; break; }
+            }
+            if (aKey === startKey) { failed = true; break; }
+            anchorKeys.push(aKey);
+        }
+        if (failed) continue;
+
+        var keys = [startKey].concat(anchorKeys);
+        if (mode !== "outback") keys.push(startKey);
+
+        var paths = [];
+        var usedEdges = {};
+        var totalWeighted = 0;
+        var legFailed = false;
+        for (var k = 1; k < keys.length; k++) {
+            var fromK = keys[k-1], toK = keys[k];
+            // Closing leg in a loop: penalise edges already used 5×, but
+            // don't forbid (a peninsula start might need to re-cross a
+            // bridge to come home).
+            var isClosingLeg = (mode !== "outback") && (k === keys.length - 1);
+            var penalty = isClosingLeg ? usedEdges : null;
+            var result = dijkstra(graph, fromK, toK, penalty);
+            if (!result || result.path.length < 2) { legFailed = true; break; }
+            paths.push(result.path);
+            totalWeighted += result.dist;
+            if (!isClosingLeg) {
+                for (var p = 1; p < result.path.length; p++) {
+                    var eid = edgeIdOf(result.path[p-1], result.path[p]);
+                    usedEdges[eid] = 5;
+                }
+            }
+        }
+        if (legFailed) continue;
+
+        var rawTotal = 0;
+        for (var pp = 0; pp < paths.length; pp++) rawTotal += pathRawDistance(paths[pp]);
+        // Out-and-back display doubles the one-way distance (see
+        // updateDistance in app.js), so the target for our generated
+        // path is half D. We still validate against D total.
+        var measured = mode === "outback" ? rawTotal * 2 : rawTotal;
+
+        if (measured >= distanceM * 0.7 && measured <= distanceM * 1.4) {
+            return {
+                anchorKeys: anchorKeys,
+                paths: paths,
+                rawDist: rawTotal,
+                displayDist: measured,
+                weightedDist: totalWeighted,
+                mode: mode,
+            };
+        }
+    }
+    return null;
+}
+
+// Compute the score components that drive sample-and-rank. Pulls
+// per-edge metadata from edgeMeta (populated by applyPaths).
+function scoreCandidate(candidate, distanceM, edgeMeta, graph) {
+    if (!candidate) return -Infinity;
+
+    var walkwayDist = 0, mainRoadDist = 0, namedDist = 0, totalRaw = 0, centralitySum = 0, edgeCount = 0;
+    for (var pi = 0; pi < candidate.paths.length; pi++) {
+        var path = candidate.paths[pi];
+        for (var i = 1; i < path.length; i++) {
+            var p1 = path[i-1].split(","), p2 = path[i].split(",");
+            var d = haversine(parseFloat(p1[0]), parseFloat(p1[1]), parseFloat(p2[0]), parseFloat(p2[1]));
+            totalRaw += d;
+            var eid = edgeIdOf(path[i-1], path[i]);
+            var meta = edgeMeta && edgeMeta[eid];
+            if (meta) {
+                if (WALKWAY_HW[meta.hw]) walkwayDist += d;
+                else if (MAINROAD_HW[meta.hw]) mainRoadDist += d;
+                if (meta.named && WALKWAY_HW[meta.hw]) namedDist += d;
+            }
+            // Centrality proxy: degree of both endpoints. Capped so a
+            // single super-hub doesn't dominate.
+            var deg1 = (graph[path[i-1]] || []).length;
+            var deg2 = (graph[path[i]] || []).length;
+            centralitySum += Math.min(deg1, 8) + Math.min(deg2, 8);
+            edgeCount++;
+        }
+    }
+    if (totalRaw < 1) return -Infinity;
+
+    var walkwayFrac = walkwayDist / totalRaw;
+    var mainRoadFrac = mainRoadDist / totalRaw;
+    var namedFrac = namedDist / totalRaw;
+    var avgCentrality = edgeCount > 0 ? (centralitySum / (edgeCount * 2 * 8)) : 0; // normalised 0..1
+
+    // baseQuality: walkways good, main roads bad. Scaled so a pure
+    // footway loop scores ~1.0 and a pure-trunk-road loop scores ~-0.5.
+    var baseQuality = walkwayFrac - 0.5 * mainRoadFrac;
+
+    // popularityScore: named-footway fraction + centrality. Both are
+    // OSM-derived proxies — see route-recommender.md §4.3. Held small
+    // (≤0.35 contribution) so it nudges, never dominates.
+    var popularityScore = 0.25 * namedFrac + 0.10 * avgCentrality;
+
+    // Triangular length match centred on D, falls to 0.3 at ±25%, 0 at ±40%.
+    var lengthRatio = candidate.displayDist / distanceM;
+    var lengthMatch;
+    var dev = Math.abs(lengthRatio - 1);
+    if (dev <= 0.15) lengthMatch = 1 - dev / 0.4;
+    else if (dev <= 0.4) lengthMatch = (0.4 - dev) / 0.4 + 0.1;
+    else lengthMatch = 0;
+
+    var score = lengthMatch * (baseQuality + popularityScore + 0.5);
+    candidate.scoreBreakdown = {
+        baseQuality: baseQuality,
+        popularityScore: popularityScore,
+        lengthMatch: lengthMatch,
+        walkwayFrac: walkwayFrac,
+        mainRoadFrac: mainRoadFrac,
+        namedFrac: namedFrac,
+    };
+    candidate.score = score;
+    return score;
+}
+
+// Public entry point. Generates `count` candidates from a seed, scores
+// them, returns ranked descending. Caller materialises candidates[0]
+// as the displayed route; Shuffle advances through the array and
+// regenerates with a rotated seed when exhausted.
+function recommendRoute(graph, edgeMeta, startKey, opts) {
+    if (!graph[startKey]) return { candidates: [], reason: "no-start-node" };
+    var distanceM = opts.distanceM;
+    var mode = opts.mode || "loop";
+    var seed = (opts.seed | 0) || Math.floor(Math.random() * 0x7fffffff);
+    var count = opts.count || 6;
+
+    var rng = seededRandom(seed);
+    var startParts = startKey.split(",");
+    var startLat = parseFloat(startParts[0]), startLon = parseFloat(startParts[1]);
+
+    var candidates = [];
+    for (var i = 0; i < count; i++) {
+        var heading = (i / count) * 2 * Math.PI + rng() * 0.5;
+        var c = generateCandidate(graph, startKey, startLat, startLon, distanceM, mode, heading, rng);
+        if (c) candidates.push(c);
+    }
+    if (candidates.length === 0) return { candidates: [], reason: "no-candidates" };
+
+    for (var ci = 0; ci < candidates.length; ci++) {
+        scoreCandidate(candidates[ci], distanceM, edgeMeta, graph);
+    }
+    candidates.sort(function (a, b) { return b.score - a.score; });
+    // Drop near-duplicate candidates (≥70% shared edges with a higher-
+    // ranked one) so Shuffle gives a visibly different route each tap.
+    var deduped = [candidates[0]];
+    for (var di = 1; di < candidates.length; di++) {
+        var keep = true;
+        for (var dj = 0; dj < deduped.length; dj++) {
+            if (candidateOverlap(candidates[di], deduped[dj]) > 0.7) { keep = false; break; }
+        }
+        if (keep) deduped.push(candidates[di]);
+    }
+    return { candidates: deduped, seed: seed };
+}
+
+function candidateOverlap(a, b) {
+    var aEdges = {};
+    var aTotal = 0;
+    for (var i = 0; i < a.paths.length; i++) {
+        var path = a.paths[i];
+        for (var j = 1; j < path.length; j++) { aEdges[edgeIdOf(path[j-1], path[j])] = 1; aTotal++; }
+    }
+    if (aTotal === 0) return 0;
+    var shared = 0, bTotal = 0;
+    for (var p2 = 0; p2 < b.paths.length; p2++) {
+        var path2 = b.paths[p2];
+        for (var k = 1; k < path2.length; k++) {
+            bTotal++;
+            if (aEdges[edgeIdOf(path2[k-1], path2[k])]) shared++;
+        }
+    }
+    return bTotal === 0 ? 0 : shared / Math.max(aTotal, bTotal);
 }
 
 function smoothElevations(elevData) {

@@ -50,6 +50,7 @@
                 <button id="address-clear" class="address-clear hidden" type="button" aria-label="Clear search">&#10005;</button>
                 <div class="autocomplete-list" id="autocomplete-list" role="listbox" aria-label="Address suggestions"></div>
             </div>
+            <button id="plan-route-btn" class="menu-item">&#10024; Plan a route</button>
             <button id="save-route-btn" class="menu-item">Save route</button>
             <div id="save-route-input" class="save-input-row hidden">
                 <input type="text" id="save-route-name" placeholder="Route name..." autocomplete="off" />
@@ -89,6 +90,9 @@
     <div class="info-banner" id="info-banner" role="alert" aria-live="assertive"></div>
     <div class="map-area">
         <div id="map" role="application" aria-label="Route planning map"></div>
+        <div class="shuffle-chip hidden" id="shuffle-chip" role="button" tabindex="0" aria-label="Shuffle to next suggested route">
+            &#127922; Shuffle
+        </div>
         <div class="elevation-panel" id="elevation-panel">
             <div class="elevation-stats" id="elevation-stats">
                 <button id="elevation-toggle" class="elevation-toggle" aria-label="Collapse elevation chart" aria-expanded="true">&#9662;</button>
@@ -100,6 +104,28 @@
             </div>
             <div id="elevation-container">
                 <canvas id="elevation-canvas"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay hidden" id="plan-modal">
+        <div class="modal">
+            <h2>&#10024; Plan a route</h2>
+            <p class="plan-hint" id="plan-hint">From this map view.</p>
+            <div class="plan-row">
+                <span class="plan-label">Distance</span>
+                <div class="plan-chips" id="plan-distance-chips" role="radiogroup" aria-label="Target distance"></div>
+            </div>
+            <div class="plan-row">
+                <span class="plan-label">Mode</span>
+                <div class="plan-chips" id="plan-mode-chips" role="radiogroup" aria-label="Route mode">
+                    <button type="button" class="plan-chip" data-mode="loop" role="radio">&#8635; Loop</button>
+                    <button type="button" class="plan-chip" data-mode="outback" role="radio">&#8644; Out &amp; Back</button>
+                </div>
+            </div>
+            <div class="plan-actions">
+                <button id="plan-cancel" class="plan-cancel">Cancel</button>
+                <button id="plan-go" class="plan-go">Plan</button>
             </div>
         </div>
     </div>

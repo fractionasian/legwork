@@ -181,7 +181,7 @@ async function resetGraphIfCityChanged(lat, lon) {
     state.graph = null;
     state.pathFeatures = null;
     state.seenIds = {};
-    state.edgeSet = {};
+    state.edgeMeta = {};
     state.nodeAttrs = {};
     spatialGrid = {};
     if (state.pathLayer) {
@@ -410,12 +410,13 @@ function applyPaths(geojson, opts) {
     }
 
     if (!state.graph) state.graph = {};
-    if (!state.edgeSet) state.edgeSet = {};
+    if (!state.edgeMeta) state.edgeMeta = {};
     var adj = state.graph;
     for (var f = 0; f < newFeatures.length; f++) {
         var props = newFeatures[f].properties;
         var coords = newFeatures[f].geometry.coordinates;
         var hw = props.highway || "";
+        var named = !!(props.name && props.name.length);
         // Combine base road weight + way-level preferences (P1 named trails, P5 soft surfaces).
         var baseWeight = (ROAD_WEIGHT[hw] || 1.2) * wayPrefMultiplier(hw, props.surface || "", props.name || "");
         for (var c = 1; c < coords.length; c++) {
@@ -423,8 +424,10 @@ function applyPaths(geojson, opts) {
             var lat2 = coords[c][1], lon2 = coords[c][0];
             var k1 = nodeKey(lat1, lon1), k2 = nodeKey(lat2, lon2);
             var edgeId = k1 < k2 ? k1 + "|" + k2 : k2 + "|" + k1;
-            if (state.edgeSet[edgeId]) continue;
-            state.edgeSet[edgeId] = true;
+            if (state.edgeMeta[edgeId]) continue;
+            // edgeMeta doubles as a dedup set (truthy presence) and the
+            // per-edge attribute lookup the recommender's scorer needs.
+            state.edgeMeta[edgeId] = { hw: hw, named: named };
             // Node-level preferences (P2 traffic signals, P3 marked crossings, P4 barriers)
             // apply to both endpoints; the worst penalty / best bonus dominates via product.
             var nodeMult = nodePrefMultiplier(state.nodeAttrs[k1]) * nodePrefMultiplier(state.nodeAttrs[k2]);

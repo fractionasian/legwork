@@ -366,7 +366,12 @@ function wireMarkerEvents(marker) {
     });
 }
 
-function onMapClick(e) { addWaypointAt(e.latlng.lat, e.latlng.lng); }
+function onMapClick(e) {
+    // Manual waypoint placement abandons any prior recommendation — the
+    // user is taking over the route from here.
+    if (state.recommender) resetRecommenderState();
+    addWaypointAt(e.latlng.lat, e.latlng.lng);
+}
 
 async function addWaypointAt(lat, lon, opts) {
     // Auto-load paths if we don't have coverage here
@@ -1083,6 +1088,7 @@ document.getElementById("reverse-btn").addEventListener("click", function () {
     }, 1500);
 });
 document.getElementById("clear-btn").addEventListener("click", function () {
+    resetRecommenderState();
     clearRouteLayers(false);
     updateRoute();
 });
@@ -1401,6 +1407,195 @@ function loadFromHash() {
     return points;
 }
 
+// ── Plan-a-route (recommender) ────────────────────────
+// Spec: docs/design/route-recommender.md. MVP entry point: side-menu
+// button → modal (distance + mode chips) → generator → top-ranked
+// candidate becomes a normal multi-waypoint route. Shuffle chip
+// advances through the ranked list; regenerates with a new seed when
+// exhausted.
+state.recommender = null;
+
+function planDistancePresets() {
+    return state.useMiles
+        ? [{ label: "2 mi", m: 2 * 1609.344 }, { label: "3 mi", m: 3 * 1609.344 }, { label: "5 mi", m: 5 * 1609.344 }, { label: "6 mi", m: 6 * 1609.344 }, { label: "10 mi", m: 10 * 1609.344 }]
+        : [{ label: "3 km", m: 3000 }, { label: "5 km", m: 5000 }, { label: "8 km", m: 8000 }, { label: "10 km", m: 10000 }, { label: "15 km", m: 15000 }];
+}
+
+function buildPlanChips() {
+    var distRow = document.getElementById("plan-distance-chips");
+    distRow.innerHTML = "";
+    var presets = planDistancePresets();
+    for (var i = 0; i < presets.length; i++) {
+        (function (p) {
+            var btn = document.createElement("button");
+            btn.type = "button";
+            btn.className = "plan-chip";
+            btn.textContent = p.label;
+            btn.dataset.metres = String(p.m);
+            btn.setAttribute("role", "radio");
+            btn.addEventListener("click", function () {
+                var siblings = distRow.querySelectorAll(".plan-chip");
+                for (var s = 0; s < siblings.length; s++) siblings[s].classList.remove("selected");
+                btn.classList.add("selected");
+            });
+            distRow.appendChild(btn);
+        })(presets[i]);
+    }
+    // Default-select 5km / 3mi.
+    var defaultIdx = 1;
+    distRow.children[defaultIdx].classList.add("selected");
+}
+
+function selectedPlanDistance() {
+    var sel = document.querySelector("#plan-distance-chips .plan-chip.selected");
+    return sel ? parseFloat(sel.dataset.metres) : 5000;
+}
+
+function selectedPlanMode() {
+    var sel = document.querySelector("#plan-mode-chips .plan-chip.selected");
+    return sel ? sel.dataset.mode : "loop";
+}
+
+function selectPlanMode(mode) {
+    var chips = document.querySelectorAll("#plan-mode-chips .plan-chip");
+    for (var i = 0; i < chips.length; i++) {
+        chips[i].classList.toggle("selected", chips[i].dataset.mode === mode);
+    }
+}
+
+function openPlanModal() {
+    buildPlanChips();
+    // Inherit existing mode unless it's oneway (which doesn't make sense
+    // for a generated route — there's no destination to head to).
+    var initialMode = state.mode === "outback" ? "outback" : "loop";
+    selectPlanMode(initialMode);
+    var hint = document.getElementById("plan-hint");
+    if (state.startLat != null && state.startLon != null) hint.textContent = "From your last starting point.";
+    else hint.textContent = "From the centre of the current map view.";
+    document.getElementById("plan-modal").classList.remove("hidden");
+}
+
+function closePlanModal() {
+    document.getElementById("plan-modal").classList.add("hidden");
+}
+
+function planStartLatLon() {
+    if (state.startLat != null && state.startLon != null) return [state.startLat, state.startLon];
+    var c = state.map.getCenter();
+    return [c.lat, c.lng];
+}
+
+async function runRecommender(opts) {
+    var startLatLon = planStartLatLon();
+    var lat = startLatLon[0], lon = startLatLon[1];
+
+    showBanner("Planning a route...", "loading");
+    await resetGraphIfCityChanged(lat, lon);
+    if (!state.graph) await loadTilesOrPaths(lat, lon);
+
+    var startKey = closestNode(state.graph || {}, lat, lon);
+    if (!startKey) {
+        showBanner("Couldn't find any paths near that point", "");
+        return;
+    }
+    var sp = startKey.split(",");
+    var snap = haversine(lat, lon, parseFloat(sp[0]), parseFloat(sp[1]));
+    if (snap > 250) {
+        await loadPaths(lat, lon);
+        startKey = closestNode(state.graph, lat, lon);
+        if (!startKey) { showBanner("Couldn't find any paths near that point", ""); return; }
+    }
+
+    var result = recommendRoute(state.graph, state.edgeMeta || {}, startKey, opts);
+    if (!result.candidates || result.candidates.length === 0) {
+        showBanner("Couldn't generate a route — try a different distance or location", "");
+        return;
+    }
+    state.recommender = {
+        startKey: startKey,
+        opts: opts,
+        seed: result.seed,
+        candidates: result.candidates,
+        idx: 0,
+    };
+    showBanner("");
+    state.mode = opts.mode;
+    setModeButton();
+    updateReverseVisibility();
+    await materialiseRecommendation(result.candidates[0]);
+    showShuffleChip(true);
+}
+
+async function shuffleRecommendation() {
+    var rec = state.recommender;
+    if (!rec) return;
+    rec.idx++;
+    if (rec.idx >= rec.candidates.length) {
+        // Exhausted current batch — regenerate with rotated seed.
+        showBanner("Finding more routes...", "loading");
+        var newSeed = (rec.seed + 0x9E3779B1) >>> 0;
+        var result = recommendRoute(state.graph, state.edgeMeta || {}, rec.startKey, Object.assign({}, rec.opts, { seed: newSeed }));
+        showBanner("");
+        if (!result.candidates || result.candidates.length === 0) {
+            showBanner("Out of fresh ideas — try a different distance", "");
+            return;
+        }
+        rec.candidates = result.candidates;
+        rec.idx = 0;
+        rec.seed = newSeed;
+    }
+    await materialiseRecommendation(rec.candidates[rec.idx]);
+}
+
+async function materialiseRecommendation(candidate) {
+    if (!candidate || !state.recommender) return;
+    clearRouteLayers(false);
+    var sp = state.recommender.startKey.split(",");
+    await addWaypointAt(parseFloat(sp[0]), parseFloat(sp[1]), { exactPosition: true });
+    for (var i = 0; i < candidate.anchorKeys.length; i++) {
+        var p = candidate.anchorKeys[i].split(",");
+        await addWaypointAt(parseFloat(p[0]), parseFloat(p[1]), { exactPosition: true });
+    }
+    var bounds = L.latLngBounds(state.waypoints.map(function (w) { return [w.lat, w.lon]; }));
+    state.map.fitBounds(bounds, { padding: [40, 40], maxZoom: 16 });
+}
+
+function showShuffleChip(visible) {
+    var chip = document.getElementById("shuffle-chip");
+    if (!chip) return;
+    chip.classList.toggle("hidden", !visible);
+}
+
+document.getElementById("plan-route-btn").addEventListener("click", function () {
+    closeMenu();
+    openPlanModal();
+});
+document.getElementById("plan-cancel").addEventListener("click", closePlanModal);
+document.getElementById("plan-modal").addEventListener("click", function (e) {
+    if (e.target.id === "plan-modal") closePlanModal();
+});
+var planModeChips = document.querySelectorAll("#plan-mode-chips .plan-chip");
+for (var pmi = 0; pmi < planModeChips.length; pmi++) {
+    (function (chip) {
+        chip.addEventListener("click", function () { selectPlanMode(chip.dataset.mode); });
+    })(planModeChips[pmi]);
+}
+document.getElementById("plan-go").addEventListener("click", function () {
+    var distanceM = selectedPlanDistance();
+    var mode = selectedPlanMode();
+    closePlanModal();
+    runRecommender({ distanceM: distanceM, mode: mode });
+});
+document.getElementById("shuffle-chip").addEventListener("click", shuffleRecommendation);
+document.getElementById("shuffle-chip").addEventListener("keydown", function (e) {
+    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); shuffleRecommendation(); }
+});
+
+function resetRecommenderState() {
+    state.recommender = null;
+    showShuffleChip(false);
+}
+
 // ── Welcome modal ──────────────────────────────────────
 // Wired once at boot; openWelcomeModal() can be re-invoked from the Tips
 // menu item and the dismiss listeners are already in place.
@@ -1539,6 +1734,7 @@ async function restoreSavedRoute(id) {
         if (!route) { showBanner("Route not found"); return; }
 
         // Clear existing state
+        resetRecommenderState();
         clearRouteLayers(false);
 
         // Restore mode
