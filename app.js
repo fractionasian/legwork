@@ -375,8 +375,18 @@ async function addWaypointAt(lat, lon, opts) {
         await loadTilesOrPaths(lat, lon);
         if (!state.graph) { showBanner("Could not load paths for this area"); return; }
     }
+    // closestNode only scans ~3.5km around the tap. When the user pans to a
+    // region the graph doesn't cover (e.g. a different city than the one we
+    // bootstrapped into), it returns null even though state.graph is non-empty.
+    // Fall through to the same loadPaths recovery as the >200m branch so the
+    // tap actually does something.
     var nk = closestNode(state.graph, lat, lon);
-    if (!nk) return;
+    if (!nk) {
+        showBanner("Loading paths for this area...", "loading");
+        await loadTilesOrPaths(lat, lon);
+        nk = closestNode(state.graph, lat, lon);
+        if (!nk) { showBanner("Could not load paths for this area"); return; }
+    }
     // If closest node is >200m away, we probably need more paths (tiles already tried above)
     var nkParts = nk.split(",");
     var snapDist = haversine(lat, lon, parseFloat(nkParts[0]), parseFloat(nkParts[1]));
