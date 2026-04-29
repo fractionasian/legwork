@@ -533,6 +533,15 @@ button.menu-item:disabled {
     text-decoration-color: #6ee7b7;
 }
 
+.menu-version {
+    padding: 0 18px 16px;
+    font-size: 10px;
+    color: #4a4d5a;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    text-align: right;
+    letter-spacing: 0.02em;
+}
+
 /* ── Autocomplete ─────────────────────────────────── */
 .autocomplete-list {
     position: absolute;
