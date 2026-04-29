@@ -1,9 +1,10 @@
 name: Bump Service Worker Cache
 
 # Runs on every push to main that touches a shell file. Rewrites CACHE_NAME in
-# sw.js to a short hash of (index.html + app.js + routing.js + storage.js +
-# tiles.js + style.css), committing the change back. Self-pushes don't re-run
-# because the filter below excludes the bot actor.
+# sw.js (and the matching #app-version span in index.html) to a short hash of
+# (index.html + app.js + routing.js + storage.js + tiles.js + style.css),
+# committing the change back. Self-pushes don't re-run because the filter
+# below excludes the bot actor.
 
 on:
   push:
@@ -38,20 +39,24 @@ jobs:
           echo "hash=$HASH" >> "$GITHUB_OUTPUT"
           echo "Computed cache hash: $HASH"
 
-      - name: Update sw.js if hash changed
+      - name: Update sw.js + index.html if hash changed
         id: update
         env:
           NEW_HASH: ${{ steps.hash.outputs.hash }}
         run: |
           NEW="legwork-${NEW_HASH}"
           CURRENT=$(grep -oE 'var CACHE_NAME = "[^"]+";' sw.js | sed -E 's/.*"([^"]+)".*/\1/')
-          echo "Current: $CURRENT"
-          echo "New:     $NEW"
-          if [ "$CURRENT" = "$NEW" ]; then
+          CURRENT_VERSION=$(grep -oE '<span id="app-version">[^<]*</span>' index.html | sed -E 's|.*>([^<]*)<.*|\1|')
+          echo "Current SW:      $CURRENT"
+          echo "New SW:          $NEW"
+          echo "Current version: $CURRENT_VERSION"
+          echo "New version:     $NEW_HASH"
+          if [ "$CURRENT" = "$NEW" ] && [ "$CURRENT_VERSION" = "$NEW_HASH" ]; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
             echo "No change needed."
           else
             sed -i -E "s/var CACHE_NAME = \"[^\"]+\";/var CACHE_NAME = \"$NEW\";/" sw.js
+            sed -i -E "s|<span id=\"app-version\">[^<]*</span>|<span id=\"app-version\">${NEW_HASH}</span>|" index.html
             echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
 
@@ -62,6 +67,6 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add sw.js
+          git add sw.js index.html
           git commit -m "chore: bump sw CACHE_NAME to legwork-${NEW_HASH}"
           git push
