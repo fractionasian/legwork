@@ -128,6 +128,10 @@ function updateMarkerNumber(marker, num) {
     marker.setIcon(numberedMarkerIcon(num));
 }
 
+function setMarkerState(marker, num, markerState) {
+    marker.setIcon(numberedMarkerIcon(num, markerState));
+}
+
 // ── Autocomplete (Photon) ──────────────────────────────
 var autocompleteTimer = null;
 var autocompleteController = null;
