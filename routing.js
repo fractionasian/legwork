@@ -14,6 +14,7 @@ function haversine(lat1, lon1, lat2, lon2) {
 // Displayed distance still uses raw haversine.
 var ROAD_WEIGHT = {
     footway: 1.0, path: 1.0, cycleway: 1.0, pedestrian: 1.0, crossing: 1.0,
+    track: 1.0, bridleway: 1.0, byway: 1.0,
     living_street: 1.1, residential: 1.1,
     service: 1.2, unclassified: 1.2,
     tertiary: 1.3, tertiary_link: 1.3,
@@ -25,7 +26,7 @@ var ROAD_WEIGHT = {
 
 // Runner-friendly preference nudges — see docs/design/route-preferences.md.
 // Combines multiplicatively with ROAD_WEIGHT. Default-on, no UI.
-var PATHLIKE_HIGHWAYS = { footway: 1, path: 1, cycleway: 1, pedestrian: 1, track: 1 };
+var PATHLIKE_HIGHWAYS = { footway: 1, path: 1, cycleway: 1, pedestrian: 1, track: 1, bridleway: 1, byway: 1 };
 var SOFT_SURFACES = { ground: 1, dirt: 1, grass: 1, compacted: 1, gravel: 1, unpaved: 1, fine_gravel: 1, earth: 1 };
 
 function wayPrefMultiplier(highway, surface, name) {
