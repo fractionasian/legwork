@@ -356,13 +356,13 @@ function wireMarkerEvents(marker) {
             var nkParts = newKey.split(",");
             var snapDist = haversine(pos.lat, pos.lng, parseFloat(nkParts[0]), parseFloat(nkParts[1]));
             if (snapDist > 200) {
-                showBanner("Loading paths for this area...", "loading");
+                showBanner("Loading paths for this area", "loading");
                 await loadTilesOrPaths(pos.lat, pos.lng);
                 newKey = closestNode(state.graph, pos.lat, pos.lng);
             }
         } else if (state.graph) {
             // No node found at all — load tiles at drag target
-            showBanner("Loading paths for this area...", "loading");
+            showBanner("Loading paths for this area", "loading");
             await loadTilesOrPaths(pos.lat, pos.lng);
             newKey = closestNode(state.graph, pos.lat, pos.lng);
         }

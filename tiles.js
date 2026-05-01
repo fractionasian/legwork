@@ -284,7 +284,7 @@ async function loadPaths(lat, lon) {
     // osmToGeoJSON for the runner-friendly preference weighting.
     var cacheKey = "paths2:" + lat.toFixed(3) + ":" + lon.toFixed(3) + ":" + radius;
 
-    showBanner("Loading paths...", "loading");
+    showBanner("Loading paths", "loading");
 
     var cached = await cacheGet(cacheKey, PATHS_TTL);
     if (cached) {
@@ -340,7 +340,7 @@ async function loadPaths(lat, lon) {
             return;
         } catch (e) {
             if (attempt < maxRetries) {
-                showBanner("Retrying path load (" + (attempt + 1) + "/" + maxRetries + ")...", "loading");
+                showBanner("Retrying path load (" + (attempt + 1) + "/" + maxRetries + ")", "loading");
                 await new Promise(function (r) { setTimeout(r, delay * Math.pow(2, attempt)); });
                 continue;
             }
