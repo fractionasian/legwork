@@ -105,17 +105,23 @@ function buildMenuLegend() {
 }
 
 // ── Numbered markers ───────────────────────────────────
-function numberedMarkerIcon(num) {
+function numberedMarkerIcon(num, markerState) {
+    markerState = markerState || "ready";
+    var stateClass = markerState === "ready" ? "" : " wp-marker--" + markerState;
+    var safeNum = String(num).replace(/[<>&"']/g, "");
+    var overlay = "";
+    if (markerState === "pending") overlay = '<div class="wp-spinner"></div>';
+    else if (markerState === "failed") overlay = '<div class="wp-retry">↻</div>';
     return L.divIcon({
-        html: '<div class="wp-marker">' + num + '</div>',
+        html: '<div class="wp-marker' + stateClass + '">' + safeNum + overlay + '</div>',
         className: "",
         iconSize: [28, 28],
         iconAnchor: [14, 14],
     });
 }
 
-function createNumberedMarker(lat, lon, num) {
-    return L.marker([lat, lon], { icon: numberedMarkerIcon(num), draggable: true }).addTo(state.map);
+function createNumberedMarker(lat, lon, num, markerState) {
+    return L.marker([lat, lon], { icon: numberedMarkerIcon(num, markerState), draggable: true }).addTo(state.map);
 }
 
 function updateMarkerNumber(marker, num) {
