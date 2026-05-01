@@ -1755,6 +1755,42 @@ async function deleteSavedRoute(id) {
     renderSavedRoutes();
 }
 
+async function updateSavedRouteName(id, newName) {
+    var name = (newName || "").trim();
+    if (!name) return false;
+    try {
+        var db = await openDB();
+        await new Promise(function (resolve, reject) {
+            var tx = db.transaction("savedRoutes", "readwrite");
+            var store = tx.objectStore("savedRoutes");
+            var req = store.get(id);
+            req.onsuccess = function () {
+                var rec = req.result;
+                if (!rec) { resolve(); return; }
+                rec.name = name;
+                store.put(rec);
+            };
+            tx.oncomplete = resolve;
+            tx.onerror = function () { reject(tx.error); };
+        });
+        return true;
+    } catch (e) {
+        return false;
+    }
+}
+
+async function restoreSavedRouteRecord(record) {
+    try {
+        var db = await openDB();
+        await new Promise(function (resolve, reject) {
+            var tx = db.transaction("savedRoutes", "readwrite");
+            tx.objectStore("savedRoutes").put(record);
+            tx.oncomplete = resolve;
+            tx.onerror = function () { reject(tx.error); };
+        });
+    } catch (e) {}
+}
+
 async function renderSavedRoutes() {
     var list = document.getElementById("saved-routes-list");
     if (!list) return;
