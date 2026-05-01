@@ -1669,6 +1669,7 @@ async function confirmSaveRoute() {
         routeSegments: state.routeSegments,
         elevationData: state.lastElevationData,
         ts: Date.now(),
+        waypointHash: waypointHash(state.waypoints),
     };
 
     try {
