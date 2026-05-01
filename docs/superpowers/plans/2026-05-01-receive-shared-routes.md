@@ -49,8 +49,11 @@ Append these tests inside the existing `<script>` block in `test.html`, after th
     });
     test("waypointHash: precision is 5 decimals", function () {
         var a = [{ lat: -31.961234, lon: 115.831234 }];
-        var b = [{ lat: -31.961235, lon: 115.831235 }]; // differs at 6th decimal only
+        var b = [{ lat: -31.961234999, lon: 115.831234999 }]; // differs at 6th+ decimals only
         assert(waypointHash(a) === waypointHash(b));
+        // NB: .toFixed(5) ROUNDS (not truncates), so values like -31.961235
+        // and -31.961234 sit in DIFFERENT 5-decimal buckets. We pick values
+        // both rounding to the same bucket to demonstrate sub-meter collapse.
     });
     test("waypointHash: order matters", function () {
         var a = [{ lat: -31.96, lon: 115.83 }, { lat: -31.97, lon: 115.84 }];
@@ -656,6 +659,20 @@ itself unchanged.
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
 ```
+
+---
+
+## Known limitations (post-Task-8)
+
+Discovered during Task 8 review by reading the boot flow:
+
+- **Received routes' saved-list row will not show the "↑Xm ascent" metric.** `addWaypointAt` calls `updateRoute()` without `await` (lines 411, 444), and `updateRoute` ends with `debouncedFetchElevation(...)` — a `setTimeout(..., 400)`. So `state.lastElevationData` is always `[]` when `autoSaveSharedRoute` runs at the end of the boot loop. The saved record stores `elevationData: []`, and `renderSavedRoutes` conditionally hides the ascent chip when `elevationData.length < 2`. Other metrics (distance, mode, date) render normally.
+
+  *No functional impact:* `restoreSavedRoute` rebuilds elevation from scratch via `await updateRoute()` (line 1822). The route runs/renders correctly when reopened.
+
+  *If Peter wants the ascent metric on received-route rows,* the fix is to either (a) await elevation completion before saving (requires a new "elevation done" event), or (b) extend `autoSaveSharedRoute` to update the saved record asynchronously after elevation lands, mirroring the geocode-async pattern. Both are deferrable; ship as-is.
+
+- **Banner stomp risk:** `autoSaveSharedRoute`'s `setTimeout(showBanner(""), 3000)` is unconditional — it can clear a later unrelated banner if one is shown within 3s. Same pattern as `saveNamedRoute`; project-wide convention. Fix would be a `banner.dataset.type` guard on the clear (steal the Task 5 `showActionBanner` pattern). Out of scope for this plan.
 
 ---
 
