@@ -467,6 +467,9 @@ async function resolveWaypointNode(lat, lon) {
         await loadPaths(lat, lon);
         nk = closestNode(state.graph, lat, lon);
         if (!nk) return null;
+        var nkParts2 = nk.split(",");
+        var snapDist2 = haversine(lat, lon, parseFloat(nkParts2[0]), parseFloat(nkParts2[1]));
+        if (snapDist2 > 200) return null;
     }
     return nk;
 }
