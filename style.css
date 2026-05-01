@@ -875,6 +875,7 @@ kbd {
 
 /* ── Route markers ────────────────────────────────── */
 .wp-marker {
+    position: relative;
     background: #2e86de;
     color: #fff;
     border: 2px solid #fff;
@@ -887,6 +888,43 @@ kbd {
     font-size: 13px;
     font-weight: bold;
     box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+}
+
+/* Pending state — pin is rendered but path data is still loading */
+.wp-marker--pending {
+    background: #d63031;
+}
+
+.wp-marker--pending .wp-spinner {
+    position: absolute;
+    inset: -5px;
+    border: 2px solid transparent;
+    border-top-color: rgba(255, 255, 255, 0.9);
+    border-radius: 50%;
+    animation: wp-spin 0.9s linear infinite;
+    pointer-events: none;
+}
+
+@keyframes wp-spin {
+    to { transform: rotate(360deg); }
+}
+
+/* Failed state — path load failed; tap to retry */
+.wp-marker--failed {
+    background: #f39c12;
+    cursor: pointer;
+}
+
+.wp-marker--failed .wp-retry {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    font-size: 16px;
+    font-weight: bold;
+    pointer-events: none;
 }
 
 .wp-midpoint {
