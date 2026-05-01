@@ -195,14 +195,15 @@ async function resetGraphIfCityChanged(lat, lon) {
     }
 }
 
-function showCityRequest() {
-    var el = document.getElementById("city-request-link");
-    if (el) el.classList.remove("hidden");
-}
-
-function hideCityRequest() {
-    var el = document.getElementById("city-request-link");
-    if (el) el.classList.add("hidden");
+function setupOsmIssueLink() {
+    var el = document.getElementById("osm-issue-link");
+    if (!el) return;
+    el.addEventListener("click", function () {
+        if (!state.map) return;
+        var c = state.map.getCenter();
+        var z = Math.max(state.map.getZoom(), 16);
+        el.href = "https://www.openstreetmap.org/edit#map=" + z + "/" + c.lat.toFixed(5) + "/" + c.lng.toFixed(5);
+    });
 }
 
 // ── Points of interest (toilets, drinking water) ──────

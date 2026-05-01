@@ -1772,6 +1772,7 @@ window.addEventListener("resize", function () {
 // ── Boot ───────────────────────────────────────────────
 initMap();
 setupAutocomplete();
+setupOsmIssueLink();
 buildMenuLegend();
 updateReverseVisibility();
 showWelcome();
@@ -1833,7 +1834,6 @@ setupInstallPrompt();
                     return loadTilesForLocation(lat, lon);
                 }).then(function (loaded) {
                     if (!loaded) {
-                        showCityRequest();
                         return loadPaths(lat, lon);
                     }
                 }).then(function () {
