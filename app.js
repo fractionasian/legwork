@@ -340,7 +340,13 @@ function wireMarkerEvents(marker) {
         L.DomEvent.stopPropagation(ev);
         var idx = -1;
         for (var w = 0; w < state.waypoints.length; w++) { if (state.waypoints[w].marker === marker) { idx = w; break; } }
-        removeWaypoint(idx);
+        if (idx < 0) return;
+        var wp = state.waypoints[idx];
+        if (wp.failed) {
+            retryFailedWaypoint(wp);
+        } else {
+            removeWaypoint(idx);
+        }
     });
     marker.on("dragend", async function () {
         var pos = marker.getLatLng();
@@ -449,6 +455,39 @@ function markWaypointFailed(wp) {
     wp.failed = true;
     setMarkerState(wp.marker, idx + 1, "failed");
     showBanner("Could not load paths — tap pin to retry");
+}
+
+async function retryFailedWaypoint(wp) {
+    if (!wp.failed) return;
+    var idx = state.waypoints.indexOf(wp);
+    if (idx < 0) return;
+
+    wp.failed = false;
+    wp.pending = true;
+    setMarkerState(wp.marker, idx + 1, "pending");
+
+    try {
+        var nk = await resolveWaypointNode(wp.lat, wp.lon);
+        if (!nk) {
+            markWaypointFailed(wp);
+            return;
+        }
+        var liveIdx = state.waypoints.indexOf(wp);
+        if (liveIdx < 0) return;
+        var nkParts = nk.split(",");
+        var snapLat = parseFloat(nkParts[0]);
+        var snapLon = parseFloat(nkParts[1]);
+        wp.lat = snapLat;
+        wp.lon = snapLon;
+        wp.nodeKey = nk;
+        wp.pending = false;
+        wp.marker.setLatLng([snapLat, snapLon]);
+        setMarkerState(wp.marker, liveIdx + 1, "ready");
+        updateRoute();
+    } catch (e) {
+        console.warn("retryFailedWaypoint failed:", e);
+        markWaypointFailed(wp);
+    }
 }
 
 function removeWaypoint(idx) {
