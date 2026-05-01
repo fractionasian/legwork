@@ -590,7 +590,7 @@ button.menu-item:disabled {
 }
 
 /* Greyscale base tiles so coloured route stands out */
-.leaflet-tile-pane {
+.leaflet-tile {
     filter: grayscale(1) brightness(0.7) contrast(1.1);
 }
 
