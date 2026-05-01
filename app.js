@@ -848,9 +848,19 @@ function updateDistance() {
 // ── Distance markers ───────────────────────────────────
 function updateDistanceMarkers() {
     clearLayerArray("distanceMarkers");
-    var interval = state.useMiles ? 1609.344 : 1000; // 1 mile or 1 km
+    var unitMetres = state.useMiles ? 1609.344 : 1000;
     var suffix = state.useMiles ? "mi" : "k";
-    if (state.totalDistMetres < interval) return;
+    var totalUnits = state.totalDistMetres / unitMetres;
+    if (totalUnits < 1) return;
+
+    // Scale interval by total distance so long routes don't crowd the map.
+    var intervalUnits;
+    if (state.useMiles) {
+        intervalUnits = totalUnits <= 10 ? 1 : totalUnits <= 25 ? 2 : totalUnits <= 50 ? 5 : 10;
+    } else {
+        intervalUnits = totalUnits <= 15 ? 1 : totalUnits <= 40 ? 2 : totalUnits <= 80 ? 5 : 10;
+    }
+    var interval = intervalUnits * unitMetres;
 
     var coords = [];
     for (var s = 0; s < state.routeSegments.length; s++) {
@@ -864,7 +874,7 @@ function updateDistanceMarkers() {
     }
     if (coords.length < 2) return;
 
-    var accumulated = 0, nextMark = interval, markNum = 1;
+    var accumulated = 0, nextMark = interval, markNum = intervalUnits;
     for (var i = 1; i < coords.length; i++) {
         var d = haversine(coords[i-1][0], coords[i-1][1], coords[i][0], coords[i][1]);
         accumulated += d;
@@ -884,9 +894,29 @@ function updateDistanceMarkers() {
                 zIndexOffset: -100,
             }).addTo(state.map);
             state.distanceMarkers.push(mkr);
-            markNum++;
+            markNum += intervalUnits;
             nextMark += interval;
         }
+    }
+
+    // End marker: show the total distance at the route's final coord, but only if
+    // the last interval marker didn't already land exactly there.
+    var lastIntervalUnits = markNum - intervalUnits;
+    var totalUnitsOneDp = Math.round(totalUnits * 10) / 10;
+    if (totalUnitsOneDp > lastIntervalUnits + 0.05) {
+        var endCoord = coords[coords.length - 1];
+        var endLabel = totalUnitsOneDp.toFixed(1) + suffix;
+        var endMkr = L.marker([endCoord[0], endCoord[1]], {
+            icon: L.divIcon({
+                html: '<div class="distance-pill">' + endLabel + '</div>',
+                className: "",
+                iconSize: [40, 16],
+                iconAnchor: [20, 8],
+            }),
+            interactive: false,
+            zIndexOffset: -100,
+        }).addTo(state.map);
+        state.distanceMarkers.push(endMkr);
     }
 }
 
