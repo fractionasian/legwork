@@ -353,6 +353,11 @@ button.menu-item {
     padding: 0 18px;
 }
 
+#saved-routes-list {
+    max-height: 40vh;
+    overflow-y: auto;
+}
+
 .saved-list.hidden {
     display: none;
 }
