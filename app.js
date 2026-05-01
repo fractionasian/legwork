@@ -1692,6 +1692,64 @@ document.getElementById("save-route-name").addEventListener("keydown", function 
     if (e.key === "Escape") document.getElementById("save-route-input").classList.add("hidden");
 });
 
+async function autoSaveSharedRoute() {
+    if (state.waypoints.length < 2) return;
+    var hash = waypointHash(state.waypoints);
+    var existing = await findSavedRouteByHash(hash);
+    if (existing) return; // dedup hit — silent
+
+    var dist = document.getElementById("distance-display").textContent;
+    var routeData = {
+        name: "Route — " + dist, // placeholder; replaced by geocode below
+        distance: dist,
+        waypoints: state.waypoints.map(function (wp) {
+            return { lat: wp.lat, lon: wp.lon, nodeKey: wp.nodeKey };
+        }),
+        mode: state.mode,
+        zoom: state.map.getZoom(),
+        center: { lat: state.map.getCenter().lat, lon: state.map.getCenter().lng },
+        routeSegments: state.routeSegments,
+        elevationData: state.lastElevationData,
+        ts: Date.now(),
+        waypointHash: hash,
+    };
+
+    var savedId;
+    try {
+        var db = await openDB();
+        savedId = await new Promise(function (resolve, reject) {
+            var tx = db.transaction("savedRoutes", "readwrite");
+            var req = tx.objectStore("savedRoutes").add(routeData);
+            req.onsuccess = function () { resolve(req.result); };
+            req.onerror = function () { reject(tx.error); };
+        });
+    } catch (e) {
+        return; // storage failure — don't toast, don't crash
+    }
+
+    showBanner("Saved to your routes");
+    setTimeout(function () { showBanner(""); }, 3000);
+    renderSavedRoutes();
+
+    // Async geocode replacement of the placeholder name.
+    var startWp = state.waypoints[0];
+    if (navigator.onLine) {
+        fetchWithTimeout("https://photon.komoot.io/reverse?lat=" + startWp.lat + "&lon=" + startWp.lon + "&limit=1", null, 10000)
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                var feat = (data.features || [])[0];
+                if (feat && feat.properties) {
+                    var p = feat.properties;
+                    var name = p.name || p.street || p.city;
+                    if (name) {
+                        updateSavedRouteName(savedId, name + " — " + dist).then(renderSavedRoutes);
+                    }
+                }
+            })
+            .catch(function () {});
+    }
+}
+
 async function loadSavedRoutes() {
     try {
         var db = await openDB();
@@ -2005,6 +2063,7 @@ setupInstallPrompt();
         for (var i = 0; i < sharedPoints.length; i++) {
             await addWaypointAt(sharedPoints[i].lat, sharedPoints[i].lon, { exactPosition: i === 0 });
         }
+        await autoSaveSharedRoute();
         return;
     }
 
