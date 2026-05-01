@@ -1795,6 +1795,22 @@ async function renderSavedRoutes() {
     var list = document.getElementById("saved-routes-list");
     if (!list) return;
     var routes = await loadSavedRoutes();
+    routes.sort(function (a, b) { return (b.ts || 0) - (a.ts || 0); });
+    // Lazy hash backfill — older entries pre-dedup get their hash on first render.
+    var needsBackfill = routes.filter(function (r) { return !r.waypointHash && r.waypoints; });
+    if (needsBackfill.length > 0) {
+        var db = await openDB();
+        await new Promise(function (resolve) {
+            var tx = db.transaction("savedRoutes", "readwrite");
+            var store = tx.objectStore("savedRoutes");
+            needsBackfill.forEach(function (r) {
+                r.waypointHash = waypointHash(r.waypoints);
+                store.put(r);
+            });
+            tx.oncomplete = resolve;
+            tx.onerror = resolve;
+        });
+    }
     while (list.firstChild) list.removeChild(list.firstChild);
     if (routes.length === 0) {
         list.classList.add("hidden");
