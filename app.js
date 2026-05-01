@@ -1890,11 +1890,58 @@ async function renderSavedRoutes() {
                     restoreSavedRouteRecord(snapshot).then(renderSavedRoutes);
                 }, 5000);
             });
+            var edit = document.createElement("button");
+            edit.className = "saved-item-edit";
+            edit.textContent = "\u270e";
+            edit.title = "Rename saved route";
+            edit.addEventListener("click", function (e) {
+                e.stopPropagation();
+                startInlineRename(label, route.id);
+            });
             row.appendChild(info);
+            row.appendChild(edit);
             row.appendChild(del);
             list.appendChild(row);
         })(routes[i]);
     }
+}
+
+function startInlineRename(labelEl, routeId) {
+    var oldName = labelEl.textContent;
+    var input = document.createElement("input");
+    input.type = "text";
+    input.value = oldName;
+    input.className = "saved-item-rename-input";
+    input.autocomplete = "off";
+
+    var committed = false;
+    function commit() {
+        if (committed) return;
+        committed = true;
+        var newName = input.value.trim();
+        if (newName && newName !== oldName) {
+            updateSavedRouteName(routeId, newName).then(renderSavedRoutes);
+        } else {
+            labelEl.textContent = oldName;
+            input.replaceWith(labelEl);
+        }
+    }
+    function cancel() {
+        if (committed) return;
+        committed = true;
+        labelEl.textContent = oldName;
+        input.replaceWith(labelEl);
+    }
+
+    input.addEventListener("keydown", function (e) {
+        if (e.key === "Enter") commit();
+        else if (e.key === "Escape") cancel();
+    });
+    input.addEventListener("blur", commit);
+
+    labelEl.replaceWith(input);
+    input.focus();
+    input.select();
 }
 
 // ── Offline indicator ──────────────────────────────────
