@@ -443,10 +443,10 @@ async function resolveWaypointNode(lat, lon) {
 
 // Helper: mark a waypoint as failed, attaching the visual amber retry state.
 function markWaypointFailed(wp) {
-    wp.pending = false;
-    wp.failed = true;
     var idx = state.waypoints.indexOf(wp);
     if (idx < 0) return;
+    wp.pending = false;
+    wp.failed = true;
     setMarkerState(wp.marker, idx + 1, "failed");
     showBanner("Could not load paths — tap pin to retry");
 }
