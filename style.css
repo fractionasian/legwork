@@ -754,6 +754,21 @@ button.menu-item:disabled {
     background: rgba(255, 255, 255, 0.08);
 }
 
+.info-banner-action {
+    background: transparent;
+    border: 1px solid currentColor;
+    color: inherit;
+    padding: 2px 10px;
+    margin-left: 4px;
+    border-radius: 4px;
+    font: inherit;
+    cursor: pointer;
+}
+
+.info-banner-action:hover {
+    background: rgba(255, 255, 255, 0.1);
+}
+
 .info-banner.offline {
     background: #2a2a1a;
     color: #e0d48a;
