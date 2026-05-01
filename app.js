@@ -1677,6 +1677,26 @@ async function loadSavedRoutes() {
     } catch (e) { return []; }
 }
 
+async function findSavedRouteByHash(hash) {
+    if (!hash) return null;
+    try {
+        var db = await openDB();
+        return new Promise(function (resolve) {
+            var tx = db.transaction("savedRoutes", "readonly");
+            var req = tx.objectStore("savedRoutes").getAll();
+            req.onsuccess = function () {
+                var match = (req.result || []).find(function (r) {
+                    return r.waypointHash === hash;
+                });
+                resolve(match || null);
+            };
+            req.onerror = function () { resolve(null); };
+        });
+    } catch (e) {
+        return null;
+    }
+}
+
 async function restoreSavedRoute(id) {
     try {
         var db = await openDB();
