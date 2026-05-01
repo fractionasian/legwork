@@ -1884,7 +1884,11 @@ async function renderSavedRoutes() {
             del.title = "Delete saved route";
             del.addEventListener("click", function (e) {
                 e.stopPropagation();
+                var snapshot = route; // closure captures full record for restore
                 deleteSavedRoute(route.id);
+                showActionBanner("Route deleted", "Undo", function () {
+                    restoreSavedRouteRecord(snapshot).then(renderSavedRoutes);
+                }, 5000);
             });
             row.appendChild(info);
             row.appendChild(del);
