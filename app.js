@@ -385,13 +385,38 @@ function wireMarkerEvents(marker) {
 function onMapClick(e) { addWaypointAt(e.latlng.lat, e.latlng.lng); }
 
 async function addWaypointAt(lat, lon, opts) {
-    // Render the marker IMMEDIATELY at the tap location in pending state.
-    // Path loading happens after, with the marker transitioning to ready or failed.
     var num = state.waypoints.length + 1;
+
+    // Synchronous fast path: if state.graph already has a usable node within 200m
+    // of the tap, create the marker directly in ready state — no red flash.
+    var fastNk = null;
+    if (state.graph) {
+        fastNk = closestNode(state.graph, lat, lon);
+        if (fastNk) {
+            var fastParts = fastNk.split(",");
+            var fastDist = haversine(lat, lon, parseFloat(fastParts[0]), parseFloat(fastParts[1]));
+            if (fastDist > 200) fastNk = null;
+        }
+    }
+
+    if (fastNk) {
+        var fastNkParts = fastNk.split(",");
+        var fastSnapLat = parseFloat(fastNkParts[0]);
+        var fastSnapLon = parseFloat(fastNkParts[1]);
+        var fastDisplayLat = (opts && opts.exactPosition) ? lat : fastSnapLat;
+        var fastDisplayLon = (opts && opts.exactPosition) ? lon : fastSnapLon;
+        var fastMarker = createNumberedMarker(fastDisplayLat, fastDisplayLon, num);
+        wireMarkerEvents(fastMarker);
+        state.waypoints.push({ lat: fastDisplayLat, lon: fastDisplayLon, marker: fastMarker, nodeKey: fastNk });
+        updateRoute();
+        return;
+    }
+
+    // Slow path: paths need to be loaded. Render marker in pending state immediately,
+    // resolve async, transition to ready or failed.
     var marker = createNumberedMarker(lat, lon, num, "pending");
     wireMarkerEvents(marker);
 
-    // Push a placeholder waypoint so renumbering and removal work even while pending.
     var wp = { lat: lat, lon: lon, marker: marker, nodeKey: null, pending: true };
     state.waypoints.push(wp);
 
@@ -401,7 +426,6 @@ async function addWaypointAt(lat, lon, opts) {
             markWaypointFailed(wp);
             return;
         }
-        // If the user removed this waypoint while we were resolving, do nothing.
         var liveIdx = state.waypoints.indexOf(wp);
         if (liveIdx < 0) return;
 

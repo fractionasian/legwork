@@ -1,5 +1,5 @@
 // CACHE_NAME is auto-bumped by .github/workflows/bump-sw.yml on push to main.
-var CACHE_NAME = "legwork-b140853c";
+var CACHE_NAME = "legwork-fastpath";
 var APP_SHELL = [
     "./",
     "./index.html",
