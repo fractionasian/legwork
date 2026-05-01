@@ -8,7 +8,8 @@ const TILE_SIZE = 0.05;
 const HIGHWAYS = [
     "footway","cycleway","path","residential","living_street","pedestrian",
     "service","unclassified","tertiary","tertiary_link","secondary","secondary_link",
-    "primary","primary_link","trunk","trunk_link","crossing","steps"
+    "primary","primary_link","trunk","trunk_link","crossing","steps",
+    "track","bridleway","byway"
 ];
 
 const USER_AGENT = "legwork-tile-builder/1.0 (+https://github.com/fractionasian/legwork)";

@@ -215,6 +215,17 @@
         assert(ROAD_WEIGHT.path === 1.0);
         assert(ROAD_WEIGHT.trunk === 2.5);
     });
+    test("ROAD_WEIGHT: track/bridleway/byway are first-class trail surfaces", function () {
+        assert(ROAD_WEIGHT.track === 1.0);
+        assert(ROAD_WEIGHT.bridleway === 1.0);
+        assert(ROAD_WEIGHT.byway === 1.0);
+    });
+    test("wayPref: named bridleway gets named-trail nudge (PATHLIKE)", function () {
+        assert(wayPrefMultiplier("bridleway", "", "Bibbulmun Track") === 0.85);
+    });
+    test("wayPref: soft-surface byway gets soft-surface nudge (PATHLIKE)", function () {
+        assert(wayPrefMultiplier("byway", "gravel", "") === 0.95);
+    });
 
     // ── Runner-friendly preferences (P1–P5) ───────────
     test("wayPref P1: named footway is cheaper", function () {
