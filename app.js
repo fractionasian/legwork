@@ -868,6 +868,7 @@ function updateDistanceMarkers() {
     for (var i = 1; i < coords.length; i++) {
         var d = haversine(coords[i-1][0], coords[i-1][1], coords[i][0], coords[i][1]);
         accumulated += d;
+        if (d < 1e-6) continue;
         while (accumulated >= nextMark) {
             var ratio = 1 - (accumulated - nextMark) / d;
             var lat = coords[i-1][0] + ratio * (coords[i][0] - coords[i-1][0]);
