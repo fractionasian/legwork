@@ -379,43 +379,76 @@ function wireMarkerEvents(marker) {
 function onMapClick(e) { addWaypointAt(e.latlng.lat, e.latlng.lng); }
 
 async function addWaypointAt(lat, lon, opts) {
-    // Auto-load paths if we don't have coverage here
-    if (!state.graph) {
-        showBanner("Loading paths for this area...", "loading");
-        await loadTilesOrPaths(lat, lon);
-        if (!state.graph) { showBanner("Could not load paths for this area"); return; }
+    // Render the marker IMMEDIATELY at the tap location in pending state.
+    // Path loading happens after, with the marker transitioning to ready or failed.
+    var num = state.waypoints.length + 1;
+    var marker = createNumberedMarker(lat, lon, num, "pending");
+    wireMarkerEvents(marker);
+
+    // Push a placeholder waypoint so renumbering and removal work even while pending.
+    var wp = { lat: lat, lon: lon, marker: marker, nodeKey: null, pending: true };
+    state.waypoints.push(wp);
+
+    try {
+        var nk = await resolveWaypointNode(lat, lon);
+        if (!nk) {
+            markWaypointFailed(wp);
+            return;
+        }
+        // If the user removed this waypoint while we were resolving, do nothing.
+        var liveIdx = state.waypoints.indexOf(wp);
+        if (liveIdx < 0) return;
+
+        var nkParts = nk.split(",");
+        var snapLat = parseFloat(nkParts[0]);
+        var snapLon = parseFloat(nkParts[1]);
+        var displayLat = (opts && opts.exactPosition) ? lat : snapLat;
+        var displayLon = (opts && opts.exactPosition) ? lon : snapLon;
+
+        wp.lat = displayLat;
+        wp.lon = displayLon;
+        wp.nodeKey = nk;
+        wp.pending = false;
+        marker.setLatLng([displayLat, displayLon]);
+        setMarkerState(marker, liveIdx + 1, "ready");
+        updateRoute();
+    } catch (e) {
+        console.warn("addWaypointAt failed:", e);
+        markWaypointFailed(wp);
     }
-    // closestNode only scans ~3.5km around the tap. When the user pans to a
-    // region the graph doesn't cover (e.g. a different city than the one we
-    // bootstrapped into), it returns null even though state.graph is non-empty.
-    // Fall through to the same loadPaths recovery as the >200m branch so the
-    // tap actually does something.
+}
+
+// Helper: run the existing 3-stage path-resolution logic and return the closest-node key,
+// or null if no usable node could be found.
+async function resolveWaypointNode(lat, lon) {
+    if (!state.graph) {
+        await loadTilesOrPaths(lat, lon);
+        if (!state.graph) return null;
+    }
     var nk = closestNode(state.graph, lat, lon);
     if (!nk) {
-        showBanner("Loading paths for this area...", "loading");
         await loadTilesOrPaths(lat, lon);
         nk = closestNode(state.graph, lat, lon);
-        if (!nk) { showBanner("Could not load paths for this area"); return; }
+        if (!nk) return null;
     }
-    // If closest node is >200m away, we probably need more paths (tiles already tried above)
     var nkParts = nk.split(",");
     var snapDist = haversine(lat, lon, parseFloat(nkParts[0]), parseFloat(nkParts[1]));
     if (snapDist > 200) {
-        showBanner("Loading paths for this area...", "loading");
         await loadPaths(lat, lon);
         nk = closestNode(state.graph, lat, lon);
-        if (!nk) return;
+        if (!nk) return null;
     }
-    var parts = nk.split(",");
-    var snapLat = parseFloat(parts[0]), snapLon = parseFloat(parts[1]);
-    var displayLat = (opts && opts.exactPosition) ? lat : snapLat;
-    var displayLon = (opts && opts.exactPosition) ? lon : snapLon;
-    var num = state.waypoints.length + 1;
-    var marker = createNumberedMarker(displayLat, displayLon, num);
-    wireMarkerEvents(marker);
+    return nk;
+}
 
-    state.waypoints.push({ lat: displayLat, lon: displayLon, marker: marker, nodeKey: nk });
-    updateRoute();
+// Helper: mark a waypoint as failed, attaching the visual amber retry state.
+function markWaypointFailed(wp) {
+    wp.pending = false;
+    wp.failed = true;
+    var idx = state.waypoints.indexOf(wp);
+    if (idx < 0) return;
+    setMarkerState(wp.marker, idx + 1, "failed");
+    showBanner("Could not load paths — tap pin to retry");
 }
 
 function removeWaypoint(idx) {
