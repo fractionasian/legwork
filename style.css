@@ -778,15 +778,14 @@ button.menu-item:disabled {
     display: inline-block;
     width: 1.2em;
     text-align: left;
-    overflow: hidden;
     vertical-align: bottom;
     color: inherit;
     animation: loadEllipsis 1.2s steps(3, jump-none) infinite;
 }
 
 @keyframes loadEllipsis {
-    from { width: 0.4em; }
-    to { width: 1.2em; }
+    from { clip-path: inset(0 calc(100% - 0.4em) 0 0); }
+    to { clip-path: inset(0 0 0 0); }
 }
 
 /* ── Welcome modal ────────────────────────────────── */
