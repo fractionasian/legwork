@@ -10,6 +10,14 @@ function haversine(lat1, lon1, lat2, lon2) {
     return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
+// Stable string identifier for a waypoint sequence — used for dedup of
+// auto-saved shared routes. 5-decimal precision (~1m), order-sensitive.
+function waypointHash(waypoints) {
+    return JSON.stringify(waypoints.map(function (wp) {
+        return [wp.lat.toFixed(5), wp.lon.toFixed(5)];
+    }));
+}
+
 // Road-type multipliers — Dijkstra favours footpaths/quiet streets over busy roads.
 // Displayed distance still uses raw haversine.
 var ROAD_WEIGHT = {
