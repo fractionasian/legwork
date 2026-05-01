@@ -276,6 +276,27 @@
         assert(gj.nodeAttrs[key] && gj.nodeAttrs[key].barrier === true);
     });
 
+    // ── waypointHash ──────────────────────────────────
+    test("waypointHash: deterministic for same waypoints", function () {
+        var wps = [{ lat: -31.96, lon: 115.83 }, { lat: -31.97, lon: 115.84 }];
+        assert(waypointHash(wps) === waypointHash(wps));
+    });
+    test("waypointHash: different for different waypoints", function () {
+        var a = [{ lat: -31.96, lon: 115.83 }, { lat: -31.97, lon: 115.84 }];
+        var b = [{ lat: -31.96, lon: 115.83 }, { lat: -31.97, lon: 115.85 }];
+        assert(waypointHash(a) !== waypointHash(b));
+    });
+    test("waypointHash: precision is 5 decimals", function () {
+        var a = [{ lat: -31.961234, lon: 115.831234 }];
+        var b = [{ lat: -31.961234999, lon: 115.831234999 }]; // differs at 6th+ decimals only
+        assert(waypointHash(a) === waypointHash(b));
+    });
+    test("waypointHash: order matters", function () {
+        var a = [{ lat: -31.96, lon: 115.83 }, { lat: -31.97, lon: 115.84 }];
+        var b = [{ lat: -31.97, lon: 115.84 }, { lat: -31.96, lon: 115.83 }];
+        assert(waypointHash(a) !== waypointHash(b));
+    });
+
     // ── Summary ───────────────────────────────────────
     var summary = document.getElementById("summary");
     if (failed === 0) {
