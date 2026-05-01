@@ -1201,6 +1201,33 @@ function showBannerWithRetry(msg, onRetry) {
     el.appendChild(btn);
 }
 
+// Toast with an inline action button (e.g. "Route deleted · Undo").
+// onAction fires only if the user clicks the button before the timeout;
+// otherwise the banner clears silently.
+function showActionBanner(text, actionLabel, onAction, durationMs) {
+    var banner = document.getElementById("info-banner");
+    while (banner.firstChild) banner.removeChild(banner.firstChild);
+    banner.dataset.type = "action";
+    var span = document.createElement("span");
+    span.textContent = text + " ";
+    var btn = document.createElement("button");
+    btn.className = "info-banner-action";
+    btn.textContent = actionLabel;
+    var dismissed = false;
+    btn.addEventListener("click", function () {
+        if (dismissed) return;
+        dismissed = true;
+        try { onAction(); } finally { showBanner(""); }
+    });
+    banner.appendChild(span);
+    banner.appendChild(btn);
+    banner.className = "info-banner action";
+    banner.style.display = "block";
+    setTimeout(function () {
+        if (!dismissed && banner.dataset.type === "action") showBanner("");
+    }, durationMs || 5000);
+}
+
 // ── Event bindings ─────────────────────────────────────
 document.getElementById("address-input").addEventListener("keydown", function (e) { if (e.key === "Enter") geocodeAddress(); });
 var MODE_LABELS = { loop: "\u21BB Loop", outback: "\u21C4 Out & Back", oneway: "\u2192 One Way" };
