@@ -1,6 +1,6 @@
 {
-  "built": "2026-05-01T04:14:18.093Z",
-  "version": "a085852e",
+  "built": "2026-05-03T05:29:30.952Z",
+  "version": "99c1d76b",
   "cities": {
     "adelaide": {
       "name": "Adelaide",
@@ -44,7 +44,7 @@
             "William Street",
             "Norwood"
           ],
-          "ways": 10568
+          "ways": 10570
         },
         {
           "file": "4_2.json",
@@ -86,7 +86,7 @@
           "suburbs": [
             "Mile End"
           ],
-          "ways": 9143
+          "ways": 9144
         },
         {
           "file": "3_1.json",
@@ -116,7 +116,7 @@
             "Gladys Street",
             "Pearson Street"
           ],
-          "ways": 5682
+          "ways": 5683
         },
         {
           "file": "5_0.json",
@@ -145,7 +145,7 @@
             "Quarantine Power Station",
             "Torrens Island Conservation Park"
           ],
-          "ways": 350
+          "ways": 348
         },
         {
           "file": "3_2.json",
@@ -173,7 +173,7 @@
             "Esplanade",
             "Largs Bay"
           ],
-          "ways": 2132
+          "ways": 2196
         },
         {
           "file": "3_0.json",
@@ -187,7 +187,7 @@
             "West Lakes Shore Beach",
             "Dune Court"
           ],
-          "ways": 2328
+          "ways": 2395
         },
         {
           "file": "1_1.json",
@@ -230,7 +230,7 @@
             "North Arm Road",
             "Grand Trunkway"
           ],
-          "ways": 2290
+          "ways": 2300
         },
         {
           "file": "1_4.json",
@@ -333,7 +333,7 @@
             "Clyde Avenue",
             "David Read Lodge"
           ],
-          "ways": 4988
+          "ways": 4989
         },
         {
           "file": "3_4.json",
@@ -463,7 +463,7 @@
           "suburbs": [
             "Unknown"
           ],
-          "ways": 1019
+          "ways": 1025
         },
         {
           "file": "5_3.json",
@@ -709,7 +709,7 @@
             "Rudd Street",
             "Little Doris Creek"
           ],
-          "ways": 3719
+          "ways": 3723
         },
         {
           "file": "2_2.json",
@@ -724,7 +724,7 @@
             "Gardens Point Road",
             "Azteca"
           ],
-          "ways": 16676
+          "ways": 16807
         },
         {
           "file": "2_1.json",
@@ -753,7 +753,7 @@
             "Windsor",
             "Lutwyche"
           ],
-          "ways": 9947
+          "ways": 9982
         },
         {
           "file": "3_3.json",
@@ -959,7 +959,7 @@
             "Mount Petrie Road",
             "Carindale"
           ],
-          "ways": 2733
+          "ways": 2737
         },
         {
           "file": "3_4.json",
@@ -1013,7 +1013,7 @@
           "suburbs": [
             "Rochedale"
           ],
-          "ways": 2252
+          "ways": 2253
         },
         {
           "file": "3_0.json",
@@ -1235,7 +1235,7 @@
           "suburbs": [
             "Cotter Road"
           ],
-          "ways": 4213
+          "ways": 4218
         },
         {
           "file": "2_1.json",
@@ -1275,7 +1275,7 @@
           "suburbs": [
             "Barry Drive"
           ],
-          "ways": 8973
+          "ways": 8981
         },
         {
           "file": "2_3.json",
@@ -1432,7 +1432,7 @@
             "Kama River Walk",
             "Pipe Flat"
           ],
-          "ways": 2038
+          "ways": 2050
         },
         {
           "file": "-1_3.json",
@@ -2041,7 +2041,7 @@
             "Fyfe Mcdade",
             "William Reeve"
           ],
-          "ways": 30985
+          "ways": 31009
         },
         {
           "file": "2_0.json",
@@ -2085,7 +2085,7 @@
             "Deptford",
             "Chairbears Nursery"
           ],
-          "ways": 13042
+          "ways": 13046
         },
         {
           "file": "3_3.json",
@@ -2100,7 +2100,7 @@
             "Northdene Gardens",
             "Hillside Road"
           ],
-          "ways": 11143
+          "ways": 11147
         },
         {
           "file": "2_3.json",
@@ -2115,7 +2115,7 @@
             "Beans & Beyond",
             "Chance Street"
           ],
-          "ways": 25961
+          "ways": 25962
         },
         {
           "file": "2_1.json",
@@ -2185,7 +2185,7 @@
             "Battersea Square",
             "Cotswold Mews"
           ],
-          "ways": 14547
+          "ways": 14561
         },
         {
           "file": "2_4.json",
@@ -2199,7 +2199,7 @@
             "Bow",
             "Wellington Way"
           ],
-          "ways": 21495
+          "ways": 21501
         },
         {
           "file": "3_4.json",
@@ -2329,7 +2329,7 @@
             "Polworth Road",
             "Farnan Road"
           ],
-          "ways": 7021
+          "ways": 7025
         },
         {
           "file": "-1_4.json",
@@ -2626,7 +2626,7 @@
           "suburbs": [
             "Brunswick East"
           ],
-          "ways": 15706
+          "ways": 15713
         },
         {
           "file": "2_4.json",
@@ -2641,7 +2641,7 @@
             "Sidney Myer",
             "CityLink"
           ],
-          "ways": 19221
+          "ways": 19243
         },
         {
           "file": "5_0.json",
@@ -2669,7 +2669,7 @@
           "suburbs": [
             "Delahey"
           ],
-          "ways": 6306
+          "ways": 6311
         },
         {
           "file": "5_-1.json",
@@ -2734,7 +2734,7 @@
           "suburbs": [
             "Clayton"
           ],
-          "ways": 7207
+          "ways": 7209
         },
         {
           "file": "3_7.json",
@@ -2856,7 +2856,7 @@
             "Coburg North",
             "Newlands Road"
           ],
-          "ways": 7542
+          "ways": 7544
         },
         {
           "file": "5_4.json",
@@ -2984,7 +2984,7 @@
           "suburbs": [
             "Brighton East"
           ],
-          "ways": 5805
+          "ways": 5811
         },
         {
           "file": "5_7.json",
@@ -2997,7 +2997,7 @@
           "suburbs": [
             "Plenty"
           ],
-          "ways": 2999
+          "ways": 3001
         },
         {
           "file": "4_7.json",
@@ -3078,7 +3078,7 @@
             "Port Melbourne",
             "Australian Road Research Board"
           ],
-          "ways": 8113
+          "ways": 8124
         },
         {
           "file": "4_2.json",
@@ -3091,7 +3091,7 @@
           "suburbs": [
             "Airport West"
           ],
-          "ways": 5938
+          "ways": 5998
         },
         {
           "file": "5_2.json",
@@ -3105,7 +3105,7 @@
             "Moonee Ponds Creek Trail",
             "Westmeadows"
           ],
-          "ways": 3709
+          "ways": 3711
         },
         {
           "file": "2_1.json",
@@ -3989,7 +3989,7 @@
             "Kenwick Wetlands Nature Reserve",
             "Bickley Road"
           ],
-          "ways": 4080
+          "ways": 4081
         },
         {
           "file": "1_6.json",
@@ -4409,7 +4409,7 @@
             "Ken’s Continental",
             "Daffodil Nail & Beauty"
           ],
-          "ways": 16281
+          "ways": 16289
         },
         {
           "file": "1_2.json",
@@ -4453,7 +4453,7 @@
             "Benelong Rd at Brightmore St",
             "Brightmore Reserve"
           ],
-          "ways": 8851
+          "ways": 8934
         },
         {
           "file": "3_4.json",
@@ -4468,7 +4468,7 @@
             "McDonald Street",
             "Coles Road"
           ],
-          "ways": 6159
+          "ways": 6171
         },
         {
           "file": "2_4.json",
@@ -4498,7 +4498,7 @@
             "River Road",
             "Northwood Road"
           ],
-          "ways": 6907
+          "ways": 6937
         },
         {
           "file": "2_1.json",
@@ -4540,7 +4540,7 @@
             "Alexandra Canal Shared Path",
             "Woolworths Distribution Centre"
           ],
-          "ways": 8415
+          "ways": 8416
         },
         {
           "file": "2_0.json",
@@ -4582,7 +4582,7 @@
             "Leinster Avenue",
             "Yeats Avenue"
           ],
-          "ways": 3313
+          "ways": 3315
         },
         {
           "file": "0_4.json",
@@ -4692,7 +4692,7 @@
           "suburbs": [
             "Epping"
           ],
-          "ways": 4657
+          "ways": 4658
         },
         {
           "file": "3_1.json",
@@ -4949,7 +4949,7 @@
             "五反田駅前プラザ",
             "聖アンジュ学園 五反田校"
           ],
-          "ways": 12552
+          "ways": 12553
         },
         {
           "file": "-1_3.json",
@@ -5053,7 +5053,7 @@
             "一般社団法人産業保健振興会",
             "鶯谷検診センター"
           ],
-          "ways": 19369
+          "ways": 19368
         },
         {
           "file": "2_4.json",
