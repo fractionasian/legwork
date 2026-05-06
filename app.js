@@ -530,6 +530,7 @@ var _routeGen = 0;
 async function updateRoute() {
     var gen = ++_routeGen;
     clearRouteLayers(true); // keep waypoints; we're redrawing the geometry between them
+    document.getElementById("distance-pill").disabled = state.waypoints.length < 2;
 
     if (state.waypoints.length < 2) {
         updateDistance();
@@ -1319,20 +1320,23 @@ document.getElementById("locate-btn").addEventListener("click", function () {
 
 // ── Distance action dropdown ──────────────────────────
 var distWrapper = document.querySelector(".distance-wrapper");
+var distPill = document.getElementById("distance-pill");
 var distMenu = document.getElementById("distance-menu");
 
 function closeDistMenu() {
     distMenu.classList.add("hidden");
     distWrapper.classList.remove("open");
+    distPill.setAttribute("aria-expanded", "false");
 }
 
-distWrapper.addEventListener("click", function () {
+distPill.addEventListener("click", function () {
     if (state.waypoints.length < 2) return;
     if (!distMenu.classList.contains("hidden")) {
         closeDistMenu();
     } else {
         distMenu.classList.remove("hidden");
         distWrapper.classList.add("open");
+        distPill.setAttribute("aria-expanded", "true");
     }
 });
 
