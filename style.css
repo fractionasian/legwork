@@ -63,14 +63,31 @@ body {
     position: relative;
     display: flex;
     align-items: center;
-    cursor: pointer;
-    padding: 4px 8px;
-    border-radius: 6px;
-    transition: background 0.15s;
 }
 
-.distance-wrapper:hover {
+.distance-pill {
+    display: flex;
+    align-items: center;
     background: #252836;
+    border: 1px solid #3a3d4a;
+    padding: 4px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    color: inherit;
+    font: inherit;
+    transition: background 0.15s, border-color 0.15s;
+}
+
+.distance-pill:hover:not(:disabled),
+.distance-pill:focus-visible {
+    background: #2d3142;
+    border-color: #4a4d5a;
+    outline: none;
+}
+
+.distance-pill:disabled {
+    opacity: 0.55;
+    cursor: default;
 }
 
 .controls .distance-display {
@@ -84,9 +101,9 @@ body {
 }
 
 .distance-chevron {
-    color: #6b6e7a;
-    font-size: 10px;
-    margin-left: 4px;
+    color: #9aa0b0;
+    font-size: 11px;
+    margin-left: 6px;
     transition: transform 0.15s;
 }
 

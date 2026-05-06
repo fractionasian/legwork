@@ -28,12 +28,15 @@
         <button id="clear-btn" aria-label="Clear all waypoints">&#10005;</button>
         <button id="locate-btn" aria-label="Centre on my location" title="Centre on my location">&#8982;</button>
         <div class="distance-wrapper">
-            <span class="distance-display" id="distance-display" role="status" aria-live="polite">0.0 km</span>
-            <span class="distance-chevron" id="distance-chevron">&#9662;</span>
-            <div class="distance-menu hidden" id="distance-menu">
-                <button id="dm-save">Save route</button>
-                <button id="dm-export">Export GPX</button>
-                <button id="dm-share">Copy share link</button>
+            <button class="distance-pill" id="distance-pill" type="button"
+                    aria-haspopup="menu" aria-expanded="false" aria-controls="distance-menu" disabled>
+                <span class="distance-display" id="distance-display" role="status" aria-live="polite">0.0 km</span>
+                <span class="distance-chevron" id="distance-chevron" aria-hidden="true">&#9662;</span>
+            </button>
+            <div class="distance-menu hidden" id="distance-menu" role="menu">
+                <button id="dm-save" role="menuitem">Save route</button>
+                <button id="dm-export" role="menuitem">Export GPX</button>
+                <button id="dm-share" role="menuitem">Copy share link</button>
             </div>
         </div>
     </nav>
