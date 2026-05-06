@@ -370,6 +370,23 @@ button.menu-item {
 .menu-install {
     font-size: 13px;
     color: #6ee7b7;
+    border-left: 3px solid #6ee7b7;
+    background: rgba(110, 231, 183, 0.06);
+    cursor: default;
+}
+
+.menu-install[role="button"] {
+    cursor: pointer;
+    font-weight: 600;
+}
+
+.menu-install:hover {
+    background: rgba(110, 231, 183, 0.12);
+}
+
+.menu-install:focus-visible {
+    outline: 2px solid #6ee7b7;
+    outline-offset: -2px;
 }
 
 .menu-install.hidden {

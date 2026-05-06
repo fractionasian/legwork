@@ -1545,27 +1545,43 @@ function setupInstallPrompt() {
     // Already running as installed PWA
     if (window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone) return;
 
+    function handleInstall() {
+        if (!deferredInstallPrompt) return;
+        deferredInstallPrompt.prompt();
+        deferredInstallPrompt.userChoice.then(function () {
+            deferredInstallPrompt = null;
+            el.classList.add("hidden");
+        });
+    }
+    // Wire handlers once — beforeinstallprompt can refire and would otherwise stack listeners.
+    el.addEventListener("click", handleInstall);
+    el.addEventListener("keydown", function (e) {
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); handleInstall(); }
+    });
+
     // Android/Chrome: capture the beforeinstallprompt event
     window.addEventListener("beforeinstallprompt", function (e) {
         e.preventDefault();
         deferredInstallPrompt = e;
         el.textContent = "Install app";
         el.classList.remove("hidden");
-        el.style.cursor = "pointer";
-        el.addEventListener("click", function () {
-            deferredInstallPrompt.prompt();
-            deferredInstallPrompt.userChoice.then(function () {
-                deferredInstallPrompt = null;
-                el.classList.add("hidden");
-            });
-        });
+        el.setAttribute("role", "button");
+        el.setAttribute("tabindex", "0");
     });
 
-    // iOS Safari: show manual hint
+    // iOS Safari: show manual hint (informational, not a button — no install API)
     var isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
     var isSafari = /Safari/.test(navigator.userAgent) && !/Chrome|CriOS|FxiOS/.test(navigator.userAgent);
     if (isIOS && isSafari) {
-        el.innerHTML = 'Add to Home Screen: tap <strong>Share</strong> → <strong>Add to Home Screen</strong>';
+        while (el.firstChild) el.removeChild(el.firstChild);
+        el.appendChild(document.createTextNode("Add to Home Screen: tap "));
+        var s1 = document.createElement("strong");
+        s1.textContent = "Share";
+        el.appendChild(s1);
+        el.appendChild(document.createTextNode(" → "));
+        var s2 = document.createElement("strong");
+        s2.textContent = "Add to Home Screen";
+        el.appendChild(s2);
         el.classList.remove("hidden");
     }
 }
