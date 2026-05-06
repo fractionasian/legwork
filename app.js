@@ -275,7 +275,10 @@ async function geocodeAddress(opts) {
         if (features.length === 0) { showBanner("Address not found"); return; }
         var coords = features[0].geometry.coordinates;
         goToLocation(coords[1], coords[0]);
-    } catch (e) { showBanner("Geocoding failed: " + e.message); }
+    } catch (e) {
+        console.error("geocode:", e);
+        showBanner("Couldn't search that address — check your connection");
+    }
 }
 
 function goToLocation(lat, lon) {
@@ -1313,7 +1316,7 @@ document.getElementById("locate-btn").addEventListener("click", function () {
     if (navigator.geolocation) {
         navigator.geolocation.getCurrentPosition(
             function (pos) { startHere(pos.coords.latitude, pos.coords.longitude); },
-            function () { showBanner("Could not get your location"); },
+            function () { showBanner("Couldn't get your location — check that location is enabled for this site"); },
             { enableHighAccuracy: true, timeout: 10000 }
         );
     }
@@ -1699,7 +1702,8 @@ async function confirmSaveRoute() {
         showBanner("Route saved: " + name);
         renderSavedRoutes();
     } catch (e) {
-        showBanner("Failed to save route: " + e.message);
+        console.error("save route:", e);
+        showBanner("Couldn't save route — your browser storage may be full");
     }
 }
 
@@ -1808,7 +1812,7 @@ async function restoreSavedRoute(id) {
             req.onsuccess = function () { resolve(req.result); };
             req.onerror = function () { resolve(null); };
         });
-        if (!route) { showBanner("Route not found"); return; }
+        if (!route) { showBanner("That saved route is no longer here — it may have been deleted"); return; }
 
         // Clear existing state
         clearRouteLayers(false);
@@ -1840,7 +1844,8 @@ async function restoreSavedRoute(id) {
         closeMenu();
         showBanner("Loaded: " + route.name);
     } catch (e) {
-        showBanner("Failed to load route: " + e.message);
+        console.error("load route:", e);
+        showBanner("Couldn't open that route — try again");
     }
 }
 
