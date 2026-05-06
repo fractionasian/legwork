@@ -49,13 +49,18 @@ body {
     text-align: center;
 }
 
-.controls button:hover {
+.controls button:hover:not(:disabled) {
     background: #2f3344;
     border-color: #5a5d6a;
 }
 
-.controls button:active {
+.controls button:active:not(:disabled) {
     background: #383c4f;
+}
+
+.controls button:disabled {
+    opacity: 0.4;
+    cursor: default;
 }
 
 .distance-wrapper {
