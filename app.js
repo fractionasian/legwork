@@ -1236,10 +1236,11 @@ function setModeButton() {
     document.getElementById("mode-btn").textContent = MODE_LABELS[state.mode] || MODE_LABELS.loop;
 }
 
-// ── Reverse button visibility ─────────────────────────
+// ── Reverse button enable/disable ──────────────────────
+// HIG #9 (perceived stability): disabled stays visible, doesn't disappear,
+// so the toolbar shape doesn't shift when the user cycles modes.
 function updateReverseVisibility() {
-    var btn = document.getElementById("reverse-btn");
-    btn.style.display = state.mode === "loop" ? "" : "none";
+    document.getElementById("reverse-btn").disabled = state.mode !== "loop";
 }
 
 document.getElementById("mode-btn").addEventListener("click", function () {
