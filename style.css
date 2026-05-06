@@ -41,13 +41,17 @@ body {
 .mode-group {
     display: flex;
     gap: 4px;
-    min-width: 112px;
     flex-shrink: 0;
 }
 
 .mode-group button {
-    flex: 1;
     text-align: center;
+}
+
+/* Fixed width sized to the longest label ("⇄ Out & Back") so cycling
+   modes doesn't push the rest of the toolbar around. HIG #9. */
+#mode-btn {
+    min-width: 120px;
 }
 
 .controls button:hover:not(:disabled) {
