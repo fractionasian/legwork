@@ -25,7 +25,8 @@ body {
 
 
 .controls button {
-    padding: 8px 12px;
+    padding: 10px 12px;
+    min-height: 40px;
     border: 1px solid #3a3d4a;
     border-radius: 6px;
     background: #252836;
@@ -236,6 +237,7 @@ body {
 }
 
 .menu-close {
+    position: relative;
     background: none;
     border: none;
     color: #808390;
@@ -246,12 +248,19 @@ body {
     transition: color 0.15s;
 }
 
+.menu-close::before {
+    content: "";
+    position: absolute;
+    inset: -8px;
+}
+
 .menu-close:hover {
     color: #f0f0f0;
 }
 
 .menu-body {
     padding: 12px 0;
+    padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
     flex: 1;
 }
 
@@ -329,6 +338,12 @@ button.menu-item {
     justify-content: center;
     padding: 0;
     transition: background 0.15s, color 0.15s;
+}
+
+.address-clear::before {
+    content: "";
+    position: absolute;
+    inset: -8px;
 }
 
 .address-clear:hover {
@@ -411,6 +426,7 @@ button.menu-item {
 }
 
 .saved-item-edit {
+    position: relative;
     background: transparent;
     border: none;
     color: inherit;
@@ -418,6 +434,11 @@ button.menu-item {
     font-size: 14px;
     padding: 4px 6px;
     opacity: 0.6;
+}
+.saved-item-edit::before {
+    content: "";
+    position: absolute;
+    inset: -8px -4px;
 }
 .saved-item-edit:hover {
     opacity: 1;
@@ -433,6 +454,7 @@ button.menu-item {
 }
 
 .saved-item-delete {
+    position: relative;
     background: none;
     border: none;
     color: #6b6e7a;
@@ -440,6 +462,12 @@ button.menu-item {
     cursor: pointer;
     padding: 0 0 0 8px;
     line-height: 1;
+}
+
+.saved-item-delete::before {
+    content: "";
+    position: absolute;
+    inset: -10px -4px -10px -2px;
 }
 
 .saved-item-delete:hover {
