@@ -1260,8 +1260,19 @@ document.getElementById("reverse-btn").addEventListener("click", function () {
     }, 1500);
 });
 document.getElementById("clear-btn").addEventListener("click", function () {
+    if (state.waypoints.length === 0) {
+        clearRouteLayers(false);
+        updateRoute();
+        return;
+    }
+    var snapshot = state.waypoints.map(function (w) { return { lat: w.lat, lon: w.lon }; });
     clearRouteLayers(false);
     updateRoute();
+    showActionBanner("Route cleared", "Undo", async function () {
+        for (var i = 0; i < snapshot.length; i++) {
+            await addWaypointAt(snapshot[i].lat, snapshot[i].lon, { exactPosition: i === 0 });
+        }
+    }, 5000);
 });
 document.getElementById("export-btn").addEventListener("click", function () {
     closeMenu();
