@@ -426,7 +426,7 @@ async function addWaypointAt(lat, lon, opts) {
     try {
         var nk = await resolveWaypointNode(lat, lon);
         if (!nk) {
-            markWaypointFailed(wp);
+            markWaypointFailed(wp, await noPathNearbyReason(lat, lon));
             return;
         }
         var liveIdx = state.waypoints.indexOf(wp);
@@ -451,6 +451,20 @@ async function addWaypointAt(lat, lon, opts) {
     }
 }
 
+// "Could not load paths" is misleading inside a tiled city, where coverage is
+// already complete — the real reason is "you tapped somewhere with no nearby
+// walkable path" (e.g. middle of a river). Returns null to use the default
+// network-style message when we genuinely don't know.
+async function noPathNearbyReason(lat, lon) {
+    try {
+        var manifest = await fetchManifest();
+        if (manifest && findCityForLocation(manifest, lat, lon)) {
+            return "No path nearby — tap a road or footpath";
+        }
+    } catch (e) { /* fall through to default */ }
+    return null;
+}
+
 // Helper: run the existing 3-stage path-resolution logic and return the closest-node key,
 // or null if no usable node could be found.
 async function resolveWaypointNode(lat, lon) {
@@ -467,7 +481,18 @@ async function resolveWaypointNode(lat, lon) {
     var nkParts = nk.split(",");
     var snapDist = haversine(lat, lon, parseFloat(nkParts[0]), parseFloat(nkParts[1]));
     if (snapDist > 200) {
-        await loadPaths(lat, lon);
+        // Inside a manifest city we already have full footpath coverage, so an
+        // Overpass round-trip would just re-fetch the same bank paths (e.g.
+        // tap in the middle of the Swan River) and flicker the retry banner
+        // for nothing. Only fall back to Overpass for locations outside any
+        // tiled city.
+        var manifest = await fetchManifest();
+        var inTiledCity = manifest && findCityForLocation(manifest, lat, lon);
+        if (inTiledCity) {
+            await loadTilesForLocation(lat, lon);
+        } else {
+            await loadPaths(lat, lon);
+        }
         nk = closestNode(state.graph, lat, lon);
         if (!nk) return null;
         var nkParts2 = nk.split(",");
@@ -478,13 +503,13 @@ async function resolveWaypointNode(lat, lon) {
 }
 
 // Helper: mark a waypoint as failed, attaching the visual amber retry state.
-function markWaypointFailed(wp) {
+function markWaypointFailed(wp, reason) {
     var idx = state.waypoints.indexOf(wp);
     if (idx < 0) return;
     wp.pending = false;
     wp.failed = true;
     setMarkerState(wp.marker, idx + 1, "failed");
-    showBanner("Could not load paths — tap pin to retry");
+    showBanner(reason || "Could not load paths — tap pin to retry");
 }
 
 async function retryFailedWaypoint(wp) {
@@ -499,7 +524,7 @@ async function retryFailedWaypoint(wp) {
     try {
         var nk = await resolveWaypointNode(wp.lat, wp.lon);
         if (!nk) {
-            markWaypointFailed(wp);
+            markWaypointFailed(wp, await noPathNearbyReason(wp.lat, wp.lon));
             return;
         }
         var liveIdx = state.waypoints.indexOf(wp);

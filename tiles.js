@@ -326,7 +326,7 @@ async function loadPaths(lat, lon) {
             }, 60000);
             if (resp.status === 429 || resp.status >= 500) {
                 if (attempt < maxRetries) {
-                    showBanner("Path server busy, retrying (" + (attempt + 1) + "/" + maxRetries + ")...", "loading");
+                    showBanner("Loading paths (retry " + (attempt + 1) + "/" + maxRetries + ")...", "loading");
                     await new Promise(function (r) { setTimeout(r, delay * Math.pow(2, attempt)); });
                     continue;
                 }
@@ -340,7 +340,7 @@ async function loadPaths(lat, lon) {
             return;
         } catch (e) {
             if (attempt < maxRetries) {
-                showBanner("Retrying path load (" + (attempt + 1) + "/" + maxRetries + ")", "loading");
+                showBanner("Loading paths (retry " + (attempt + 1) + "/" + maxRetries + ")...", "loading");
                 await new Promise(function (r) { setTimeout(r, delay * Math.pow(2, attempt)); });
                 continue;
             }
