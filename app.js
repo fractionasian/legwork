@@ -426,7 +426,7 @@ async function addWaypointAt(lat, lon, opts) {
     try {
         var nk = await resolveWaypointNode(lat, lon);
         if (!nk) {
-            markWaypointFailed(wp, await noPathNearbyReason(lat, lon));
+            markWaypointFailed(wp, await failedReason(lat, lon));
             return;
         }
         var liveIdx = state.waypoints.indexOf(wp);
@@ -451,18 +451,12 @@ async function addWaypointAt(lat, lon, opts) {
     }
 }
 
-// "Could not load paths" is misleading inside a tiled city, where coverage is
-// already complete — the real reason is "you tapped somewhere with no nearby
-// walkable path" (e.g. middle of a river). Returns null to use the default
-// network-style message when we genuinely don't know.
-async function noPathNearbyReason(lat, lon) {
-    try {
-        var manifest = await fetchManifest();
-        if (manifest && findCityForLocation(manifest, lat, lon)) {
-            return "No path nearby — tap a road or footpath";
-        }
-    } catch (e) { /* fall through to default */ }
-    return null;
+// Inside a tiled city the failure is geographic ("no path here"), not a
+// network/Overpass issue, so the default banner would mislead.
+async function failedReason(lat, lon) {
+    return (await isInTiledCity(lat, lon))
+        ? "No path nearby — tap a road or footpath"
+        : null;
 }
 
 // Helper: run the existing 3-stage path-resolution logic and return the closest-node key,
@@ -481,14 +475,10 @@ async function resolveWaypointNode(lat, lon) {
     var nkParts = nk.split(",");
     var snapDist = haversine(lat, lon, parseFloat(nkParts[0]), parseFloat(nkParts[1]));
     if (snapDist > 200) {
-        // Inside a manifest city we already have full footpath coverage, so an
-        // Overpass round-trip would just re-fetch the same bank paths (e.g.
-        // tap in the middle of the Swan River) and flicker the retry banner
-        // for nothing. Only fall back to Overpass for locations outside any
-        // tiled city.
-        var manifest = await fetchManifest();
-        var inTiledCity = manifest && findCityForLocation(manifest, lat, lon);
-        if (inTiledCity) {
+        // In a tiled city, coverage is already complete — Overpass would just
+        // re-fetch the same bank paths (e.g. tap in the middle of the Swan
+        // River) and flicker the retry banner. Skip it.
+        if (await isInTiledCity(lat, lon)) {
             await loadTilesForLocation(lat, lon);
         } else {
             await loadPaths(lat, lon);
@@ -524,7 +514,7 @@ async function retryFailedWaypoint(wp) {
     try {
         var nk = await resolveWaypointNode(wp.lat, wp.lon);
         if (!nk) {
-            markWaypointFailed(wp, await noPathNearbyReason(wp.lat, wp.lon));
+            markWaypointFailed(wp, await failedReason(wp.lat, wp.lon));
             return;
         }
         var liveIdx = state.waypoints.indexOf(wp);
