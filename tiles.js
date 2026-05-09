@@ -30,6 +30,11 @@ function findCityForLocation(manifest, lat, lon) {
     return null;
 }
 
+async function isInTiledCity(lat, lon) {
+    var manifest = await fetchManifest();
+    return !!(manifest && findCityForLocation(manifest, lat, lon));
+}
+
 function tilesInRadius(city, lat, lon, radiusKm) {
     var radiusDeg = radiusKm / 111; // rough km-to-degrees
     var selected = [];
@@ -324,13 +329,6 @@ async function loadPaths(lat, lon) {
                 body: "data=" + encodeURIComponent(query),
                 headers: { "Content-Type": "application/x-www-form-urlencoded" },
             }, 60000);
-            if (resp.status === 429 || resp.status >= 500) {
-                if (attempt < maxRetries) {
-                    showBanner("Loading paths (retry " + (attempt + 1) + "/" + maxRetries + ")...", "loading");
-                    await new Promise(function (r) { setTimeout(r, delay * Math.pow(2, attempt)); });
-                    continue;
-                }
-            }
             if (!resp.ok) throw new Error("HTTP " + resp.status);
             var raw = await resp.json();
             var geojson = osmToGeoJSON(raw);
