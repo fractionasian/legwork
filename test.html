@@ -276,6 +276,39 @@
         assert(gj.nodeAttrs[key] && gj.nodeAttrs[key].barrier === true);
     });
 
+    // ── Cycling profile ───────────────────────────────
+    test("BIKE_ROAD_WEIGHT: cycleway is cheapest", function () {
+        assert(BIKE_ROAD_WEIGHT.cycleway < BIKE_ROAD_WEIGHT.residential);
+        assert(BIKE_ROAD_WEIGHT.cycleway < BIKE_ROAD_WEIGHT.footway);
+    });
+    test("BIKE_ROAD_WEIGHT: steps are heavily penalised but not infinite", function () {
+        assert(BIKE_ROAD_WEIGHT.steps >= 5 && BIKE_ROAD_WEIGHT.steps < 10);
+    });
+    test("BIKE_ROAD_WEIGHT: primary tolerated more than running profile", function () {
+        assert(BIKE_ROAD_WEIGHT.primary < ROAD_WEIGHT.primary);
+    });
+    test("bikeWayPref: soft surface on path is mildly penalised, not bonused", function () {
+        assert(bikeWayPrefMultiplier("path", "gravel", "") === 1.05);
+    });
+    test("bikeWayPref: paved path is neutral", function () {
+        assert(bikeWayPrefMultiplier("path", "asphalt", "Coastal Path") === 1);
+    });
+    test("bikeNodePref: barrier penalty is harsher than running", function () {
+        assert(bikeNodePrefMultiplier({ barrier: true }) > nodePrefMultiplier({ barrier: true }));
+    });
+    test("routingProfile: returns bike tables when name=bike", function () {
+        var p = routingProfile("bike");
+        assert(p.roadWeight === BIKE_ROAD_WEIGHT);
+        assert(p.wayPref === bikeWayPrefMultiplier);
+        assert(p.nodePref === bikeNodePrefMultiplier);
+    });
+    test("routingProfile: defaults to running tables", function () {
+        var p = routingProfile("run");
+        assert(p.roadWeight === ROAD_WEIGHT);
+        var pUnknown = routingProfile("nonsense");
+        assert(pUnknown.roadWeight === ROAD_WEIGHT);
+    });
+
     // ── waypointHash ──────────────────────────────────
     test("waypointHash: deterministic for same waypoints", function () {
         var wps = [{ lat: -31.96, lon: 115.83 }, { lat: -31.97, lon: 115.84 }];
