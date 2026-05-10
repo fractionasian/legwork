@@ -30,6 +30,7 @@ var state = {
     poiMarkers: [],
     showToilets: false,
     showWater: false,
+    profile: "run",
 };
 // Read per-type toggle state. Migrate the old unified lw:showPois flag if present.
 try {
@@ -45,6 +46,8 @@ try {
         state.showToilets = localStorage.getItem("lw:showToilets") === "1";
         state.showWater = localStorage.getItem("lw:showWater") === "1";
     }
+    var _savedProfile = localStorage.getItem("lw:profile");
+    if (_savedProfile === "bike" || _savedProfile === "run") state.profile = _savedProfile;
 } catch (e) {}
 function anyPoisVisible() { return state.showToilets || state.showWater; }
 
@@ -1133,7 +1136,8 @@ async function exportGPX() {
         if (ed) elevLookup[ed.lat.toFixed(5) + "," + ed.lon.toFixed(5)] = ed.elevation;
     }
 
-    var gpx = ['<?xml version="1.0" encoding="UTF-8"?>','<gpx version="1.1" creator="Legwork" xmlns="http://www.topografix.com/GPX/1/1">','  <trk>','    <name>'+name+'</name>','    <trkseg>'];
+    var trkType = state.profile === "bike" ? "cycling" : "running";
+    var gpx = ['<?xml version="1.0" encoding="UTF-8"?>','<gpx version="1.1" creator="Legwork" xmlns="http://www.topografix.com/GPX/1/1">','  <trk>','    <name>'+name+'</name>','    <type>'+trkType+'</type>','    <trkseg>'];
     for (var i = 0; i < coords.length; i++) {
         var elevKey = coords[i][0].toFixed(5) + "," + coords[i][1].toFixed(5);
         var elev = elevLookup[elevKey];
@@ -1490,6 +1494,20 @@ document.getElementById("unit-toggle").addEventListener("click", function () {
     state.useMiles = !state.useMiles;
     document.getElementById("unit-label").textContent = state.useMiles ? "mi" : "km";
     updateDistance();
+});
+
+// ── Cycling toggle (in menu) ──────────────────────────
+function syncCyclingLabel() {
+    var c = document.getElementById("cycling-label");
+    if (c) c.textContent = state.profile === "bike" ? "On" : "Off";
+}
+syncCyclingLabel();
+document.getElementById("cycling-toggle").addEventListener("click", function () {
+    state.profile = state.profile === "bike" ? "run" : "bike";
+    try { localStorage.setItem("lw:profile", state.profile); } catch (e) {}
+    syncCyclingLabel();
+    rebuildGraphForProfile();
+    updateRoute();
 });
 
 // ── POI toggles (in menu) ─────────────────────────────
