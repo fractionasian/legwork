@@ -32,6 +32,21 @@ var ROAD_WEIGHT = {
     trunk: 2.5, trunk_link: 2.5,
 };
 
+// Cycling weights: cycleways preferred, primary tolerated, steps soft-banned,
+// soft surfaces mildly penalised (commuter-leaning, not MTB).
+var BIKE_ROAD_WEIGHT = {
+    cycleway: 0.8,
+    path: 1.0, track: 1.0, bridleway: 1.1, byway: 1.1, crossing: 1.0,
+    living_street: 1.0, residential: 1.0,
+    footway: 1.2, pedestrian: 1.2,
+    service: 1.1, unclassified: 1.1,
+    tertiary: 1.15, tertiary_link: 1.15,
+    secondary: 1.3, secondary_link: 1.3,
+    primary: 1.6, primary_link: 1.6,
+    trunk: 2.2, trunk_link: 2.2,
+    steps: 5.0,
+};
+
 // Runner-friendly preference nudges — see docs/design/route-preferences.md.
 // Combines multiplicatively with ROAD_WEIGHT. Default-on, no UI.
 var PATHLIKE_HIGHWAYS = { footway: 1, path: 1, cycleway: 1, pedestrian: 1, track: 1, bridleway: 1, byway: 1 };
@@ -56,6 +71,39 @@ function nodePrefMultiplier(attrs) {
     if (attrs.trafficSignal) return 1.15;
     // Unmarked crossings are neutral — no nudge.
     return 1;
+}
+
+function bikeWayPrefMultiplier(highway, surface, _name) {
+    // Soft surfaces mildly penalised on path-class ways (commuter assumption).
+    // Named-trail bonus dropped: cyclists don't get the same coastal-trail benefit.
+    if (PATHLIKE_HIGHWAYS[highway] && SOFT_SURFACES[surface]) return 1.05;
+    return 1;
+}
+
+function bikeNodePrefMultiplier(attrs) {
+    if (!attrs) return 1;
+    // Barriers are worse for bikes — kissing gates and stiles need dismount.
+    if (attrs.barrier) return 1.4;
+    if (attrs.crossingMarked) return 0.9;
+    if (attrs.trafficSignal) return 1.15;
+    return 1;
+}
+
+function routingProfile(name) {
+    if (name === "bike") {
+        return {
+            roadWeight: BIKE_ROAD_WEIGHT,
+            wayPref: bikeWayPrefMultiplier,
+            nodePref: bikeNodePrefMultiplier,
+            defaultWeight: 1.15,
+        };
+    }
+    return {
+        roadWeight: ROAD_WEIGHT,
+        wayPref: wayPrefMultiplier,
+        nodePref: nodePrefMultiplier,
+        defaultWeight: 1.2,
+    };
 }
 
 function nodeKey(lat, lon) {
@@ -147,6 +195,10 @@ function gridInsert(nk, lat, lon) {
     var gk = gridKey(lat, lon);
     if (!spatialGrid[gk]) spatialGrid[gk] = [];
     spatialGrid[gk].push({ key: nk, lat: lat, lon: lon });
+}
+
+function resetSpatialGrid() {
+    spatialGrid = {};
 }
 
 function closestNode(graph, lat, lon) {
