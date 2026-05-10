@@ -1,6 +1,6 @@
 {
-  "built": "2026-05-03T05:29:30.952Z",
-  "version": "99c1d76b",
+  "built": "2026-05-10T05:36:22.116Z",
+  "version": "c0ca5e1a",
   "cities": {
     "adelaide": {
       "name": "Adelaide",
@@ -29,7 +29,7 @@
             "Montague Road",
             "Coonong Avenue"
           ],
-          "ways": 5590
+          "ways": 5591
         },
         {
           "file": "2_3.json",
@@ -44,7 +44,7 @@
             "William Street",
             "Norwood"
           ],
-          "ways": 10570
+          "ways": 10571
         },
         {
           "file": "4_2.json",
@@ -86,7 +86,7 @@
           "suburbs": [
             "Mile End"
           ],
-          "ways": 9144
+          "ways": 9180
         },
         {
           "file": "3_1.json",
@@ -101,7 +101,7 @@
             "Albert Park",
             "Spotlight"
           ],
-          "ways": 7298
+          "ways": 7413
         },
         {
           "file": "1_2.json",
@@ -130,7 +130,7 @@
             "Overseas Passenger Terminal",
             "Oliver Rogers Road"
           ],
-          "ways": 558
+          "ways": 560
         },
         {
           "file": "5_1.json",
@@ -145,7 +145,7 @@
             "Quarantine Power Station",
             "Torrens Island Conservation Park"
           ],
-          "ways": 348
+          "ways": 379
         },
         {
           "file": "3_2.json",
@@ -158,7 +158,7 @@
           "suburbs": [
             "Regency Road"
           ],
-          "ways": 5594
+          "ways": 5639
         },
         {
           "file": "4_0.json",
@@ -230,7 +230,7 @@
             "North Arm Road",
             "Grand Trunkway"
           ],
-          "ways": 2300
+          "ways": 2302
         },
         {
           "file": "1_4.json",
@@ -273,7 +273,7 @@
             "Kelly Road",
             "Burragah Recreation Centre"
           ],
-          "ways": 4840
+          "ways": 4842
         },
         {
           "file": "0_4.json",
@@ -288,7 +288,7 @@
             "Blue Cottage",
             "Soldiers Memorial Hall"
           ],
-          "ways": 326
+          "ways": 328
         },
         {
           "file": "0_5.json",
@@ -318,7 +318,7 @@
             "Goldbridge Avenue",
             "Earlsfield Avenue"
           ],
-          "ways": 4218
+          "ways": 4228
         },
         {
           "file": "2_1.json",
@@ -333,7 +333,7 @@
             "Clyde Avenue",
             "David Read Lodge"
           ],
-          "ways": 4989
+          "ways": 5039
         },
         {
           "file": "3_4.json",
@@ -348,7 +348,7 @@
             "Gorge Road",
             "Edmund Avenue"
           ],
-          "ways": 4197
+          "ways": 4199
         },
         {
           "file": "0_2.json",
@@ -363,7 +363,7 @@
             "Flinders University",
             "Humanities Road"
           ],
-          "ways": 3610
+          "ways": 3613
         },
         {
           "file": "5_5.json",
@@ -407,7 +407,7 @@
             "Gambia Avenue",
             "Welwyn Road"
           ],
-          "ways": 7270
+          "ways": 7273
         },
         {
           "file": "0_1.json",
@@ -463,7 +463,7 @@
           "suburbs": [
             "Unknown"
           ],
-          "ways": 1025
+          "ways": 1082
         },
         {
           "file": "5_3.json",
@@ -478,7 +478,7 @@
             "Antrim Street",
             "Cork Street"
           ],
-          "ways": 5212
+          "ways": 5220
         },
         {
           "file": "0_3.json",
@@ -724,7 +724,7 @@
             "Gardens Point Road",
             "Azteca"
           ],
-          "ways": 16807
+          "ways": 16861
         },
         {
           "file": "2_1.json",
@@ -753,7 +753,7 @@
             "Windsor",
             "Lutwyche"
           ],
-          "ways": 9982
+          "ways": 10001
         },
         {
           "file": "3_3.json",
@@ -781,7 +781,7 @@
             "Acacia Street",
             "Pel-Air"
           ],
-          "ways": 1542
+          "ways": 1512
         },
         {
           "file": "4_3.json",
@@ -794,7 +794,7 @@
           "suburbs": [
             "Banyo"
           ],
-          "ways": 3825
+          "ways": 3842
         },
         {
           "file": "2_4.json",
@@ -835,7 +835,7 @@
             "Chermside",
             "EG Australia"
           ],
-          "ways": 6170
+          "ways": 6181
         },
         {
           "file": "4_1.json",
@@ -850,7 +850,7 @@
             "Western Ridge Road",
             "P1"
           ],
-          "ways": 4774
+          "ways": 4780
         },
         {
           "file": "3_1.json",
@@ -890,7 +890,7 @@
           "suburbs": [
             "Sherwood"
           ],
-          "ways": 5411
+          "ways": 5457
         },
         {
           "file": "2_0.json",
@@ -916,7 +916,7 @@
           "suburbs": [
             "Sunnybank"
           ],
-          "ways": 6329
+          "ways": 6332
         },
         {
           "file": "0_0.json",
@@ -945,7 +945,7 @@
             "Moorooka",
             "Delville Avenue"
           ],
-          "ways": 10388
+          "ways": 10426
         },
         {
           "file": "1_4.json",
@@ -973,7 +973,7 @@
             "Pinkenba",
             "Incitec Pivot"
           ],
-          "ways": 1697
+          "ways": 1699
         },
         {
           "file": "0_2.json",
@@ -987,7 +987,7 @@
             "Beaudesert Road",
             "Acacia Ridge"
           ],
-          "ways": 4210
+          "ways": 4188
         },
         {
           "file": "1_3.json",
@@ -1013,7 +1013,7 @@
           "suburbs": [
             "Rochedale"
           ],
-          "ways": 2253
+          "ways": 2255
         },
         {
           "file": "3_0.json",
@@ -1026,7 +1026,7 @@
           "suburbs": [
             "Upper Kedron"
           ],
-          "ways": 2958
+          "ways": 2959
         },
         {
           "file": "-1_1.json",
@@ -1209,7 +1209,7 @@
             "Carruthers Street after Throssell Street",
             "Carruthers Street after Jennings Street"
           ],
-          "ways": 5783
+          "ways": 5784
         },
         {
           "file": "0_1.json",
@@ -1222,7 +1222,7 @@
           "suburbs": [
             "Mt Taylor Hill Climb"
           ],
-          "ways": 4613
+          "ways": 4617
         },
         {
           "file": "1_0.json",
@@ -1235,7 +1235,7 @@
           "suburbs": [
             "Cotter Road"
           ],
-          "ways": 4218
+          "ways": 4229
         },
         {
           "file": "2_1.json",
@@ -1262,7 +1262,7 @@
             "Wickham Crescent",
             "Torres Street"
           ],
-          "ways": 7363
+          "ways": 7413
         },
         {
           "file": "2_2.json",
@@ -1275,7 +1275,7 @@
           "suburbs": [
             "Barry Drive"
           ],
-          "ways": 8981
+          "ways": 8970
         },
         {
           "file": "2_3.json",
@@ -1303,7 +1303,7 @@
             "Majura Horse Trail",
             "Federal Highway"
           ],
-          "ways": 2499
+          "ways": 2501
         },
         {
           "file": "0_3.json",
@@ -1318,7 +1318,7 @@
             "Jerrabomberra Grassland Reserve - Canberra Nature Park",
             "ACT ESA Training Facility Hume"
           ],
-          "ways": 1205
+          "ways": 1207
         },
         {
           "file": "3_2.json",
@@ -1347,7 +1347,7 @@
             "Kembla Street",
             "Newcastle Street"
           ],
-          "ways": 3341
+          "ways": 3350
         },
         {
           "file": "0_0.json",
@@ -1375,7 +1375,7 @@
           "suburbs": [
             "Gundaroo Drive"
           ],
-          "ways": 8201
+          "ways": 8215
         },
         {
           "file": "0_2.json",
@@ -1405,7 +1405,7 @@
             "Moyes Crescent",
             "Holt 105"
           ],
-          "ways": 5892
+          "ways": 5894
         },
         {
           "file": "-1_1.json",
@@ -1502,7 +1502,7 @@
             "Winslade",
             "Browns Trig Fire Trail"
           ],
-          "ways": 9
+          "ways": 8
         },
         {
           "file": "-1_0.json",
@@ -1545,7 +1545,7 @@
             "Fannie Bay",
             "Sunset Beach"
           ],
-          "ways": 1950
+          "ways": 1955
         },
         {
           "file": "1_1.json",
@@ -1560,7 +1560,7 @@
             "North Australia Rail Trail",
             "Stuart Highway (458)"
           ],
-          "ways": 2262
+          "ways": 2269
         },
         {
           "file": "0_0.json",
@@ -1573,7 +1573,7 @@
           "suburbs": [
             "Unknown"
           ],
-          "ways": 1436
+          "ways": 1438
         },
         {
           "file": "1_2.json",
@@ -1588,7 +1588,7 @@
             "Flight Path Golf & Outdoor Recreation",
             "Horse Stables (282)"
           ],
-          "ways": 1399
+          "ways": 1407
         },
         {
           "file": "2_1.json",
@@ -1602,7 +1602,7 @@
             "Dripstone Road",
             "Lakeside Drive"
           ],
-          "ways": 4484
+          "ways": 4498
         },
         {
           "file": "0_1.json",
@@ -1700,7 +1700,7 @@
             "GASP Trail",
             "Brooker Highway"
           ],
-          "ways": 2234
+          "ways": 2239
         },
         {
           "file": "2_1.json",
@@ -1744,7 +1744,7 @@
             "Woolworths Car Park",
             "Stop 4, No.169 Campbell St"
           ],
-          "ways": 4082
+          "ways": 4085
         },
         {
           "file": "0_1.json",
@@ -1983,7 +1983,7 @@
             "Danewood Drive",
             "Hampstead Garden Suburb"
           ],
-          "ways": 5865
+          "ways": 5866
         },
         {
           "file": "3_0.json",
@@ -2011,7 +2011,7 @@
             "Hawkins Way",
             "Stoms Path"
           ],
-          "ways": 5329
+          "ways": 5339
         },
         {
           "file": "0_5.json",
@@ -2026,7 +2026,7 @@
             "Broadlands Road",
             "Ridgeway Drive"
           ],
-          "ways": 7594
+          "ways": 7589
         },
         {
           "file": "2_2.json",
@@ -2041,7 +2041,7 @@
             "Fyfe Mcdade",
             "William Reeve"
           ],
-          "ways": 31009
+          "ways": 31270
         },
         {
           "file": "2_0.json",
@@ -2056,7 +2056,7 @@
             "Webb Close",
             "North Kensington"
           ],
-          "ways": 10586
+          "ways": 10595
         },
         {
           "file": "4_1.json",
@@ -2085,7 +2085,7 @@
             "Deptford",
             "Chairbears Nursery"
           ],
-          "ways": 13046
+          "ways": 13049
         },
         {
           "file": "3_3.json",
@@ -2115,7 +2115,7 @@
             "Beans & Beyond",
             "Chance Street"
           ],
-          "ways": 25962
+          "ways": 26628
         },
         {
           "file": "2_1.json",
@@ -2130,7 +2130,7 @@
             "Cooper House",
             "Fisherton Street"
           ],
-          "ways": 16271
+          "ways": 16301
         },
         {
           "file": "1_5.json",
@@ -2144,7 +2144,7 @@
             "Sun in the Sands Roundabout",
             "Shooters Hill Road"
           ],
-          "ways": 12469
+          "ways": 12491
         },
         {
           "file": "3_2.json",
@@ -2185,7 +2185,7 @@
             "Battersea Square",
             "Cotswold Mews"
           ],
-          "ways": 14561
+          "ways": 14560
         },
         {
           "file": "2_4.json",
@@ -2199,7 +2199,7 @@
             "Bow",
             "Wellington Way"
           ],
-          "ways": 21501
+          "ways": 21521
         },
         {
           "file": "3_4.json",
@@ -2241,7 +2241,7 @@
           "suburbs": [
             "Peckham"
           ],
-          "ways": 14620
+          "ways": 14612
         },
         {
           "file": "2_5.json",
@@ -2254,7 +2254,7 @@
           "suburbs": [
             "Plaistow"
           ],
-          "ways": 15798
+          "ways": 15793
         },
         {
           "file": "0_3.json",
@@ -2269,7 +2269,7 @@
             "Shell",
             "Select"
           ],
-          "ways": 6715
+          "ways": 6716
         },
         {
           "file": "1_-1.json",
@@ -2299,7 +2299,7 @@
             "Barn Elms Reach",
             "South Bank Sailing Club"
           ],
-          "ways": 9171
+          "ways": 9178
         },
         {
           "file": "4_0.json",
@@ -2586,7 +2586,7 @@
           "suburbs": [
             "Canterbury"
           ],
-          "ways": 4112
+          "ways": 4113
         },
         {
           "file": "2_5.json",
@@ -2599,7 +2599,7 @@
           "suburbs": [
             "Hawthorn"
           ],
-          "ways": 9435
+          "ways": 9437
         },
         {
           "file": "3_6.json",
@@ -2613,7 +2613,7 @@
             "Bulleen Park",
             "Future Yarra Junior Football League Pavillion"
           ],
-          "ways": 5019
+          "ways": 5020
         },
         {
           "file": "3_4.json",
@@ -2626,7 +2626,7 @@
           "suburbs": [
             "Brunswick East"
           ],
-          "ways": 15713
+          "ways": 15711
         },
         {
           "file": "2_4.json",
@@ -2641,7 +2641,7 @@
             "Sidney Myer",
             "CityLink"
           ],
-          "ways": 19243
+          "ways": 19296
         },
         {
           "file": "5_0.json",
@@ -2656,7 +2656,7 @@
             "Calder Freeway",
             "Calder Park"
           ],
-          "ways": 2195
+          "ways": 2199
         },
         {
           "file": "4_0.json",
@@ -2669,7 +2669,7 @@
           "suburbs": [
             "Delahey"
           ],
-          "ways": 6311
+          "ways": 6324
         },
         {
           "file": "5_-1.json",
@@ -2695,7 +2695,7 @@
           "suburbs": [
             "Ascot Vale"
           ],
-          "ways": 9903
+          "ways": 9929
         },
         {
           "file": "1_8.json",
@@ -2734,7 +2734,7 @@
           "suburbs": [
             "Clayton"
           ],
-          "ways": 7209
+          "ways": 7211
         },
         {
           "file": "3_7.json",
@@ -2775,7 +2775,7 @@
           "suburbs": [
             "Box Hill"
           ],
-          "ways": 4955
+          "ways": 4954
         },
         {
           "file": "1_5.json",
@@ -2788,7 +2788,7 @@
           "suburbs": [
             "Caulfield North"
           ],
-          "ways": 8845
+          "ways": 8849
         },
         {
           "file": "0_6.json",
@@ -2816,7 +2816,7 @@
             "Riva",
             "Bay Trail"
           ],
-          "ways": 5282
+          "ways": 5327
         },
         {
           "file": "2_8.json",
@@ -2842,7 +2842,7 @@
           "suburbs": [
             "Lalor"
           ],
-          "ways": 5536
+          "ways": 5537
         },
         {
           "file": "4_4.json",
@@ -2856,7 +2856,7 @@
             "Coburg North",
             "Newlands Road"
           ],
-          "ways": 7544
+          "ways": 7541
         },
         {
           "file": "5_4.json",
@@ -2871,7 +2871,7 @@
             "Galada Tamboore and Marran Baba Parklands",
             "Campbellfield"
           ],
-          "ways": 3434
+          "ways": 3435
         },
         {
           "file": "4_3.json",
@@ -2884,7 +2884,7 @@
           "suburbs": [
             "Pascoe Vale"
           ],
-          "ways": 4920
+          "ways": 4928
         },
         {
           "file": "0_4.json",
@@ -2913,7 +2913,7 @@
             "Deer Park",
             "Station Road"
           ],
-          "ways": 5980
+          "ways": 5982
         },
         {
           "file": "4_1.json",
@@ -2943,7 +2943,7 @@
             "Arundel Creek",
             "McNabs Road"
           ],
-          "ways": 679
+          "ways": 681
         },
         {
           "file": "3_2.json",
@@ -2958,7 +2958,7 @@
             "Test Track",
             "Maribyrnong"
           ],
-          "ways": 6436
+          "ways": 6481
         },
         {
           "file": "3_5.json",
@@ -2984,7 +2984,7 @@
           "suburbs": [
             "Brighton East"
           ],
-          "ways": 5811
+          "ways": 5813
         },
         {
           "file": "5_7.json",
@@ -2997,7 +2997,7 @@
           "suburbs": [
             "Plenty"
           ],
-          "ways": 3001
+          "ways": 3002
         },
         {
           "file": "4_7.json",
@@ -3010,7 +3010,7 @@
           "suburbs": [
             "Montmorency"
           ],
-          "ways": 3780
+          "ways": 3783
         },
         {
           "file": "0_8.json",
@@ -3037,7 +3037,7 @@
             "St Albans Road",
             "Sunshine North"
           ],
-          "ways": 5880
+          "ways": 5886
         },
         {
           "file": "1_0.json",
@@ -3050,7 +3050,7 @@
           "suburbs": [
             "Altona Meadows"
           ],
-          "ways": 4102
+          "ways": 4110
         },
         {
           "file": "4_6.json",
@@ -3063,7 +3063,7 @@
           "suburbs": [
             "Macleod"
           ],
-          "ways": 5652
+          "ways": 5655
         },
         {
           "file": "2_3.json",
@@ -3078,7 +3078,7 @@
             "Port Melbourne",
             "Australian Road Research Board"
           ],
-          "ways": 8124
+          "ways": 8129
         },
         {
           "file": "4_2.json",
@@ -3105,7 +3105,7 @@
             "Moonee Ponds Creek Trail",
             "Westmeadows"
           ],
-          "ways": 3711
+          "ways": 3714
         },
         {
           "file": "2_1.json",
@@ -3119,7 +3119,7 @@
             "West Gate Freeway (Express)",
             "Western Ring Road Onramp"
           ],
-          "ways": 2693
+          "ways": 2694
         },
         {
           "file": "2_2.json",
@@ -3145,7 +3145,7 @@
           "suburbs": [
             "Dallas"
           ],
-          "ways": 4763
+          "ways": 4762
         },
         {
           "file": "4_5.json",
@@ -3158,7 +3158,7 @@
           "suburbs": [
             "Reservoir"
           ],
-          "ways": 7779
+          "ways": 7782
         },
         {
           "file": "5_8.json",
@@ -3199,7 +3199,7 @@
             "Mill Park",
             "Riccana Court"
           ],
-          "ways": 6593
+          "ways": 6595
         },
         {
           "file": "2_0.json",
@@ -3417,7 +3417,7 @@
             "Hoppers Crossing",
             "Hammer Court"
           ],
-          "ways": 56
+          "ways": 60
         },
         {
           "file": "6_3.json",
@@ -3543,7 +3543,7 @@
           "suburbs": [
             "South Perth"
           ],
-          "ways": 7981
+          "ways": 7984
         },
         {
           "file": "1_3.json",
@@ -3588,7 +3588,7 @@
             "Gloucester Street Shared Path",
             "Ballaruk Bushland"
           ],
-          "ways": 4654
+          "ways": 4659
         },
         {
           "file": "4_4.json",
@@ -3603,7 +3603,7 @@
             "Third Avenue",
             "Second Avenue"
           ],
-          "ways": 5868
+          "ways": 5870
         },
         {
           "file": "4_3.json",
@@ -3618,7 +3618,7 @@
             "Telethon Speech & Hearing",
             "Bendat Parent and Community Centre"
           ],
-          "ways": 9409
+          "ways": 9412
         },
         {
           "file": "6_2.json",
@@ -3678,7 +3678,7 @@
             "Lydd Close",
             "Bredhurst Road"
           ],
-          "ways": 3325
+          "ways": 3326
         },
         {
           "file": "5_3.json",
@@ -3693,7 +3693,7 @@
             "Alexander Street",
             "Amelia Street"
           ],
-          "ways": 4637
+          "ways": 4646
         },
         {
           "file": "7_2.json",
@@ -3721,7 +3721,7 @@
             "Beechboro Road North",
             "Beechboro Road before Benara Road"
           ],
-          "ways": 3071
+          "ways": 3077
         },
         {
           "file": "7_1.json",
@@ -3763,7 +3763,7 @@
             "300 Acres Restaurant & Bar",
             "Wembley Golf Clubhouse"
           ],
-          "ways": 3749
+          "ways": 3757
         },
         {
           "file": "2_2.json",
@@ -3778,7 +3778,7 @@
             "Point Roe",
             "Colonial Gardens"
           ],
-          "ways": 6322
+          "ways": 6337
         },
         {
           "file": "1_1.json",
@@ -3804,7 +3804,7 @@
           "suburbs": [
             "Dunkley Avenue"
           ],
-          "ways": 3735
+          "ways": 3737
         },
         {
           "file": "4_7.json",
@@ -3834,7 +3834,7 @@
             "Howard Parade",
             "Sulman Avenue after Howard Parade"
           ],
-          "ways": 6185
+          "ways": 6186
         },
         {
           "file": "5_7.json",
@@ -3847,7 +3847,7 @@
           "suburbs": [
             "Patterson Drive"
           ],
-          "ways": 3747
+          "ways": 3748
         },
         {
           "file": "5_6.json",
@@ -3890,7 +3890,7 @@
             "Beaconsfield",
             "York St Before Jean St"
           ],
-          "ways": 7019
+          "ways": 7023
         },
         {
           "file": "7_3.json",
@@ -3932,7 +3932,7 @@
             "Fulham Street",
             "Cemy Place"
           ],
-          "ways": 4966
+          "ways": 5002
         },
         {
           "file": "4_5.json",
@@ -4004,7 +4004,7 @@
             "Newborough Place",
             "Bayham Place"
           ],
-          "ways": 7499
+          "ways": 7508
         },
         {
           "file": "1_5.json",
@@ -4019,7 +4019,7 @@
             "Ruth Playground",
             "Ezekiel Avenue"
           ],
-          "ways": 6118
+          "ways": 6130
         },
         {
           "file": "2_5.json",
@@ -4078,7 +4078,7 @@
             "Good Shepherd Catholic Primary School",
             "Marmion Street"
           ],
-          "ways": 6118
+          "ways": 6199
         },
         {
           "file": "0_6.json",
@@ -4092,7 +4092,7 @@
             "Tonkin Highway",
             "McNeill Road"
           ],
-          "ways": 3831
+          "ways": 3842
         },
         {
           "file": "2_1.json",
@@ -4164,7 +4164,7 @@
             "Cockram Road",
             "Mills Road East"
           ],
-          "ways": 2381
+          "ways": 2396
         },
         {
           "file": "0_4.json",
@@ -4179,7 +4179,7 @@
             "Elderflower Street",
             "Yarrow Street"
           ],
-          "ways": 3142
+          "ways": 3245
         },
         {
           "file": "7_7.json",
@@ -4394,7 +4394,7 @@
           "suburbs": [
             "Lakemba"
           ],
-          "ways": 6485
+          "ways": 6493
         },
         {
           "file": "1_3.json",
@@ -4409,7 +4409,7 @@
             "Ken’s Continental",
             "Daffodil Nail & Beauty"
           ],
-          "ways": 16289
+          "ways": 16313
         },
         {
           "file": "1_2.json",
@@ -4424,7 +4424,7 @@
             "The Crescent Synthetic Sportsfield",
             "The Crescent"
           ],
-          "ways": 11814
+          "ways": 11826
         },
         {
           "file": "1_4.json",
@@ -4438,7 +4438,7 @@
             "Beaumont Street",
             "Liverpool Street"
           ],
-          "ways": 4520
+          "ways": 4550
         },
         {
           "file": "2_3.json",
@@ -4453,7 +4453,7 @@
             "Benelong Rd at Brightmore St",
             "Brightmore Reserve"
           ],
-          "ways": 8934
+          "ways": 9129
         },
         {
           "file": "3_4.json",
@@ -4468,7 +4468,7 @@
             "McDonald Street",
             "Coles Road"
           ],
-          "ways": 6171
+          "ways": 6174
         },
         {
           "file": "2_4.json",
@@ -4498,7 +4498,7 @@
             "River Road",
             "Northwood Road"
           ],
-          "ways": 6937
+          "ways": 6992
         },
         {
           "file": "2_1.json",
@@ -4526,7 +4526,7 @@
             "Earlwood Police Station",
             "Lewins Street"
           ],
-          "ways": 7269
+          "ways": 7275
         },
         {
           "file": "0_2.json",
@@ -4540,7 +4540,7 @@
             "Alexandra Canal Shared Path",
             "Woolworths Distribution Centre"
           ],
-          "ways": 8416
+          "ways": 8418
         },
         {
           "file": "2_0.json",
@@ -4554,7 +4554,7 @@
             "Silverwater Marker",
             "Hill Rd opp Half St"
           ],
-          "ways": 6032
+          "ways": 6030
         },
         {
           "file": "3_2.json",
@@ -4567,7 +4567,7 @@
           "suburbs": [
             "Lindfield"
           ],
-          "ways": 5017
+          "ways": 5023
         },
         {
           "file": "3_3.json",
@@ -4582,7 +4582,7 @@
             "Leinster Avenue",
             "Yeats Avenue"
           ],
-          "ways": 3315
+          "ways": 3321
         },
         {
           "file": "0_4.json",
@@ -4692,7 +4692,7 @@
           "suburbs": [
             "Epping"
           ],
-          "ways": 4658
+          "ways": 4665
         },
         {
           "file": "3_1.json",
@@ -4706,7 +4706,7 @@
             "M2 Hills Motorway",
             "Talavera Road Offramp"
           ],
-          "ways": 5197
+          "ways": 5239
         },
         {
           "file": "-1_1.json",
@@ -4934,7 +4934,7 @@
             "八丁堀",
             "八丁堀　宗佑"
           ],
-          "ways": 19616
+          "ways": 19617
         },
         {
           "file": "0_2.json",
@@ -4949,7 +4949,7 @@
             "五反田駅前プラザ",
             "聖アンジュ学園 五反田校"
           ],
-          "ways": 12553
+          "ways": 12556
         },
         {
           "file": "-1_3.json",
@@ -5009,7 +5009,7 @@
             "Aki’s Place",
             "中丸橋"
           ],
-          "ways": 10466
+          "ways": 10478
         },
         {
           "file": "1_2.json",
@@ -5023,7 +5023,7 @@
             "青山一丁目駅前",
             "赤坂郵便局前"
           ],
-          "ways": 15395
+          "ways": 15384
         },
         {
           "file": "1_1.json",
@@ -5038,7 +5038,7 @@
             "幡ヶ谷一丁目",
             "世田ヶ谷道"
           ],
-          "ways": 13335
+          "ways": 13344
         },
         {
           "file": "2_3.json",
@@ -5053,7 +5053,7 @@
             "一般社団法人産業保健振興会",
             "鶯谷検診センター"
           ],
-          "ways": 19368
+          "ways": 19375
         },
         {
           "file": "2_4.json",
@@ -5098,7 +5098,7 @@
             "大塚児童館",
             "大塚六丁目"
           ],
-          "ways": 16155
+          "ways": 16160
         },
         {
           "file": "3_0.json",
@@ -5113,7 +5113,7 @@
             "旭町保育園",
             "旭町三丁目"
           ],
-          "ways": 11824
+          "ways": 11828
         },
         {
           "file": "2_1.json",
@@ -5203,7 +5203,7 @@
             "綾瀬ひまわり園",
             "綾瀬川通り"
           ],
-          "ways": 9753
+          "ways": 9755
         },
         {
           "file": "2_0.json",
@@ -5218,7 +5218,7 @@
             "シャンプルオカムラ",
             "三井のリパーク"
           ],
-          "ways": 12040
+          "ways": 12042
         },
         {
           "file": "-1_1.json",
@@ -5248,7 +5248,7 @@
             "西新井第3アパート",
             "扇三丁目第2アパート"
           ],
-          "ways": 8736
+          "ways": 8737
         },
         {
           "file": "1_-1.json",
