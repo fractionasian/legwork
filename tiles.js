@@ -277,6 +277,13 @@ async function loadPois(lat, lon) {
 function radiusFromZoom() {
     if (!state.map) return 2000;
     var z = state.map.getZoom();
+    // Cyclists plan longer routes — fetch a wider graph at every zoom.
+    if (state.profile === "bike") {
+        if (z >= 16) return 1500;
+        if (z >= 14) return 4000;
+        if (z >= 12) return 10000;
+        return 20000;
+    }
     if (z >= 16) return 1000;
     if (z >= 14) return 2000;
     if (z >= 12) return 5000;
@@ -411,12 +418,14 @@ function applyPaths(geojson, opts) {
     if (!state.graph) state.graph = {};
     if (!state.edgeSet) state.edgeSet = {};
     var adj = state.graph;
+    var profile = routingProfile(state.profile || "run");
+    state.graphProfile = state.profile || "run";
     for (var f = 0; f < newFeatures.length; f++) {
         var props = newFeatures[f].properties;
         var coords = newFeatures[f].geometry.coordinates;
         var hw = props.highway || "";
         // Combine base road weight + way-level preferences (P1 named trails, P5 soft surfaces).
-        var baseWeight = (ROAD_WEIGHT[hw] || 1.2) * wayPrefMultiplier(hw, props.surface || "", props.name || "");
+        var baseWeight = (profile.roadWeight[hw] || profile.defaultWeight) * profile.wayPref(hw, props.surface || "", props.name || "");
         for (var c = 1; c < coords.length; c++) {
             var lat1 = coords[c-1][1], lon1 = coords[c-1][0];
             var lat2 = coords[c][1], lon2 = coords[c][0];
@@ -426,7 +435,7 @@ function applyPaths(geojson, opts) {
             state.edgeSet[edgeId] = true;
             // Node-level preferences (P2 traffic signals, P3 marked crossings, P4 barriers)
             // apply to both endpoints; the worst penalty / best bonus dominates via product.
-            var nodeMult = nodePrefMultiplier(state.nodeAttrs[k1]) * nodePrefMultiplier(state.nodeAttrs[k2]);
+            var nodeMult = profile.nodePref(state.nodeAttrs[k1]) * profile.nodePref(state.nodeAttrs[k2]);
             var d = haversine(lat1, lon1, lat2, lon2) * baseWeight * nodeMult;
             if (!adj[k1]) { adj[k1] = []; gridInsert(k1, lat1, lon1); }
             if (!adj[k2]) { adj[k2] = []; gridInsert(k2, lat2, lon2); }
@@ -436,6 +445,22 @@ function applyPaths(geojson, opts) {
     }
 
     console.log("Graph: " + Object.keys(adj).length + " nodes (+" + newFeatures.length + " ways)");
+}
+
+// Re-weight the existing graph against state.profile without re-fetching.
+// Used by the cycling toggle: tile features stay, only edge costs change.
+function rebuildGraphForProfile() {
+    if (!state.pathFeatures) {
+        state.graphProfile = state.profile || "run";
+        return;
+    }
+    var snapshot = state.pathFeatures;
+    state.graph = null;
+    state.edgeSet = null;
+    state.seenIds = null;
+    state.pathFeatures = null;
+    resetSpatialGrid();
+    applyPaths(snapshot, { skipRender: true });
 }
 
 // ── Gap filling ───────────────────────────────────────
