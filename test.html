@@ -330,6 +330,27 @@
         assert(waypointHash(a) !== waypointHash(b));
     });
 
+    // ── tileCoords ──────────────────────────────────
+    test("tileCoords: equator at z=0 lands at tile (0,0) pixel (128,128)", function () {
+        var r = tileCoords(0, 0, 0);
+        assert(r.xtile === 0 && r.ytile === 0);
+        assert(Math.abs(r.px - 128) < 0.001 && Math.abs(r.py - 128) < 0.001);
+    });
+    test("tileCoords: Perth (-31.99510, 115.81148) at z=14", function () {
+        var r = tileCoords(-31.99510, 115.81148, 14);
+        // Known good values computed offline
+        assert(r.xtile === 13462 && r.ytile === 9730);
+        assert(r.px >= 0 && r.px < 256);
+        assert(r.py >= 0 && r.py < 256);
+    });
+    test("tileCoords: increasing longitude moves east (larger xtile or px)", function () {
+        var a = tileCoords(-31.99, 115.80, 14);
+        var b = tileCoords(-31.99, 115.85, 14);
+        var ka = a.xtile * 256 + a.px;
+        var kb = b.xtile * 256 + b.px;
+        assert(kb > ka);
+    });
+
     // ── Summary ───────────────────────────────────────
     var summary = document.getElementById("summary");
     if (failed === 0) {

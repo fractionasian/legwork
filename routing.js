@@ -319,6 +319,19 @@ function compactToGeoJSON(data) {
     return fc;
 }
 
+// ── Terrarium tile math ────────────────────────────────
+// Convert (lat, lon, zoom) to slippy-map tile XYZ + pixel-space (px, py)
+// within that tile's 256×256 raster. Used to look up elevation in
+// pre-rendered Terrarium PNG tiles served by AWS Open Data Programme.
+function tileCoords(lat, lon, z) {
+    var n = Math.pow(2, z);
+    var x = (lon + 180) / 360 * n;
+    var latRad = lat * Math.PI / 180;
+    var y = (1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2 * n;
+    var xtile = Math.floor(x), ytile = Math.floor(y);
+    return { xtile: xtile, ytile: ytile, px: (x - xtile) * 256, py: (y - ytile) * 256 };
+}
+
 // ── Route sampling + elevation smoothing ──────────────
 function sampleRoute(coords, intervalMetres) {
     var points = [coords[0]], accumulated = 0;
