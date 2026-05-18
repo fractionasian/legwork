@@ -332,6 +332,13 @@ function tileCoords(lat, lon, z) {
     return { xtile: xtile, ytile: ytile, px: (x - xtile) * 256, py: (y - ytile) * 256 };
 }
 
+// Decode a single Terrarium pixel (R, G, B) to metres above WGS84 ellipsoid.
+// Encoding: elev = (R*256 + G + B/256) - 32768. See
+// https://github.com/tilezen/joerd/blob/master/docs/formats.md#terrarium
+function decodeTerrarium(r, g, b) {
+    return (r * 256 + g + b / 256) - 32768;
+}
+
 // ── Route sampling + elevation smoothing ──────────────
 function sampleRoute(coords, intervalMetres) {
     var points = [coords[0]], accumulated = 0;

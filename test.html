@@ -351,6 +351,22 @@
         assert(kb > ka);
     });
 
+    // ── decodeTerrarium ─────────────────────────────
+    test("decodeTerrarium: (128, 0, 0) decodes to 0 m", function () {
+        // R=128 → 128*256 = 32768; minus offset 32768 → 0
+        assert(Math.abs(decodeTerrarium(128, 0, 0) - 0) < 0.001);
+    });
+    test("decodeTerrarium: (128, 100, 0) decodes to 100 m", function () {
+        assert(Math.abs(decodeTerrarium(128, 100, 0) - 100) < 0.001);
+    });
+    test("decodeTerrarium: (127, 0, 0) decodes to -256 m (below sea level)", function () {
+        assert(Math.abs(decodeTerrarium(127, 0, 0) - (-256)) < 0.001);
+    });
+    test("decodeTerrarium: fractional via blue channel", function () {
+        // R=128, G=10, B=128 → 32768 + 10 + 0.5 - 32768 = 10.5
+        assert(Math.abs(decodeTerrarium(128, 10, 128) - 10.5) < 0.001);
+    });
+
     // ── Summary ───────────────────────────────────────
     var summary = document.getElementById("summary");
     if (failed === 0) {
