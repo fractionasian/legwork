@@ -197,7 +197,7 @@
         var r = smoothElevations([{ lat: 0, lon: 0, elevation: 5 }]);
         assert(r.length === 1 && r[0].elevation === 5);
     });
-    test("smoothElevations: reduces a spike", function () {
+    test("smoothElevations: eliminates a single spike", function () {
         var data = [
             { lat: 0, lon: 0, elevation: 10 },
             { lat: 0, lon: 0, elevation: 10 },
@@ -206,7 +206,8 @@
             { lat: 0, lon: 0, elevation: 10 },
         ];
         var s = smoothElevations(data);
-        assert(s[2].elevation < 100 && s[2].elevation > 10, "spike not reduced: " + s[2].elevation);
+        // median-9 prefilter wipes a lone outlier completely
+        assert(s[2].elevation < 20, "spike not reduced: " + s[2].elevation);
     });
 
     // ── ROAD_WEIGHT ───────────────────────────────────
@@ -396,6 +397,36 @@
         function getPixel(x, y) { return grid[y][x]; }
         // px=0.5, py=0.5 → mean of 0,10,20,30 = 15
         assert(Math.abs(bilinearSample(getPixel, 0.5, 0.5) - 15) < 0.001);
+    });
+
+    // ── medianFilter ───────────────────────────────
+    test("medianFilter window=3: kills single-point spike", function () {
+        var input = [5, 5, 5, 50, 5, 5, 5];
+        var out = medianFilter(input, 3);
+        // Window 3 centered on the spike includes neighbours → median = 5
+        assert(out[3] === 5);
+    });
+    test("medianFilter window=9: kills cluster of 3 zeros amid 30s", function () {
+        var input = [30,30,30,30,0,0,0,30,30,30,30];
+        var out = medianFilter(input, 9);
+        // 9-window at index 5 (the middle zero): values include 4 thirties and 3 zeros and 2 thirties → median 30
+        assert(out[5] === 30);
+    });
+    test("medianFilter preserves length", function () {
+        var input = [1, 2, 3, 4, 5];
+        assert(medianFilter(input, 3).length === 5);
+    });
+    test("smoothElevations: median+EMA reduces 0-bleed artefacts", function () {
+        // Simulate Open-Meteo's failure mode: 5m terrain with random 0 dropouts
+        var input = [];
+        for (var i = 0; i < 50; i++) {
+            input.push({ lat: 0, lon: 0, elevation: (i % 4 === 0) ? 0 : 5 });
+        }
+        var out = smoothElevations(input);
+        // No element should be near 0 — median+EMA washes the artefacts
+        for (var i = 5; i < 45; i++) {
+            assert(out[i].elevation > 2, "elevation at " + i + " is " + out[i].elevation);
+        }
     });
 
     // ── Summary ───────────────────────────────────────
