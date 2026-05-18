@@ -404,3 +404,16 @@ function smoothElevations(elevData) {
     }
     return smoothed;
 }
+
+// Export for Node consumption (e.g. scripts/verify-elevation.mjs).
+// No-op in browsers (module is undefined there).
+if (typeof module !== "undefined" && module.exports) {
+    module.exports = {
+        haversine: haversine,
+        tileCoords: tileCoords,
+        decodeTerrarium: decodeTerrarium,
+        bilinearSample: bilinearSample,
+        medianFilter: medianFilter,
+        smoothElevations: smoothElevations,
+    };
+}
