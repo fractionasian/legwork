@@ -19,6 +19,7 @@ var TILE_PATTERNS = [
     "tile.openstreetmap.org",
     "server.arcgisonline.com",
     "tile.opentopomap.org",
+    "s3.amazonaws.com/elevation-tiles-prod",
 ];
 
 self.addEventListener("install", function (e) {
