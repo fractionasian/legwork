@@ -351,6 +351,21 @@ function bilinearSample(getPixel, px, py) {
     return a * (1 - fx) * (1 - fy) + b * fx * (1 - fy) + c * (1 - fx) * fy + d * fx * fy;
 }
 
+// Median filter — window must be odd. Replaces each value with the median of
+// itself and its (window-1)/2 neighbours on each side. Edges shrink the
+// window symmetrically (a value at index 0 with window=9 uses neighbours 0–4).
+function medianFilter(arr, window) {
+    var half = Math.floor(window / 2);
+    var out = new Array(arr.length);
+    for (var i = 0; i < arr.length; i++) {
+        var lo = Math.max(0, i - half);
+        var hi = Math.min(arr.length, i + half + 1);
+        var sorted = arr.slice(lo, hi).sort(function (a, b) { return a - b; });
+        out[i] = sorted[Math.floor(sorted.length / 2)];
+    }
+    return out;
+}
+
 // ── Route sampling + elevation smoothing ──────────────
 function sampleRoute(coords, intervalMetres) {
     var points = [coords[0]], accumulated = 0;
@@ -366,15 +381,26 @@ function sampleRoute(coords, intervalMetres) {
 
 function smoothElevations(elevData) {
     if (elevData.length < 2) return elevData;
-    var alpha = 0.6;
-    var smoothed = [elevData[0]];
-    for (var i = 1; i < elevData.length; i++) {
-        var prev = smoothed[i-1].elevation;
-        var curr = elevData[i].elevation;
-        smoothed.push({ lat: elevData[i].lat, lon: elevData[i].lon, elevation: alpha * curr + (1 - alpha) * prev });
+    // Step 1: median-9 prefilter on elevation values only. Kills isolated
+    // outliers (e.g. a single DEM cell that returned a 30 m phantom) before
+    // the EMA blends them outward.
+    var elevs = elevData.map(function (e) { return e.elevation; });
+    var medianed = medianFilter(elevs, 9);
+    // Step 2: forward + reverse EMA with α=0.4 for symmetric smoothing.
+    var alpha = 0.4;
+    var smoothed = [{ lat: elevData[0].lat, lon: elevData[0].lon, elevation: medianed[0] }];
+    for (var i = 1; i < medianed.length; i++) {
+        var prev = smoothed[i - 1].elevation;
+        smoothed.push({
+            lat: elevData[i].lat, lon: elevData[i].lon,
+            elevation: alpha * medianed[i] + (1 - alpha) * prev,
+        });
     }
     for (var i = smoothed.length - 2; i >= 0; i--) {
-        smoothed[i] = { lat: smoothed[i].lat, lon: smoothed[i].lon, elevation: alpha * smoothed[i].elevation + (1 - alpha) * smoothed[i+1].elevation };
+        smoothed[i] = {
+            lat: smoothed[i].lat, lon: smoothed[i].lon,
+            elevation: alpha * smoothed[i].elevation + (1 - alpha) * smoothed[i + 1].elevation,
+        };
     }
     return smoothed;
 }
