@@ -339,6 +339,18 @@ function decodeTerrarium(r, g, b) {
     return (r * 256 + g + b / 256) - 32768;
 }
 
+// Bilinear interpolation. getPixel(x, y) returns the elevation at integer
+// pixel (x, y). px, py are fractional coordinates. The caller is responsible
+// for clamping or providing cross-tile getPixel — we just blend.
+function bilinearSample(getPixel, px, py) {
+    var x0 = Math.floor(px), y0 = Math.floor(py);
+    var x1 = x0 + 1, y1 = y0 + 1;
+    var fx = px - x0, fy = py - y0;
+    var a = getPixel(x0, y0), b = getPixel(x1, y0);
+    var c = getPixel(x0, y1), d = getPixel(x1, y1);
+    return a * (1 - fx) * (1 - fy) + b * fx * (1 - fy) + c * (1 - fx) * fy + d * fx * fy;
+}
+
 // ── Route sampling + elevation smoothing ──────────────
 function sampleRoute(coords, intervalMetres) {
     var points = [coords[0]], accumulated = 0;
