@@ -300,42 +300,168 @@ function goToLocation(lat, lon) {
     });
 }
 
-// ── Elevation (direct Open-Topo-Data API) ──────────────
-async function fetchElevation(points) {
-    var results = [];
-    var uncached = [];
-    var uncachedIdx = [];
+// ── Elevation (AWS Terrarium tiles, Open-Meteo fallback) ─────
+//
+// Terrarium tiles are PNG RGB images where each pixel encodes an elevation:
+//   elev_metres = (R*256 + G + B/256) - 32768
+// Tiles served by AWS Open Data Programme at z14 (~30 m underlying resolution
+// for AU, sourced from SRTM30 + GMTED2010). CORS enabled, no API key.
+//
+// Strategy: group input points by tile, fetch each tile once, decode all
+// points that fall in it via bilinear interpolation. Fall back to Open-Meteo
+// for any tile that fails to load.
 
+var TERRARIUM_ZOOM = 14;
+var TERRARIUM_URL = "https://s3.amazonaws.com/elevation-tiles-prod/terrarium";
+
+async function fetchTerrariumTile(xtile, ytile) {
+    var url = TERRARIUM_URL + "/" + TERRARIUM_ZOOM + "/" + xtile + "/" + ytile + ".png";
+    var resp = await fetchWithTimeout(url, null, 20000);
+    if (!resp.ok) throw new Error("Terrarium HTTP " + resp.status);
+    var blob = await resp.blob();
+    var bitmap = await createImageBitmap(blob);
+    var canvas = document.createElement("canvas");
+    canvas.width = bitmap.width; canvas.height = bitmap.height;
+    var ctx = canvas.getContext("2d");
+    ctx.drawImage(bitmap, 0, 0);
+    return ctx.getImageData(0, 0, bitmap.width, bitmap.height);
+}
+
+// Build a getPixel that handles cross-tile boundaries by sampling adjacent
+// tiles from the cache. Out-of-range tiles (top/bottom of map) clamp.
+function makeGetPixel(tileCache, xtile, ytile) {
+    return function (x, y) {
+        var tx = xtile, ty = ytile;
+        if (x < 0) { tx -= 1; x += 256; }
+        else if (x >= 256) { tx += 1; x -= 256; }
+        if (y < 0) { ty -= 1; y += 256; }
+        else if (y >= 256) { ty += 1; y -= 256; }
+        var tile = tileCache[tx + "/" + ty];
+        if (!tile) return null; // signal cross-tile miss
+        var idx = (y * 256 + x) * 4;
+        return decodeTerrarium(tile.data[idx], tile.data[idx + 1], tile.data[idx + 2]);
+    };
+}
+
+async function fetchElevation(points) {
+    var results = new Array(points.length);
+    var pendingIdx = []; // indices not yet resolved
+    var pendingPts = [];
+
+    // ── Step 1: per-point IndexedDB cache lookup ────
     for (var i = 0; i < points.length; i++) {
-        var ck = "elev2:" + points[i].lat.toFixed(5) + ":" + points[i].lon.toFixed(5);
+        var ck = "elev3:" + points[i].lat.toFixed(5) + ":" + points[i].lon.toFixed(5);
         var cached = await cacheGet(ck);
-        if (cached) { results.push(cached); } else { results.push(null); uncached.push(points[i]); uncachedIdx.push(i); }
+        if (cached) { results[i] = cached; }
+        else { results[i] = null; pendingIdx.push(i); pendingPts.push(points[i]); }
+    }
+    if (pendingPts.length === 0) return results;
+
+    // ── Step 2: group pending points by tile ────────
+    var tileGroups = {}; // "xtile/ytile" → [{ origIdx, pt, px, py }]
+    var tileXY = {};     // "xtile/ytile" → { xtile, ytile }
+    for (var i = 0; i < pendingPts.length; i++) {
+        var c = tileCoords(pendingPts[i].lat, pendingPts[i].lon, TERRARIUM_ZOOM);
+        var key = c.xtile + "/" + c.ytile;
+        if (!tileGroups[key]) { tileGroups[key] = []; tileXY[key] = { xtile: c.xtile, ytile: c.ytile }; }
+        tileGroups[key].push({ origIdx: pendingIdx[i], pt: pendingPts[i], px: c.px, py: c.py });
     }
 
-    // Open-Meteo elevation API — free, CORS-enabled, no key needed
-    for (var b = 0; b < uncached.length; b += 100) {
-        var batch = uncached.slice(b, b + 100);
-        var lats = batch.map(function (p) { return p.lat.toFixed(5); }).join(",");
-        var lons = batch.map(function (p) { return p.lon.toFixed(5); }).join(",");
-        try {
-            var resp = await fetchWithTimeout("https://api.open-meteo.com/v1/elevation?latitude=" + lats + "&longitude=" + lons, null, 20000);
-            if (!resp.ok) throw new Error("HTTP " + resp.status);
-            var data = await resp.json();
-            var elevArr = data.elevation || [];
-            for (var j = 0; j < elevArr.length; j++) {
-                var elev = elevArr[j] != null ? elevArr[j] : 0;
-                var entry = { lat: batch[j].lat, lon: batch[j].lon, elevation: elev };
-                results[uncachedIdx[b + j]] = entry;
-                if (elevArr[j] != null) {
-                    await cacheSet("elev2:" + entry.lat.toFixed(5) + ":" + entry.lon.toFixed(5), entry);
-                }
+    // ── Step 3: also fetch neighbour tiles for boundary points ─
+    var tilesToFetch = {};
+    Object.keys(tileGroups).forEach(function (key) { tilesToFetch[key] = tileXY[key]; });
+    Object.keys(tileGroups).forEach(function (key) {
+        var pts = tileGroups[key];
+        for (var i = 0; i < pts.length; i++) {
+            var p = pts[i];
+            var dx = p.px < 1 ? -1 : p.px > 255 ? 1 : 0;
+            var dy = p.py < 1 ? -1 : p.py > 255 ? 1 : 0;
+            if (dx !== 0) {
+                var k = (tileXY[key].xtile + dx) + "/" + tileXY[key].ytile;
+                if (!tilesToFetch[k]) tilesToFetch[k] = { xtile: tileXY[key].xtile + dx, ytile: tileXY[key].ytile };
             }
-        } catch (e) {
-            console.warn("Elevation batch failed:", e.message);
-            for (var j = 0; j < batch.length; j++) {
-                if (!results[uncachedIdx[b + j]]) results[uncachedIdx[b + j]] = { lat: batch[j].lat, lon: batch[j].lon, elevation: 0 };
+            if (dy !== 0) {
+                var k = tileXY[key].xtile + "/" + (tileXY[key].ytile + dy);
+                if (!tilesToFetch[k]) tilesToFetch[k] = { xtile: tileXY[key].xtile, ytile: tileXY[key].ytile + dy };
+            }
+            if (dx !== 0 && dy !== 0) {
+                var k = (tileXY[key].xtile + dx) + "/" + (tileXY[key].ytile + dy);
+                if (!tilesToFetch[k]) tilesToFetch[k] = { xtile: tileXY[key].xtile + dx, ytile: tileXY[key].ytile + dy };
             }
         }
+    });
+
+    // ── Step 4: fetch tiles in parallel ─────────────
+    var tileCache = {};
+    var fetchPromises = Object.keys(tilesToFetch).map(function (key) {
+        return fetchTerrariumTile(tilesToFetch[key].xtile, tilesToFetch[key].ytile)
+            .then(function (data) { tileCache[key] = data; })
+            .catch(function (e) { console.warn("Terrarium tile " + key + " failed:", e.message); });
+    });
+    await Promise.all(fetchPromises);
+
+    // ── Step 5: decode each point via bilinear ──────
+    var fallbackIdx = [], fallbackPts = [];
+    var tileKeys = Object.keys(tileGroups);
+    for (var t = 0; t < tileKeys.length; t++) {
+        var key = tileKeys[t];
+        var pts = tileGroups[key];
+        if (!tileCache[key]) {
+            // tile fetch failed — queue all its points for fallback
+            for (var i = 0; i < pts.length; i++) { fallbackIdx.push(pts[i].origIdx); fallbackPts.push(pts[i].pt); }
+            continue;
+        }
+        var getPixel = makeGetPixel(tileCache, tileXY[key].xtile, tileXY[key].ytile);
+        for (var i = 0; i < pts.length; i++) {
+            var p = pts[i];
+            // Probe the four bilinear neighbours. If any are null (neighbour
+            // tile missing), fall back for this point only.
+            var x0 = Math.floor(p.px), y0 = Math.floor(p.py);
+            var ok = getPixel(x0, y0) !== null && getPixel(x0 + 1, y0) !== null
+                  && getPixel(x0, y0 + 1) !== null && getPixel(x0 + 1, y0 + 1) !== null;
+            if (!ok) { fallbackIdx.push(p.origIdx); fallbackPts.push(p.pt); continue; }
+            var elev = bilinearSample(getPixel, p.px, p.py);
+            var entry = { lat: p.pt.lat, lon: p.pt.lon, elevation: elev };
+            results[p.origIdx] = entry;
+            await cacheSet("elev3:" + p.pt.lat.toFixed(5) + ":" + p.pt.lon.toFixed(5), entry);
+        }
+    }
+
+    // ── Step 6: Open-Meteo fallback for failed points ─
+    if (fallbackPts.length > 0) {
+        console.warn("Terrarium failed for " + fallbackPts.length + " points, falling back to Open-Meteo");
+        for (var b = 0; b < fallbackPts.length; b += 100) {
+            var batch = fallbackPts.slice(b, b + 100);
+            var batchIdx = fallbackIdx.slice(b, b + 100);
+            var lats = batch.map(function (p) { return p.lat.toFixed(5); }).join(",");
+            var lons = batch.map(function (p) { return p.lon.toFixed(5); }).join(",");
+            try {
+                var resp = await fetchWithTimeout(
+                    "https://api.open-meteo.com/v1/elevation?latitude=" + lats + "&longitude=" + lons,
+                    null, 20000);
+                if (!resp.ok) throw new Error("HTTP " + resp.status);
+                var data = await resp.json();
+                var elevArr = data.elevation || [];
+                for (var j = 0; j < elevArr.length; j++) {
+                    var elev = elevArr[j] != null ? elevArr[j] : 0;
+                    var entry = { lat: batch[j].lat, lon: batch[j].lon, elevation: elev };
+                    results[batchIdx[j]] = entry;
+                    if (elevArr[j] != null) {
+                        await cacheSet("elev3:" + entry.lat.toFixed(5) + ":" + entry.lon.toFixed(5), entry);
+                    }
+                }
+            } catch (e) {
+                console.warn("Open-Meteo fallback failed:", e.message);
+                for (var j = 0; j < batch.length; j++) {
+                    results[batchIdx[j]] = { lat: batch[j].lat, lon: batch[j].lon, elevation: 0 };
+                }
+            }
+        }
+    }
+
+    // Defensive: ensure no null in output
+    for (var i = 0; i < results.length; i++) {
+        if (!results[i]) results[i] = { lat: points[i].lat, lon: points[i].lon, elevation: 0 };
     }
     return results;
 }
@@ -1031,7 +1157,7 @@ function updateElevation(elevData) {
     var elevations = elevData.map(function (e) { return e.elevation; });
 
     var totalAscent = 0, totalDescent = 0, maxGradient = 0;
-    var DEAD_BAND = 2; // metres — ignore cumulative changes below this
+    var DEAD_BAND = 5; // metres — ignore cumulative changes below this
     var pending = 0;
     var segGradients = [0]; // signed grade% per point; index 0 has no prior segment
     for (var i = 1; i < elevations.length; i++) {
@@ -1143,7 +1269,7 @@ async function exportGPX() {
         var elev = elevLookup[elevKey];
         // Also check IndexedDB elevation cache
         if (elev === undefined) {
-            var cached = await cacheGet("elev2:" + coords[i][0].toFixed(5) + ":" + coords[i][1].toFixed(5));
+            var cached = await cacheGet("elev3:" + coords[i][0].toFixed(5) + ":" + coords[i][1].toFixed(5));
             if (cached) elev = cached.elevation;
         }
         if (elev !== undefined) {
