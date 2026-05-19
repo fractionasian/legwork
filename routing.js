@@ -381,16 +381,15 @@ function sampleRoute(coords, intervalMetres) {
 
 function smoothElevations(elevData) {
     if (elevData.length < 2) return elevData;
-    // Step 1: median-5 prefilter on elevation values only. Kills isolated
-    // outliers (e.g. a single DEM cell that returned a 30 m phantom) before
-    // the EMA blends them outward. Window was 9 when Open-Meteo's 0-bleed
-    // was the dominant noise source; with Terrarium tiles the data is clean
-    // enough that a 9-wide window over 50 m samples flattened genuine
-    // 100–300 m suburban undulations.
+    // Empirically tuned against the Mosman Park ↔ Subiaco out-and-back
+    // (Strava barometric truth: 44.2 m). Median-3 acts as implicit outlier
+    // rejection — isolated corrupt Terrarium pixels (observed at tile
+    // boundaries, e.g. -3700 m spikes on col 255 of tile 13462/9729) are
+    // replaced by their sorted-middle neighbour. Wider windows over-flattened
+    // genuine 30–40 m suburban undulations.
     var elevs = elevData.map(function (e) { return e.elevation; });
-    var medianed = medianFilter(elevs, 5);
-    // Step 2: forward + reverse EMA with α=0.6 for symmetric smoothing.
-    var alpha = 0.6;
+    var medianed = medianFilter(elevs, 3);
+    var alpha = 0.5;
     var smoothed = [{ lat: elevData[0].lat, lon: elevData[0].lon, elevation: medianed[0] }];
     for (var i = 1; i < medianed.length; i++) {
         var prev = smoothed[i - 1].elevation;
@@ -398,12 +397,6 @@ function smoothElevations(elevData) {
             lat: elevData[i].lat, lon: elevData[i].lon,
             elevation: alpha * medianed[i] + (1 - alpha) * prev,
         });
-    }
-    for (var i = smoothed.length - 2; i >= 0; i--) {
-        smoothed[i] = {
-            lat: smoothed[i].lat, lon: smoothed[i].lon,
-            elevation: alpha * smoothed[i].elevation + (1 - alpha) * smoothed[i + 1].elevation,
-        };
     }
     return smoothed;
 }

@@ -329,6 +329,12 @@ async function fetchTerrariumTile(xtile, ytile) {
 
 // Build a getPixel that handles cross-tile boundaries by sampling adjacent
 // tiles from the cache. Out-of-range tiles (top/bottom of map) clamp.
+//
+// Shared-boundary redirect: col 255 of tile X and col 0 of tile X+1 are the
+// same geographic column under Web Mercator XYZ convention. Some Terrarium
+// tiles ship with corrupt right/bottom edges (observed Perth tile 13462/9729
+// col 255 → -3700 m artefacts) while the neighbour's col 0 reads correctly.
+// Always prefer the neighbour's edge pixel if its tile is in cache.
 function makeGetPixel(tileCache, xtile, ytile) {
     return function (x, y) {
         var tx = xtile, ty = ytile;
@@ -336,6 +342,8 @@ function makeGetPixel(tileCache, xtile, ytile) {
         else if (x >= 256) { tx += 1; x -= 256; }
         if (y < 0) { ty -= 1; y += 256; }
         else if (y >= 256) { ty += 1; y -= 256; }
+        if (x === 255 && tileCache[(tx + 1) + "/" + ty]) { tx += 1; x = 0; }
+        if (y === 255 && tileCache[tx + "/" + (ty + 1)]) { ty += 1; y = 0; }
         var tile = tileCache[tx + "/" + ty];
         if (!tile) return null; // signal cross-tile miss
         var idx = (y * 256 + x) * 4;
