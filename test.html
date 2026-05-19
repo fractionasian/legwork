@@ -206,7 +206,7 @@
             { lat: 0, lon: 0, elevation: 10 },
         ];
         var s = smoothElevations(data);
-        // median-9 prefilter wipes a lone outlier completely
+        // median prefilter wipes a lone outlier completely
         assert(s[2].elevation < 20, "spike not reduced: " + s[2].elevation);
     });
 

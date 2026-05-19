@@ -86,3 +86,39 @@ test("smoothElevations: real-data gain — replay Fixture A elevation profile", 
     assert.ok(filteredGain < 80,
         `filtered gain ${filteredGain} m exceeds 80 m — smoothing weakened or pipeline broken`);
 });
+
+test("smoothElevations: preserves a known 40 m hill under noise", () => {
+    // Synthetic profile: a 50 m-sampled walk over a single smooth hill —
+    // 0 m → 40 m peak at 2 km → 0 m at 4 km — with ±1 m Gaussian-ish noise
+    // sprinkled per sample. True total ascent is exactly 40 m. We assert
+    // the smoothing pipeline + 5 m dead-band recovers most of it. This
+    // guards against over-smoothing (the Open-Meteo-era median-9/α=0.4
+    // pipeline collapsed real Perth routes to ~10 m of gain) as well as
+    // under-smoothing (which would let the noise add phantom ascent).
+    const profile = [];
+    // Deterministic pseudo-noise so the test is repeatable.
+    let seed = 1;
+    const rand = () => { seed = (seed * 16807) % 2147483647; return (seed / 2147483647 - 0.5) * 2; };
+    for (let i = 0; i <= 80; i++) {
+        const dist = i * 50;
+        const hill = dist <= 2000
+            ? (dist / 2000) * 40
+            : ((4000 - dist) / 2000) * 40;
+        profile.push({ lat: 0, lon: i * 0.0001, elevation: hill + rand() });
+    }
+    function gain(arr, dead) {
+        let asc = 0, pend = 0;
+        for (let i = 1; i < arr.length; i++) {
+            pend += arr[i].elevation - arr[i - 1].elevation;
+            if (pend > dead) { asc += pend; pend = 0; }
+            else if (pend < -dead) pend = 0;
+        }
+        return asc;
+    }
+    const smoothed = smoothElevations(profile);
+    const filtered = gain(smoothed, 5);
+    assert.ok(filtered > 30,
+        `filtered gain ${filtered.toFixed(1)} m < 30 m on a 40 m hill — over-smoothing`);
+    assert.ok(filtered < 50,
+        `filtered gain ${filtered.toFixed(1)} m > 50 m on a 40 m hill — under-smoothing letting noise through`);
+});
