@@ -381,13 +381,16 @@ function sampleRoute(coords, intervalMetres) {
 
 function smoothElevations(elevData) {
     if (elevData.length < 2) return elevData;
-    // Step 1: median-9 prefilter on elevation values only. Kills isolated
+    // Step 1: median-5 prefilter on elevation values only. Kills isolated
     // outliers (e.g. a single DEM cell that returned a 30 m phantom) before
-    // the EMA blends them outward.
+    // the EMA blends them outward. Window was 9 when Open-Meteo's 0-bleed
+    // was the dominant noise source; with Terrarium tiles the data is clean
+    // enough that a 9-wide window over 50 m samples flattened genuine
+    // 100–300 m suburban undulations.
     var elevs = elevData.map(function (e) { return e.elevation; });
-    var medianed = medianFilter(elevs, 9);
-    // Step 2: forward + reverse EMA with α=0.4 for symmetric smoothing.
-    var alpha = 0.4;
+    var medianed = medianFilter(elevs, 5);
+    // Step 2: forward + reverse EMA with α=0.6 for symmetric smoothing.
+    var alpha = 0.6;
     var smoothed = [{ lat: elevData[0].lat, lon: elevData[0].lon, elevation: medianed[0] }];
     for (var i = 1; i < medianed.length; i++) {
         var prev = smoothed[i - 1].elevation;
