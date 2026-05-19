@@ -350,7 +350,7 @@ async function fetchElevation(points) {
 
     // ── Step 1: per-point IndexedDB cache lookup ────
     for (var i = 0; i < points.length; i++) {
-        var ck = "elev3:" + points[i].lat.toFixed(5) + ":" + points[i].lon.toFixed(5);
+        var ck = "elev4:" + points[i].lat.toFixed(5) + ":" + points[i].lon.toFixed(5);
         var cached = await cacheGet(ck);
         if (cached) { results[i] = cached; }
         else { results[i] = null; pendingIdx.push(i); pendingPts.push(points[i]); }
@@ -423,7 +423,7 @@ async function fetchElevation(points) {
             var elev = bilinearSample(getPixel, p.px, p.py);
             var entry = { lat: p.pt.lat, lon: p.pt.lon, elevation: elev };
             results[p.origIdx] = entry;
-            await cacheSet("elev3:" + p.pt.lat.toFixed(5) + ":" + p.pt.lon.toFixed(5), entry);
+            await cacheSet("elev4:" + p.pt.lat.toFixed(5) + ":" + p.pt.lon.toFixed(5), entry);
         }
     }
 
@@ -447,7 +447,7 @@ async function fetchElevation(points) {
                     var entry = { lat: batch[j].lat, lon: batch[j].lon, elevation: elev };
                     results[batchIdx[j]] = entry;
                     if (elevArr[j] != null) {
-                        await cacheSet("elev3:" + entry.lat.toFixed(5) + ":" + entry.lon.toFixed(5), entry);
+                        await cacheSet("elev4:" + entry.lat.toFixed(5) + ":" + entry.lon.toFixed(5), entry);
                     }
                 }
             } catch (e) {
@@ -1170,8 +1170,8 @@ function updateElevation(elevData) {
         if (segDist > 0) { gradePct = (diff / segDist) * 100; var g = Math.abs(gradePct); if (g > maxGradient) maxGradient = g; }
         segGradients.push(gradePct);
     }
-    document.getElementById("stat-ascent").textContent = Math.round(totalAscent) + "m";
-    document.getElementById("stat-descent").textContent = Math.round(totalDescent) + "m";
+    document.getElementById("stat-ascent").textContent = Math.round(totalAscent) + " m";
+    document.getElementById("stat-descent").textContent = Math.round(totalDescent) + " m";
     document.getElementById("stat-gradient").textContent = maxGradient.toFixed(1) + "%";
 
     // Grade-to-colour mapping matching the hotline palette on the map
@@ -1269,7 +1269,7 @@ async function exportGPX() {
         var elev = elevLookup[elevKey];
         // Also check IndexedDB elevation cache
         if (elev === undefined) {
-            var cached = await cacheGet("elev3:" + coords[i][0].toFixed(5) + ":" + coords[i][1].toFixed(5));
+            var cached = await cacheGet("elev4:" + coords[i][0].toFixed(5) + ":" + coords[i][1].toFixed(5));
             if (cached) elev = cached.elevation;
         }
         if (elev !== undefined) {
