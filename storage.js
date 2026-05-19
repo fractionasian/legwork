@@ -31,7 +31,7 @@ function openDB() {
 }
 
 function cacheStoreFor(key) {
-    return key.indexOf("elev2:") === 0 ? "elevCache" : "pathCache";
+    return key.indexOf("elev") === 0 ? "elevCache" : "pathCache";
 }
 
 async function cacheGet(key, ttlMs) {
