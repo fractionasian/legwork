@@ -773,7 +773,7 @@ button.menu-item:disabled {
 #elevation-container {
     /* Height is the chart's drawable area; extra padding-bottom stretches the
        panel background down across the safe-area without squeezing the chart. */
-    height: 100px;
+    height: 140px;
     background: rgba(26, 29, 40, 0.92);
     backdrop-filter: blur(8px);
     padding: 2px 10px calc(6px + env(safe-area-inset-bottom, 0px));
@@ -797,10 +797,10 @@ button.menu-item:disabled {
 
 /* Larger elevation on taller screens */
 @media (min-height: 700px) {
-    #elevation-container { height: 120px; }
+    #elevation-container { height: 170px; }
 }
 @media (min-height: 900px) {
-    #elevation-container { height: 150px; }
+    #elevation-container { height: 210px; }
 }
 
 /* ── Info banner ──────────────────────────────────── */

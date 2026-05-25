@@ -1162,7 +1162,11 @@ function updateElevation(elevData) {
         distances.push(distances[i-1] + haversine(elevData[i-1].lat, elevData[i-1].lon, elevData[i].lat, elevData[i].lon));
     }
     elevData = smoothElevations(elevData);
-    var elevations = elevData.map(function (e) { return e.elevation; });
+    var absoluteElevations = elevData.map(function (e) { return e.elevation; });
+    // Plot relative to the start point — runners care about climb from where they
+    // began, not metres above sea level. Stats below use deltas so are unaffected.
+    var baseline = absoluteElevations[0];
+    var elevations = absoluteElevations.map(function (e) { return e - baseline; });
 
     var totalAscent = 0, totalDescent = 0, maxGradient = 0;
     var DEAD_BAND = 5; // metres — ignore cumulative changes below this
@@ -1237,8 +1241,8 @@ function updateElevation(elevData) {
             responsive: true, maintainAspectRatio: false,
             plugins: { legend: { display: false } },
             scales: {
-                x: { title: { display: true, text: "Distance (km)", color: "#888" }, ticks: { color: "#888", maxTicksLimit: 10 }, grid: { color: "#1a1a2e" } },
-                y: { title: { display: true, text: "Elevation (m)", color: "#888" }, ticks: { color: "#888" }, grid: { color: "#1a1a2e" } },
+                x: { title: { display: true, text: "Distance (km)", color: "#888", padding: { top: 8 } }, ticks: { color: "#888", maxTicksLimit: 10 }, grid: { color: "#1a1a2e" } },
+                y: { title: { display: true, text: "Climb (m)", color: "#888", padding: { bottom: 6 } }, ticks: { color: "#888" }, grid: { color: "#1a1a2e" } },
             },
         },
     });
