@@ -4,7 +4,9 @@
 // wipes them when the user teleports to a different city. Depends on globals
 // from routing.js, storage.js, app.js (state, showBanner, fetchWithTimeout).
 
-var TILES_BASE = "./data/";
+// Pre-baked tiles live in the separate legwork-tiles repo (keeps this repo light).
+// Same origin (fractionasian.github.io), so no CORS. Source: github.com/fractionasian/legwork-tiles
+var TILES_BASE = "https://fractionasian.github.io/legwork-tiles/";
 var _manifest = null;
 
 async function fetchManifest() {
