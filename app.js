@@ -523,8 +523,8 @@ function wireMarkerEvents(marker) {
             marker.setLatLng([_nk.lat, _nk.lon]);
             for (var w = 0; w < state.waypoints.length; w++) {
                 if (state.waypoints[w].marker === marker) {
-                    state.waypoints[w].lat = parseFloat(p[0]);
-                    state.waypoints[w].lon = parseFloat(p[1]);
+                    state.waypoints[w].lat = _nk.lat;
+                    state.waypoints[w].lon = _nk.lon;
                     state.waypoints[w].nodeKey = newKey;
                     break;
                 }
