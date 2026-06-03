@@ -681,6 +681,13 @@ function removeWaypoint(idx) {
 }
 
 // ── Route drawing ──────────────────────────────────────
+// Append src[start..] onto dst in place. Avoids `dst.push.apply(dst, src)` /
+// `dst.push(...src)`, both of which spread the source as call arguments and
+// throw RangeError once a route gets long enough to exceed the engine arg cap.
+function pushAll(dst, src, start) {
+    for (var i = start || 0; i < src.length; i++) dst.push(src[i]);
+}
+
 var _routeGen = 0;
 async function updateRoute() {
     var gen = ++_routeGen;
@@ -727,15 +734,13 @@ async function updateRoute() {
             state.routeSegments.push(segCoords);
             var line = L.polyline(segCoords, { color: "#6ee7b7", weight: 4, opacity: 0.9 }).addTo(state.map);
             state.routeLines.push(line);
-            if (allRouteCoords.length === 0) allRouteCoords.push.apply(allRouteCoords, segCoords);
-            else allRouteCoords.push.apply(allRouteCoords, segCoords.slice(1));
+            pushAll(allRouteCoords, segCoords, allRouteCoords.length === 0 ? 0 : 1);
         } else {
             var fallback = [[fromWp.lat, fromWp.lon], [toWp.lat, toWp.lon]];
             state.routeSegments.push(fallback);
             var line = L.polyline(fallback, { color: "#ef4444", weight: 3, opacity: 0.7, dashArray: "8 8" }).addTo(state.map);
             state.routeLines.push(line);
-            if (allRouteCoords.length === 0) allRouteCoords.push.apply(allRouteCoords, fallback);
-            else allRouteCoords.push.apply(allRouteCoords, fallback.slice(1));
+            pushAll(allRouteCoords, fallback, allRouteCoords.length === 0 ? 0 : 1);
             routeOk = false;
         }
     }
@@ -753,7 +758,7 @@ async function updateRoute() {
         if (closeResult && closeResult.path.length > 1) {
             var closeCoords = pathToCoords(closeResult.path);
             state.closingLine = L.polyline(closeCoords, { color: "#6ee7b7", weight: 4, opacity: 0.6, dashArray: "10 6" }).addTo(state.map);
-            allRouteCoords.push.apply(allRouteCoords, closeCoords.slice(1));
+            pushAll(allRouteCoords, closeCoords, 1);
         } else {
             state.closingLine = L.polyline([[lastWp.lat,lastWp.lon],[firstWp.lat,firstWp.lon]], { color: "#ef4444", weight: 3, opacity: 0.5, dashArray: "8 8" }).addTo(state.map);
         }
@@ -796,7 +801,7 @@ function poiPopupHtml(p) {
     if (p.name) parts.push("<strong>" + escapeText(p.name) + "</strong>");
     parts.push(heading);
     var tags = [];
-    if (p.access && p.access !== "yes") tags.push("Access: " + p.access);
+    if (p.access && p.access !== "yes") tags.push("Access: " + escapeText(p.access));
     if (p.fee === "yes") tags.push("Fee applies");
     else if (p.fee === "no") tags.push("Free");
     if (p.wheelchair === "yes") tags.push("♿ Wheelchair accessible");
@@ -1168,15 +1173,15 @@ function updateElevation(elevData) {
     var baseline = absoluteElevations[0];
     var elevations = absoluteElevations.map(function (e) { return e - baseline; });
 
-    var totalAscent = 0, totalDescent = 0, maxGradient = 0;
-    var DEAD_BAND = 5; // metres — ignore cumulative changes below this
-    var pending = 0;
+    // Ascent/descent via the shared dead-band accumulator (routing.js) — same
+    // function the saved-routes list uses, so the two never diverge. Diffs are
+    // unaffected by the baseline subtraction above.
+    var ASCENT_DEAD_BAND = 5; // metres — ignore cumulative changes below this
+    var ad = computeAscent(elevData, ASCENT_DEAD_BAND);
+    var totalAscent = ad.ascent, totalDescent = ad.descent, maxGradient = 0;
     var segGradients = [0]; // signed grade% per point; index 0 has no prior segment
     for (var i = 1; i < elevations.length; i++) {
         var diff = elevations[i] - elevations[i-1];
-        pending += diff;
-        if (pending > DEAD_BAND) { totalAscent += pending; pending = 0; }
-        else if (pending < -DEAD_BAND) { totalDescent += Math.abs(pending); pending = 0; }
         var segDist = distances[i] - distances[i-1];
         var gradePct = 0;
         if (segDist > 0) { gradePct = (diff / segDist) * 100; var g = Math.abs(gradePct); if (g > maxGradient) maxGradient = g; }
@@ -1254,8 +1259,7 @@ async function exportGPX() {
     var coords = [];
     for (var s = 0; s < state.routeSegments.length; s++) {
         var seg = state.routeSegments[s];
-        if (coords.length === 0) coords.push.apply(coords, seg);
-        else coords.push.apply(coords, seg.slice(1));
+        pushAll(coords, seg, coords.length === 0 ? 0 : 1);
     }
     if (state.mode === "loop" && state.closingLine) {
         var cl = state.closingLine.getLatLngs();
@@ -2127,15 +2131,10 @@ async function renderSavedRoutes() {
             // Mode chip — short label without the leading unicode symbol.
             var modeShort = { loop: "loop", outback: "out & back", oneway: "one way" }[route.mode] || route.mode;
             if (modeShort) parts.push(modeShort);
-            // Ascent from stored elevation samples, if any.
+            // Ascent from stored elevation samples, if any. Same shared accumulator
+            // + dead-band as the elevation panel, so the list and panel agree.
             if (route.elevationData && route.elevationData.length > 1) {
-                var ascent = 0, pending = 0;
-                for (var ei = 1; ei < route.elevationData.length; ei++) {
-                    var diff = route.elevationData[ei].elevation - route.elevationData[ei-1].elevation;
-                    pending += diff;
-                    if (pending > 2) { ascent += pending; pending = 0; }
-                    else if (pending < -2) { pending = 0; }
-                }
+                var ascent = computeAscent(route.elevationData, 5).ascent;
                 if (ascent > 0) parts.push("\u2191" + Math.round(ascent) + "m");
             }
             parts.push(new Date(route.ts).toLocaleDateString());
