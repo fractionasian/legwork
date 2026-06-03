@@ -1,12 +1,15 @@
-name: Bump Service Worker Cache
+name: CI — lint, test, bump SW cache
 
-# Runs on every push to main that touches a shell file. Rewrites CACHE_NAME in
-# sw.js (and the matching #app-version span in index.html) to a short hash of
-# (index.html + app.js + routing.js + storage.js + tiles.js + style.css),
-# committing the change back. Self-pushes don't re-run because the filter
-# below excludes the bot actor.
+# On every push to main that touches a shell file: lint (no-undef gate, catches
+# undefined-reference bugs like the dragend `p` ReferenceError) and unit tests
+# run FIRST. Only if both pass does the cache bump run — so broken code never
+# gets its CACHE_NAME bumped onto users' devices. The bump rewrites CACHE_NAME
+# in sw.js (and the #app-version span in index.html) to a short hash of the
+# shell files, committing the change back. Self-pushes don't re-run because the
+# filter below excludes the bot actor.
 
 on:
+  workflow_dispatch:
   push:
     branches: [main]
     paths:
@@ -23,7 +26,30 @@ permissions:
   contents: write
 
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    if: github.actor != 'github-actions[bot]'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: no-undef lint gate
+        run: npm run lint
+
+  test:
+    runs-on: ubuntu-latest
+    if: github.actor != 'github-actions[bot]'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: unit tests
+        run: node --test
+
   bump:
+    needs: [lint, test]
     runs-on: ubuntu-latest
     if: github.actor != 'github-actions[bot]'
     steps:

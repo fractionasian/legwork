@@ -4,6 +4,7 @@
   "private": true,
   "description": "Running/cycling route planner with path-following routing and elevation gradients",
   "scripts": {
-    "test": "node --test"
+    "test": "node --test",
+    "lint": "bash scripts/lint.sh"
   }
 }

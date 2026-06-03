@@ -7,3 +7,6 @@
 # data/cities.json (the source config) stays tracked here.
 data/tiles/
 data/manifest.json
+
+# lint gate temp bundle
+.eslint-bundle.js
