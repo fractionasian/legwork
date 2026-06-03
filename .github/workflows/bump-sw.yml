@@ -16,6 +16,7 @@ on:
       - 'storage.js'
       - 'tiles.js'
       - 'style.css'
+      - 'welcome-init.js'
       - 'sw.js'
 
 permissions:
@@ -34,7 +35,7 @@ jobs:
       - name: Compute new cache name
         id: hash
         run: |
-          HASH=$(cat index.html app.js routing.js storage.js tiles.js style.css \
+          HASH=$(cat index.html app.js routing.js storage.js tiles.js style.css welcome-init.js \
             | sha256sum | cut -c1-8)
           echo "hash=$HASH" >> "$GITHUB_OUTPUT"
           echo "Computed cache hash: $HASH"
