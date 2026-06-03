@@ -155,7 +155,8 @@ async function loadTilesInViewport() {
 
 async function loadTilesOrPaths(lat, lon) {
     var tilesLoaded = await loadTilesForLocation(lat, lon);
-    if (!tilesLoaded) await loadPaths(lat, lon);
+    if (tilesLoaded) return true;
+    return await loadPaths(lat, lon); // boolean — false if all retries exhausted
 }
 
 // Clear the routing graph + cached path features when the user teleports to a
@@ -304,7 +305,7 @@ async function loadPaths(lat, lon) {
     if (cached) {
         applyPaths(cached, { skipRender: true });
         showBanner("");
-        return;
+        return true;
     }
 
     var query = '[out:json][timeout:30];\n(\n' +
@@ -344,7 +345,7 @@ async function loadPaths(lat, lon) {
             await cacheSet(cacheKey, geojson);
             applyPaths(geojson, { skipRender: true });
             showBanner("");
-            return;
+            return true;
         } catch (e) {
             if (attempt < maxRetries) {
                 showBanner("Loading paths (retry " + (attempt + 1) + "/" + maxRetries + ")...", "loading");
@@ -354,8 +355,12 @@ async function loadPaths(lat, lon) {
             showBannerWithRetry("Failed to load paths: " + e.message, function () {
                 loadPaths(lat, lon);
             });
+            // Signal failure so callers (loadTilesOrPaths → fillGapAndRetry) don't
+            // treat an exhausted retry as a successful graph extension.
+            return false;
         }
     }
+    return false;
 }
 
 // ── Path styling + graph extension ────────────────────
@@ -432,6 +437,7 @@ function applyPaths(geojson, opts) {
             var lat1 = coords[c-1][1], lon1 = coords[c-1][0];
             var lat2 = coords[c][1], lon2 = coords[c][0];
             var k1 = nodeKey(lat1, lon1), k2 = nodeKey(lat2, lon2);
+            if (k1 === k2) continue; // two coords rounding to the same node = zero-length self-edge
             var edgeId = k1 < k2 ? k1 + "|" + k2 : k2 + "|" + k1;
             if (state.edgeSet[edgeId]) continue;
             state.edgeSet[edgeId] = true;
@@ -477,8 +483,9 @@ async function fillGapAndRetry(fromWp, toWp) {
         var midLat = fromWp.lat + t * (toWp.lat - fromWp.lat);
         var midLon = fromWp.lon + t * (toWp.lon - fromWp.lon);
         if (steps > 1) showBanner("Expanding route coverage (" + (s + 1) + "/" + (steps + 1) + ")...", "loading");
-        await loadTilesOrPaths(midLat, midLon);
-        loaded = true;
+        // Only count a step as loaded if it actually extended the graph — a
+        // failed/exhausted load must not let us proceed to route on stale data.
+        if (await loadTilesOrPaths(midLat, midLon)) loaded = true;
     }
 
     if (!loaded) return null;

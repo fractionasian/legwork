@@ -25,7 +25,19 @@ function openDB() {
             if (!db.objectStoreNames.contains("autosave")) db.createObjectStore("autosave");
             if (db.objectStoreNames.contains("savedAreas")) db.deleteObjectStore("savedAreas");
         };
-        req.onsuccess = function () { _db = req.result; resolve(_db); };
+        req.onblocked = function () {
+            // Another tab holds an older-version connection open. The upgrade
+            // can't proceed until it closes; surface rather than hang silently.
+            console.warn("IndexedDB upgrade blocked — another Legwork tab is open at an older version.");
+        };
+        req.onsuccess = function () {
+            _db = req.result;
+            // If another tab bumps DB_VERSION, close this connection and drop the
+            // cache so the next call re-opens cleanly (avoids a dead connection
+            // that throws on every transaction).
+            _db.onversionchange = function () { _db.close(); _db = null; };
+            resolve(_db);
+        };
         req.onerror = function () { reject(req.error); };
     });
 }
@@ -56,9 +68,21 @@ async function cacheSet(key, value) {
     try {
         var db = await openDB();
         var store = cacheStoreFor(key);
-        var tx = db.transaction(store, "readwrite");
-        tx.objectStore(store).put({ v: value, ts: Date.now() }, key);
-    } catch (e) { /* IndexedDB write failed — degrade silently */ }
+        return await new Promise(function (resolve) {
+            var tx = db.transaction(store, "readwrite");
+            tx.objectStore(store).put({ v: value, ts: Date.now() }, key);
+            // Resolve on commit, not on the synchronous put() — a QuotaExceededError
+            // aborts the transaction asynchronously and would otherwise be a silent
+            // write loss (cache never persists → every session re-fetches).
+            tx.oncomplete = function () { resolve(true); };
+            tx.onerror = tx.onabort = function () {
+                if (tx.error && tx.error.name === "QuotaExceededError") {
+                    console.warn("IndexedDB quota exceeded — tile/path cache write dropped.");
+                }
+                resolve(false);
+            };
+        });
+    } catch (e) { return false; }
 }
 
 // ── Autosave store ────────────────────────────────────
