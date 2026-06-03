@@ -493,8 +493,8 @@ function wireMarkerEvents(marker) {
         var newKey = closestNode(state.graph, pos.lat, pos.lng);
         // If closest node is >200m away, load tiles/paths at drag target first
         if (newKey) {
-            var nkParts = newKey.split(",");
-            var snapDist = haversine(pos.lat, pos.lng, parseFloat(nkParts[0]), parseFloat(nkParts[1]));
+            var _nk = parseNodeKey(newKey);
+            var snapDist = haversine(pos.lat, pos.lng, _nk.lat, _nk.lon);
             if (snapDist > 200) {
                 showBanner("Loading paths for this area", "loading");
                 await loadTilesOrPaths(pos.lat, pos.lng);
@@ -507,8 +507,8 @@ function wireMarkerEvents(marker) {
             newKey = closestNode(state.graph, pos.lat, pos.lng);
         }
         if (newKey) {
-            var p = newKey.split(",");
-            marker.setLatLng([parseFloat(p[0]), parseFloat(p[1])]);
+            var _nk = parseNodeKey(newKey);
+            marker.setLatLng([_nk.lat, _nk.lon]);
             for (var w = 0; w < state.waypoints.length; w++) {
                 if (state.waypoints[w].marker === marker) {
                     state.waypoints[w].lat = parseFloat(p[0]);
@@ -533,16 +533,16 @@ async function addWaypointAt(lat, lon, opts) {
     if (state.graph) {
         fastNk = closestNode(state.graph, lat, lon);
         if (fastNk) {
-            var fastParts = fastNk.split(",");
-            var fastDist = haversine(lat, lon, parseFloat(fastParts[0]), parseFloat(fastParts[1]));
+            var _fnk = parseNodeKey(fastNk);
+            var fastDist = haversine(lat, lon, _fnk.lat, _fnk.lon);
             if (fastDist > 200) fastNk = null;
         }
     }
 
     if (fastNk) {
-        var fastNkParts = fastNk.split(",");
-        var fastSnapLat = parseFloat(fastNkParts[0]);
-        var fastSnapLon = parseFloat(fastNkParts[1]);
+        var _fnk = parseNodeKey(fastNk);
+        var fastSnapLat = _fnk.lat;
+        var fastSnapLon = _fnk.lon;
         var fastDisplayLat = (opts && opts.exactPosition) ? lat : fastSnapLat;
         var fastDisplayLon = (opts && opts.exactPosition) ? lon : fastSnapLon;
         var fastMarker = createNumberedMarker(fastDisplayLat, fastDisplayLon, num);
@@ -569,9 +569,9 @@ async function addWaypointAt(lat, lon, opts) {
         var liveIdx = state.waypoints.indexOf(wp);
         if (liveIdx < 0) return;
 
-        var nkParts = nk.split(",");
-        var snapLat = parseFloat(nkParts[0]);
-        var snapLon = parseFloat(nkParts[1]);
+        var _nk = parseNodeKey(nk);
+        var snapLat = _nk.lat;
+        var snapLon = _nk.lon;
         var displayLat = (opts && opts.exactPosition) ? lat : snapLat;
         var displayLon = (opts && opts.exactPosition) ? lon : snapLon;
 
@@ -609,8 +609,8 @@ async function resolveWaypointNode(lat, lon) {
         nk = closestNode(state.graph, lat, lon);
         if (!nk) return null;
     }
-    var nkParts = nk.split(",");
-    var snapDist = haversine(lat, lon, parseFloat(nkParts[0]), parseFloat(nkParts[1]));
+    var _nk = parseNodeKey(nk);
+    var snapDist = haversine(lat, lon, _nk.lat, _nk.lon);
     if (snapDist > 200) {
         // In a tiled city, coverage is already complete — Overpass would just
         // re-fetch the same bank paths (e.g. tap in the middle of the Swan
@@ -622,8 +622,8 @@ async function resolveWaypointNode(lat, lon) {
         }
         nk = closestNode(state.graph, lat, lon);
         if (!nk) return null;
-        var nkParts2 = nk.split(",");
-        var snapDist2 = haversine(lat, lon, parseFloat(nkParts2[0]), parseFloat(nkParts2[1]));
+        var _nk2 = parseNodeKey(nk);
+        var snapDist2 = haversine(lat, lon, _nk2.lat, _nk2.lon);
         if (snapDist2 > 200) return null;
     }
     return nk;
@@ -656,9 +656,9 @@ async function retryFailedWaypoint(wp) {
         }
         var liveIdx = state.waypoints.indexOf(wp);
         if (liveIdx < 0) return;
-        var nkParts = nk.split(",");
-        var snapLat = parseFloat(nkParts[0]);
-        var snapLon = parseFloat(nkParts[1]);
+        var _nk = parseNodeKey(nk);
+        var snapLat = _nk.lat;
+        var snapLon = _nk.lon;
         wp.lat = snapLat;
         wp.lon = snapLon;
         wp.nodeKey = nk;
@@ -681,6 +681,13 @@ function removeWaypoint(idx) {
 }
 
 // ── Route drawing ──────────────────────────────────────
+// Parse a "lat,lon" node-key string into floats. Centralises the split+parseFloat
+// idiom that was repeated ~10× (each an index-fiddling bug surface).
+function parseNodeKey(nk) {
+    var parts = nk.split(",");
+    return { lat: parseFloat(parts[0]), lon: parseFloat(parts[1]) };
+}
+
 // Append src[start..] onto dst in place. Avoids `dst.push.apply(dst, src)` /
 // `dst.push(...src)`, both of which spread the source as call arguments and
 // throw RangeError once a route gets long enough to exceed the engine arg cap.
@@ -957,9 +964,9 @@ function addMidpointMarkers() {
                 var nk = state.graph ? closestNode(state.graph, pos.lat, pos.lng) : null;
                 var snapLat = pos.lat, snapLon = pos.lng;
                 if (nk) {
-                    var parts = nk.split(",");
-                    snapLat = parseFloat(parts[0]);
-                    snapLon = parseFloat(parts[1]);
+                    var _nk = parseNodeKey(nk);
+                    snapLat = _nk.lat;
+                    snapLon = _nk.lon;
                 }
 
                 var num = insertIdx + 1;
@@ -1395,9 +1402,15 @@ function showActionBanner(text, actionLabel, onAction, durationMs) {
 
 // ── Event bindings ─────────────────────────────────────
 document.getElementById("address-input").addEventListener("keydown", function (e) { if (e.key === "Enter") geocodeAddress(); });
-var MODE_LABELS = { loop: "\u21BB Loop", outback: "\u21C4 Out & Back", oneway: "\u2192 One Way" };
+// Single source of truth for route-mode display strings \u2014 `label` for the mode
+// button (with leading glyph), `word` for prose (share text, saved-routes list).
+var MODE_META = {
+    loop:    { label: "\u21BB Loop",       word: "loop" },
+    outback: { label: "\u21C4 Out & Back", word: "out & back" },
+    oneway:  { label: "\u2192 One Way",    word: "one way" },
+};
 function setModeButton() {
-    document.getElementById("mode-btn").textContent = MODE_LABELS[state.mode] || MODE_LABELS.loop;
+    document.getElementById("mode-btn").textContent = (MODE_META[state.mode] || MODE_META.loop).label;
 }
 
 // ── Reverse button enable/disable ──────────────────────
@@ -1525,7 +1538,7 @@ document.getElementById("dm-share").addEventListener("click", function (e) {
 
     // Compose a plain-text summary for share sheets: "5.2 km loop on Legwork".
     function shareText() {
-        var modeWord = { loop: "loop", outback: "out & back", oneway: "one-way" }[state.mode] || "route";
+        var modeWord = (MODE_META[state.mode] || {}).word || "route";
         var dist = document.getElementById("distance-display").textContent || "";
         return (dist ? dist + " " : "") + modeWord + " on Legwork";
     }
@@ -1775,8 +1788,7 @@ function loadFromHash() {
     var r = params.get("r");
     if (!r) return false;
     var points = r.split(";").map(function (p) {
-        var parts = p.split(",");
-        return { lat: parseFloat(parts[0]), lon: parseFloat(parts[1]) };
+        return parseNodeKey(p);
     });
     if (points.length < 2) return false;
     var m = params.get("m");
@@ -2129,7 +2141,7 @@ async function renderSavedRoutes() {
             var parts = [];
             if (route.distance) parts.push(route.distance);
             // Mode chip — short label without the leading unicode symbol.
-            var modeShort = { loop: "loop", outback: "out & back", oneway: "one way" }[route.mode] || route.mode;
+            var modeShort = (MODE_META[route.mode] || {}).word || route.mode;
             if (modeShort) parts.push(modeShort);
             // Ascent from stored elevation samples, if any. Same shared accumulator
             // + dead-band as the elevation panel, so the list and panel agree.
