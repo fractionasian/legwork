@@ -1,0 +1,9 @@
+{
+  "name": "legwork",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Running/cycling route planner with path-following routing and elevation gradients",
+  "scripts": {
+    "test": "node --test"
+  }
+}
