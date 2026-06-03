@@ -3,6 +3,22 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <!-- CSP backstop (GitHub Pages can't send headers). All scripts are 'self' or
+         a pinned+SRI'd CDN; no inline scripts. style 'unsafe-inline' is required
+         for Leaflet's injected pane styles + inline style attributes. -->
+    <meta http-equiv="Content-Security-Policy" content="
+        default-src 'self';
+        script-src 'self' https://unpkg.com https://cdn.jsdelivr.net https://cloud.umami.is;
+        style-src 'self' 'unsafe-inline' https://unpkg.com;
+        img-src 'self' data: https://tile.openstreetmap.org https://*.tile.openstreetmap.org https://server.arcgisonline.com https://tile.opentopomap.org https://*.tile.opentopomap.org https://s3.amazonaws.com https://fractionasian.github.io https://unpkg.com;
+        connect-src 'self' https://photon.komoot.io https://api.open-meteo.com https://*.overpass-api.de https://overpass.kumi.systems https://overpass.private.coffee https://s3.amazonaws.com https://fractionasian.github.io https://cloud.umami.is https://*.umami.dev;
+        font-src 'self';
+        manifest-src 'self';
+        worker-src 'self';
+        base-uri 'self';
+        form-action 'none';
+        object-src 'none'">
+    <meta name="referrer" content="strict-origin-when-cross-origin">
     <title>Legwork — Running Route Planner</title>
     <meta name="description" content="Plan running routes with elevation-coloured paths, distance markers, and GPX export. Free, no account needed." />
     <meta property="og:title" content="Legwork — Running Route Planner" />
@@ -14,7 +30,8 @@
     <meta name="theme-color" content="#1a1d28" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="anonymous"
+          integrity="sha384-sHL9NAb7lN7rfvG5lfHpm643Xkcjzp4jFvuavGOndn6pjVqS6ny56CAt3nsEVT4H" />
     <link rel="stylesheet" href="style.css" />
     <script defer src="https://cloud.umami.is/script.js" data-website-id="53493402-d1cf-4a9a-afe2-87a21fc5fbb4"></script>
 </head>
@@ -83,13 +100,13 @@
             <div class="menu-divider"></div>
             <button id="show-tips-btn" class="menu-item menu-tips">Tips &amp; shortcuts</button>
             <div class="menu-item menu-install hidden" id="install-prompt"></div>
-            <a id="osm-issue-link" class="menu-item menu-request" href="#" target="_blank" rel="noopener">Report a path issue</a>
+            <a id="osm-issue-link" class="menu-item menu-request" href="#" target="_blank" rel="noopener noreferrer">Report a path issue</a>
             <div class="menu-divider"></div>
-            <a class="menu-item menu-support" href="https://ko-fi.com/fractionasian" target="_blank" rel="noopener">☕ Buy me a coffee</a>
+            <a class="menu-item menu-support" href="https://ko-fi.com/fractionasian" target="_blank" rel="noopener noreferrer">☕ Buy me a coffee</a>
             <div class="menu-support-blurb">Free, no ads, no account. Tips keep the tiles caching.</div>
             <div class="menu-divider"></div>
             <div class="menu-credits">
-                Map data <a href="https://www.openstreetmap.org/copyright" target="_blank">© OpenStreetMap</a> · Geocoding <a href="https://photon.komoot.io/" target="_blank">Photon (Komoot)</a> · Elevation <a href="https://open-meteo.com/" target="_blank">Open-Meteo</a> (~30m DEM)
+                Map data <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">© OpenStreetMap</a> · Geocoding <a href="https://photon.komoot.io/" target="_blank" rel="noopener noreferrer">Photon (Komoot)</a> · Elevation <a href="https://open-meteo.com/" target="_blank" rel="noopener noreferrer">Open-Meteo</a> (~30m DEM)
             </div>
             <div class="menu-version">v<span id="app-version">ad6cf0b4</span></div>
         </div>
@@ -127,28 +144,14 @@
         </div>
     </div>
 
-    <script>
-        // Wire the dismiss button immediately so cold-start PWA taps register
-        // before app.js has parsed. app.js attaches its own handler on top —
-        // both are idempotent.
-        (function () {
-            var btn = document.getElementById("welcome-dismiss");
-            var modal = document.getElementById("welcome-modal");
-            if (!btn || !modal) return;
-            function dismiss() {
-                modal.classList.add("hidden");
-                try { localStorage.setItem("lw:welcomed", "1"); } catch (e) {}
-            }
-            btn.addEventListener("click", dismiss);
-            modal.addEventListener("click", function (e) {
-                if (e.target === modal) dismiss();
-            });
-        })();
-    </script>
+    <script src="welcome-init.js"></script>
 
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
-    <script src="https://cdn.jsdelivr.net/npm/leaflet-hotline@0.4.0/dist/leaflet.hotline.min.js" crossorigin=""></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4" crossorigin=""></script>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin="anonymous"
+            integrity="sha384-cxOPjt7s7Iz04uaHJceBmS+qpjv2JkIHNVcuOrM+YHwZOmJGBXI00mdUXEq65HTH"></script>
+    <script src="https://cdn.jsdelivr.net/npm/leaflet-hotline@0.4.0/dist/leaflet.hotline.min.js" crossorigin="anonymous"
+            integrity="sha384-gdnax0otJ/CCgAgGlROZ9hwjxFtjIMr8FFnCHEwrpr4GHd+L0tVqjny3ZAxe4zkc"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js" crossorigin="anonymous"
+            integrity="sha384-jb8JQMbMoBUzgWatfe6COACi2ljcDdZQ2OxczGA3bGNeWe+6DChMTBJemed7ZnvJ"></script>
     <script src="routing.js"></script>
     <script src="storage.js"></script>
     <script src="tiles.js"></script>

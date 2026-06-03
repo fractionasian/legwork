@@ -1,22 +1,30 @@
 // ── Legwork tiles — path network loading ─────────────
 // Pre-cached city tiles (primary) + live Overpass queries (fallback) build up
 // state.graph, state.pathFeatures, state.pathLayer. resetGraphIfCityChanged
-// wipes them when the user teleports to a different city. Depends on globals
-// from routing.js, storage.js, app.js (state, showBanner, fetchWithTimeout).
+// wipes them when the user teleports to a different city.
+// Globals consumed (defined elsewhere):
+//   routing.js — nodeKey, haversine, dijkstra, closestNode, gridInsert,
+//                resetSpatialGrid, routingProfile, compactToGeoJSON, osmToGeoJSON
+//   storage.js — cacheGet, cacheSet, PATHS_TTL
+//   app.js     — state, showBanner, showBannerWithRetry, fetchWithTimeout
+//   external   — L (Leaflet), window.umami
 
 // Pre-baked tiles live in the separate legwork-tiles repo (keeps this repo light).
 // Same origin (fractionasian.github.io), so no CORS. Source: github.com/fractionasian/legwork-tiles
 var TILES_BASE = "https://fractionasian.github.io/legwork-tiles/";
 var _manifest = null;
+var _manifestFetchedAt = 0;
+var MANIFEST_TTL = 30 * 60 * 1000; // 30 min — re-fetch so a server-side tile rebuild is picked up mid-session
 
 async function fetchManifest() {
-    if (_manifest) return _manifest;
+    if (_manifest && Date.now() - _manifestFetchedAt < MANIFEST_TTL) return _manifest;
     try {
         var resp = await fetchWithTimeout(TILES_BASE + "manifest.json", null, 10000);
-        if (!resp.ok) return null;
+        if (!resp.ok) return _manifest; // keep any stale copy rather than nulling on a transient failure
         _manifest = await resp.json();
+        _manifestFetchedAt = Date.now();
         return _manifest;
-    } catch (e) { return null; }
+    } catch (e) { return _manifest; }
 }
 
 function findCityForLocation(manifest, lat, lon) {
@@ -155,7 +163,8 @@ async function loadTilesInViewport() {
 
 async function loadTilesOrPaths(lat, lon) {
     var tilesLoaded = await loadTilesForLocation(lat, lon);
-    if (!tilesLoaded) await loadPaths(lat, lon);
+    if (tilesLoaded) return true;
+    return await loadPaths(lat, lon); // boolean — false if all retries exhausted
 }
 
 // Clear the routing graph + cached path features when the user teleports to a
@@ -190,7 +199,7 @@ async function resetGraphIfCityChanged(lat, lon) {
     state.seenIds = {};
     state.edgeSet = {};
     state.nodeAttrs = {};
-    spatialGrid = {};
+    resetSpatialGrid(); // single reset path (was a direct spatialGrid = {} reaching across files)
     if (state.pathLayer) {
         state.map.removeLayer(state.pathLayer);
         state.pathLayer = null;
@@ -304,7 +313,7 @@ async function loadPaths(lat, lon) {
     if (cached) {
         applyPaths(cached, { skipRender: true });
         showBanner("");
-        return;
+        return true;
     }
 
     var query = '[out:json][timeout:30];\n(\n' +
@@ -344,7 +353,7 @@ async function loadPaths(lat, lon) {
             await cacheSet(cacheKey, geojson);
             applyPaths(geojson, { skipRender: true });
             showBanner("");
-            return;
+            return true;
         } catch (e) {
             if (attempt < maxRetries) {
                 showBanner("Loading paths (retry " + (attempt + 1) + "/" + maxRetries + ")...", "loading");
@@ -354,8 +363,12 @@ async function loadPaths(lat, lon) {
             showBannerWithRetry("Failed to load paths: " + e.message, function () {
                 loadPaths(lat, lon);
             });
+            // Signal failure so callers (loadTilesOrPaths → fillGapAndRetry) don't
+            // treat an exhausted retry as a successful graph extension.
+            return false;
         }
     }
+    return false;
 }
 
 // ── Path styling + graph extension ────────────────────
@@ -432,6 +445,7 @@ function applyPaths(geojson, opts) {
             var lat1 = coords[c-1][1], lon1 = coords[c-1][0];
             var lat2 = coords[c][1], lon2 = coords[c][0];
             var k1 = nodeKey(lat1, lon1), k2 = nodeKey(lat2, lon2);
+            if (k1 === k2) continue; // two coords rounding to the same node = zero-length self-edge
             var edgeId = k1 < k2 ? k1 + "|" + k2 : k2 + "|" + k1;
             if (state.edgeSet[edgeId]) continue;
             state.edgeSet[edgeId] = true;
@@ -477,8 +491,9 @@ async function fillGapAndRetry(fromWp, toWp) {
         var midLat = fromWp.lat + t * (toWp.lat - fromWp.lat);
         var midLon = fromWp.lon + t * (toWp.lon - fromWp.lon);
         if (steps > 1) showBanner("Expanding route coverage (" + (s + 1) + "/" + (steps + 1) + ")...", "loading");
-        await loadTilesOrPaths(midLat, midLon);
-        loaded = true;
+        // Only count a step as loaded if it actually extended the graph — a
+        // failed/exhausted load must not let us proceed to route on stale data.
+        if (await loadTilesOrPaths(midLat, midLon)) loaded = true;
     }
 
     if (!loaded) return null;

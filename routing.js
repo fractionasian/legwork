@@ -205,9 +205,8 @@ function closestNode(graph, lat, lon) {
     var bestKey = null, bestDist = Infinity;
     var cLat = Math.floor(lat / GRID_CELL) * GRID_CELL;
     var cLon = Math.floor(lon / GRID_CELL) * GRID_CELL;
-    // Expand outward from a 3x3 window. Stop once the inner ring yields a hit —
-    // OSM node density means the answer is almost always in the first ring. Caps
-    // at ±7 cells (~3.5km) to prevent runaway scans in sparse areas.
+    // Expand outward ring by ring from the centre cell. Caps at ±7 cells
+    // (~3.5km) to prevent runaway scans in sparse areas.
     function ring(radius) {
         for (var dLat = -radius; dLat <= radius; dLat++) {
             for (var dLon = -radius; dLon <= radius; dLon++) {
@@ -222,7 +221,15 @@ function closestNode(graph, lat, lon) {
             }
         }
     }
-    for (var r = 1; r <= 7 && !bestKey; r++) ring(r);
+    // Don't stop at the first ring with a hit: a node just across the boundary
+    // in ring r+1 can be closer than one at the far edge of ring r. Scan one
+    // extra ring past the first hit before committing to the nearest node.
+    var foundAt = -1;
+    for (var r = 1; r <= 7; r++) {
+        ring(r);
+        if (bestKey && foundAt < 0) foundAt = r;
+        if (foundAt >= 0 && r >= foundAt + 1) break;
+    }
     return bestKey;
 }
 
@@ -401,6 +408,20 @@ function smoothElevations(elevData) {
     return smoothed;
 }
 
+// Cumulative ascent/descent from a list of elevation samples, with a dead-band
+// to reject sensor noise: only commit a run of same-sign change once it exceeds
+// `deadBand` metres. Single source of truth for both the elevation panel and the
+// saved-routes list (which previously used different dead-bands → divergent gain).
+function computeAscent(elevData, deadBand) {
+    var ascent = 0, descent = 0, pending = 0;
+    for (var i = 1; i < elevData.length; i++) {
+        pending += elevData[i].elevation - elevData[i - 1].elevation;
+        if (pending > deadBand) { ascent += pending; pending = 0; }
+        else if (pending < -deadBand) { descent += Math.abs(pending); pending = 0; }
+    }
+    return { ascent: ascent, descent: descent };
+}
+
 // Export for Node consumption (e.g. scripts/verify-elevation.mjs).
 // No-op in browsers (module is undefined there).
 if (typeof module !== "undefined" && module.exports) {
@@ -411,5 +432,19 @@ if (typeof module !== "undefined" && module.exports) {
         bilinearSample: bilinearSample,
         medianFilter: medianFilter,
         smoothElevations: smoothElevations,
+        computeAscent: computeAscent,
+        // Routing/graph helpers — exported for the headless test suite and for
+        // asserting parity with the duplicated pure functions in build-tiles.js.
+        nodeKey: nodeKey,
+        dijkstra: dijkstra,
+        MinHeap: MinHeap,
+        closestNode: closestNode,
+        gridInsert: gridInsert,
+        resetSpatialGrid: resetSpatialGrid,
+        sampleRoute: sampleRoute,
+        waypointHash: waypointHash,
+        nodeAttrsFromTags: nodeAttrsFromTags,
+        compactToGeoJSON: compactToGeoJSON,
+        osmToGeoJSON: osmToGeoJSON,
     };
 }
