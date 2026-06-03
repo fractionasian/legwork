@@ -82,6 +82,26 @@ function initMap() {
     });
 }
 
+// Single source of truth for the gradient scale. `max` is the upper grade-%
+// bound (inclusive) of each discrete band; the last band catches everything
+// steeper. Drives gradeColor/gradeFill (elevation chart), the side-menu legend,
+// and the colours of the continuous hotline palette (whose stop positions are
+// tuned separately in updateGradientLine).
+var GRADE_BANDS = [
+    { max: -10,      color: "#3b82f6", fill: "rgba(59,130,246,0.18)",  label: "Very steep down (>10%)" },
+    { max: -5,       color: "#60a5fa", fill: "rgba(96,165,250,0.15)",  label: "Steep downhill (5-10%)" },
+    { max: -2,       color: "#93c5fd", fill: "rgba(147,197,253,0.12)", label: "Downhill (2-5%)" },
+    { max: 2,        color: "#6ee7b7", fill: "rgba(110,231,183,0.1)",  label: "Flat (<2%)" },
+    { max: 5,        color: "#fbbf24", fill: "rgba(251,191,36,0.15)",  label: "Uphill (2-5%)" },
+    { max: 10,       color: "#f87171", fill: "rgba(248,113,113,0.15)", label: "Steep uphill (5-10%)" },
+    { max: Infinity, color: "#dc2626", fill: "rgba(220,38,38,0.18)",   label: "Very steep up (>10%)" },
+];
+
+function gradeBand(grade) {
+    for (var i = 0; i < GRADE_BANDS.length; i++) if (grade <= GRADE_BANDS[i].max) return GRADE_BANDS[i];
+    return GRADE_BANDS[GRADE_BANDS.length - 1];
+}
+
 // ── Build gradient legend in side menu ────────────────
 function buildMenuLegend() {
     var container = document.getElementById("menu-legend");
@@ -89,15 +109,7 @@ function buildMenuLegend() {
     title.textContent = "Gradient";
     container.appendChild(title);
     container.appendChild(document.createElement("br"));
-    var levels = [
-        { color: "#3b82f6", label: "Very steep down (>10%)" },
-        { color: "#60a5fa", label: "Steep downhill (5-10%)" },
-        { color: "#93c5fd", label: "Downhill (2-5%)" },
-        { color: "#6ee7b7", label: "Flat (<2%)" },
-        { color: "#fbbf24", label: "Uphill (2-5%)" },
-        { color: "#f87171", label: "Steep uphill (5-10%)" },
-        { color: "#dc2626", label: "Very steep up (>10%)" },
-    ];
+    var levels = GRADE_BANDS;
     for (var k = 0; k < levels.length; k++) {
         var icon = document.createElement("i");
         icon.style.background = levels[k].color;
@@ -1132,15 +1144,17 @@ function colourRouteByGradient(elevData) {
     var hotline = L.hotline(coords, {
         min: -15,
         max: 15,
+        // Stop positions are tuned for a smooth flat plateau (-2..+2 ≈ 0.43..0.57);
+        // colours come from GRADE_BANDS so a recolour is a single-source edit.
         palette: {
-            0.0:  '#3b82f6',  // very steep downhill
-            0.17: '#60a5fa',  // steep downhill
-            0.33: '#93c5fd',  // moderate downhill
-            0.43: '#6ee7b7',  // flat
-            0.57: '#6ee7b7',  // flat
-            0.67: '#fbbf24',  // moderate uphill
-            0.83: '#f87171',  // steep uphill
-            1.0:  '#dc2626',  // very steep uphill
+            0.0:  GRADE_BANDS[0].color,  // very steep downhill
+            0.17: GRADE_BANDS[1].color,  // steep downhill
+            0.33: GRADE_BANDS[2].color,  // moderate downhill
+            0.43: GRADE_BANDS[3].color,  // flat
+            0.57: GRADE_BANDS[3].color,  // flat (plateau)
+            0.67: GRADE_BANDS[4].color,  // moderate uphill
+            0.83: GRADE_BANDS[5].color,  // steep uphill
+            1.0:  GRADE_BANDS[6].color,  // very steep uphill
         },
         weight: 5,
         outlineWidth: 1,
@@ -1198,27 +1212,9 @@ function updateElevation(elevData) {
     document.getElementById("stat-descent").textContent = Math.round(totalDescent) + " m";
     document.getElementById("stat-gradient").textContent = maxGradient.toFixed(1) + "%";
 
-    // Grade-to-colour mapping matching the hotline palette on the map
-    function gradeColor(grade) {
-        var g = Math.max(-15, Math.min(15, grade));
-        if (g <= -10) return "#3b82f6";  // very steep downhill
-        if (g <= -5)  return "#60a5fa";  // steep downhill
-        if (g <= -2)  return "#93c5fd";  // moderate downhill
-        if (g <= 2)   return "#6ee7b7";  // flat
-        if (g <= 5)   return "#fbbf24";  // moderate uphill
-        if (g <= 10)  return "#f87171";  // steep uphill
-        return "#dc2626";                // very steep uphill
-    }
-    function gradeFill(grade) {
-        var g = Math.max(-15, Math.min(15, grade));
-        if (g <= -10) return "rgba(59,130,246,0.18)";
-        if (g <= -5)  return "rgba(96,165,250,0.15)";
-        if (g <= -2)  return "rgba(147,197,253,0.12)";
-        if (g <= 2)   return "rgba(110,231,183,0.1)";
-        if (g <= 5)   return "rgba(251,191,36,0.15)";
-        if (g <= 10)  return "rgba(248,113,113,0.15)";
-        return "rgba(220,38,38,0.18)";
-    }
+    // Grade → discrete colour/fill via the shared GRADE_BANDS table.
+    function gradeColor(grade) { return gradeBand(grade).color; }
+    function gradeFill(grade) { return gradeBand(grade).fill; }
 
     var labels = distances.map(function (d) { return (d/1000).toFixed(1); });
     if (state.elevationChart) {
