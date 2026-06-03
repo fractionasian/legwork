@@ -708,6 +708,46 @@ function pushAll(dst, src, start) {
 }
 
 var _routeGen = 0;
+
+// A segment needs the Overpass gap-fill if the direct graph route is missing or
+// implausibly indirect — a detour > MAX_DETOUR_RATIO× the straight line, and only
+// for gaps longer than MIN_DETOUR_DIST m so short legitimate dog-legs aren't refetched.
+var MAX_DETOUR_RATIO = 3;
+var MIN_DETOUR_DIST = 200;
+
+// Resolve a routed path between two waypoints, gap-filling if needed. Returns
+// { result } normally, or { superseded: true } if a newer updateRoute() bumped the
+// generation while we awaited the gap-fill — the caller MUST then bail without
+// mutating shared route state. This is the concurrency guard; the gen check stays
+// immediately after the await and before any caller-side mutation.
+async function resolveSegment(fromWp, toWp, gen) {
+    var result = dijkstra(state.graph, fromWp.nodeKey, toWp.nodeKey);
+    var straight = haversine(fromWp.lat, fromWp.lon, toWp.lat, toWp.lon);
+    var needsGapFill = !result || result.path.length < 2 ||
+        (result.dist > straight * MAX_DETOUR_RATIO && straight > MIN_DETOUR_DIST);
+    if (needsGapFill) {
+        result = await fillGapAndRetry(fromWp, toWp);
+        if (gen !== _routeGen) return { superseded: true };
+    }
+    return { result: result };
+}
+
+// Post-draw tail: banner, markers, distance, elevation (with out-&-back doubling),
+// share hash, autosave. Runs after all awaits/gen-checks, so it's race-free.
+function finalizeRoute(allRouteCoords, routeOk) {
+    if (!routeOk) showBanner("Red segments have no footpath connection — try dragging a waypoint onto a nearby road");
+    else showBanner("");
+    addMidpointMarkers();
+    updateDistance();
+    var elevCoords = allRouteCoords;
+    if (state.mode === "outback" && allRouteCoords.length > 1) {
+        elevCoords = allRouteCoords.concat(allRouteCoords.slice().reverse().slice(1));
+    }
+    debouncedFetchElevation(elevCoords);
+    updateShareHash();
+    saveRoute();
+}
+
 async function updateRoute() {
     var gen = ++_routeGen;
     clearRouteLayers(true); // keep waypoints; we're redrawing the geometry between them
@@ -728,26 +768,18 @@ async function updateRoute() {
     }
 
     // Clear the single-waypoint hint once the user has added a second point.
-    var bannerEl = document.getElementById("info-banner");
-    if (bannerEl.dataset.type === "hint") showBanner("");
+    var hintBanner = document.getElementById("info-banner");
+    if (hintBanner.dataset.type === "hint") showBanner("");
 
     var allRouteCoords = [];
     var routeOk = true;
 
+    // Draw each leg between consecutive waypoints.
     for (var i = 1; i < state.waypoints.length; i++) {
         var fromWp = state.waypoints[i-1], toWp = state.waypoints[i];
-        var result = dijkstra(state.graph, fromWp.nodeKey, toWp.nodeKey);
-
-        // Check if path is missing OR unreasonably indirect (>3x straight-line distance)
-        var straightDist = haversine(fromWp.lat, fromWp.lon, toWp.lat, toWp.lon);
-        var needsGapFill = !result || result.path.length < 2 ||
-            (result.dist > straightDist * 3 && straightDist > 200);
-
-        if (needsGapFill) {
-            result = await fillGapAndRetry(fromWp, toWp);
-            if (gen !== _routeGen) return; // superseded by newer call
-        }
-
+        var seg = await resolveSegment(fromWp, toWp, gen);
+        if (seg.superseded) return;
+        var result = seg.result;
         if (result && result.path.length > 1) {
             var segCoords = pathToCoords(result.path);
             state.routeSegments.push(segCoords);
@@ -757,23 +789,19 @@ async function updateRoute() {
         } else {
             var fallback = [[fromWp.lat, fromWp.lon], [toWp.lat, toWp.lon]];
             state.routeSegments.push(fallback);
-            var line = L.polyline(fallback, { color: "#ef4444", weight: 3, opacity: 0.7, dashArray: "8 8" }).addTo(state.map);
-            state.routeLines.push(line);
+            var fline = L.polyline(fallback, { color: "#ef4444", weight: 3, opacity: 0.7, dashArray: "8 8" }).addTo(state.map);
+            state.routeLines.push(fline);
             pushAll(allRouteCoords, fallback, allRouteCoords.length === 0 ? 0 : 1);
             routeOk = false;
         }
     }
 
+    // Loop mode: close the loop from last waypoint back to the first.
     if (state.mode === "loop" && state.waypoints.length >= 2) {
         var lastWp = state.waypoints[state.waypoints.length-1], firstWp = state.waypoints[0];
-        var closeResult = dijkstra(state.graph, lastWp.nodeKey, firstWp.nodeKey);
-        var closeStraight = haversine(lastWp.lat, lastWp.lon, firstWp.lat, firstWp.lon);
-        var closeNeedsGap = !closeResult || closeResult.path.length < 2 ||
-            (closeResult.dist > closeStraight * 3 && closeStraight > 200);
-        if (closeNeedsGap) {
-            closeResult = await fillGapAndRetry(lastWp, firstWp);
-            if (gen !== _routeGen) return; // superseded by newer call
-        }
+        var closeSeg = await resolveSegment(lastWp, firstWp, gen);
+        if (closeSeg.superseded) return;
+        var closeResult = closeSeg.result;
         if (closeResult && closeResult.path.length > 1) {
             var closeCoords = pathToCoords(closeResult.path);
             state.closingLine = L.polyline(closeCoords, { color: "#6ee7b7", weight: 4, opacity: 0.6, dashArray: "10 6" }).addTo(state.map);
@@ -783,18 +811,7 @@ async function updateRoute() {
         }
     }
 
-    if (!routeOk) showBanner("Red segments have no footpath connection — try dragging a waypoint onto a nearby road");
-    else showBanner("");
-
-    addMidpointMarkers();
-    updateDistance();
-    var elevCoords = allRouteCoords;
-    if (state.mode === "outback" && allRouteCoords.length > 1) {
-        elevCoords = allRouteCoords.concat(allRouteCoords.slice().reverse().slice(1));
-    }
-    debouncedFetchElevation(elevCoords);
-    updateShareHash();
-    saveRoute();
+    finalizeRoute(allRouteCoords, routeOk);
 }
 
 var _elevationTimer = null;
