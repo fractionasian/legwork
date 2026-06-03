@@ -6,5 +6,8 @@
   "scripts": {
     "test": "node --test",
     "lint": "bash scripts/lint.sh"
+  },
+  "devDependencies": {
+    "eslint": "9.39.4"
   }
 }
