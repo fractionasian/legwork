@@ -95,10 +95,8 @@ A real JS bug shows as an uncaught exception / `ReferenceError` in console, or a
   `fire('dragend')` before asserting — the handler may reload tiles first.
 - Welcome modal is present on first load but doesn't block `window`-driven calls.
 
-## Transfers
+## See also
 
-The `window`-globals trick is a vanilla-app affordance (also fits **tienlen**).
-React siblings (**quorum**, future ronin/mantle) have module-scoped internals —
-drive their real DOM (roles/test-ids) instead. Apps with their own backends
-(tienlen, quorum Worker+D1) need that backend running too, not just a static
-server.
+General method + per-stack decision tree: **`verifier-webapp`** (this is the
+legwork-specific recipe; the `window`-globals approach is the "vanilla / classic
+script" branch of that tree).
