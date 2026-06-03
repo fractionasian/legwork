@@ -1,22 +1,30 @@
 // ── Legwork tiles — path network loading ─────────────
 // Pre-cached city tiles (primary) + live Overpass queries (fallback) build up
 // state.graph, state.pathFeatures, state.pathLayer. resetGraphIfCityChanged
-// wipes them when the user teleports to a different city. Depends on globals
-// from routing.js, storage.js, app.js (state, showBanner, fetchWithTimeout).
+// wipes them when the user teleports to a different city.
+// Globals consumed (defined elsewhere):
+//   routing.js — nodeKey, haversine, dijkstra, closestNode, gridInsert,
+//                resetSpatialGrid, routingProfile, compactToGeoJSON, osmToGeoJSON
+//   storage.js — cacheGet, cacheSet, PATHS_TTL
+//   app.js     — state, showBanner, showBannerWithRetry, fetchWithTimeout
+//   external   — L (Leaflet), window.umami
 
 // Pre-baked tiles live in the separate legwork-tiles repo (keeps this repo light).
 // Same origin (fractionasian.github.io), so no CORS. Source: github.com/fractionasian/legwork-tiles
 var TILES_BASE = "https://fractionasian.github.io/legwork-tiles/";
 var _manifest = null;
+var _manifestFetchedAt = 0;
+var MANIFEST_TTL = 30 * 60 * 1000; // 30 min — re-fetch so a server-side tile rebuild is picked up mid-session
 
 async function fetchManifest() {
-    if (_manifest) return _manifest;
+    if (_manifest && Date.now() - _manifestFetchedAt < MANIFEST_TTL) return _manifest;
     try {
         var resp = await fetchWithTimeout(TILES_BASE + "manifest.json", null, 10000);
-        if (!resp.ok) return null;
+        if (!resp.ok) return _manifest; // keep any stale copy rather than nulling on a transient failure
         _manifest = await resp.json();
+        _manifestFetchedAt = Date.now();
         return _manifest;
-    } catch (e) { return null; }
+    } catch (e) { return _manifest; }
 }
 
 function findCityForLocation(manifest, lat, lon) {
@@ -191,7 +199,7 @@ async function resetGraphIfCityChanged(lat, lon) {
     state.seenIds = {};
     state.edgeSet = {};
     state.nodeAttrs = {};
-    spatialGrid = {};
+    resetSpatialGrid(); // single reset path (was a direct spatialGrid = {} reaching across files)
     if (state.pathLayer) {
         state.map.removeLayer(state.pathLayer);
         state.pathLayer = null;
