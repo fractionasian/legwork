@@ -16,7 +16,17 @@ function cors(extra = {}) {
   };
 }
 
-async function handleGraph(url, env, ctx) {
+async function handleGraph(request, url, env, ctx) {
+  // Per-IP rate limit (native Workers binding). Guarded so the handler still
+  // works if the binding is absent (e.g. in unit tests without it).
+  if (env.GRAPH_RL) {
+    const ip = request.headers.get("cf-connecting-ip") || "anon";
+    const { success } = await env.GRAPH_RL.limit({ key: ip });
+    if (!success) {
+      return new Response("rate limited", { status: 429, headers: cors({ "retry-after": "60" }) });
+    }
+  }
+
   const p = parseGraphParams(url);
   if (!p.ok) return new Response(p.error, { status: 400, headers: cors() });
 
@@ -62,7 +72,7 @@ export default {
     const url = new URL(request.url);
     if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: cors() });
     if (url.pathname === "/v1/health") return new Response("ok", { status: 200, headers: cors() });
-    if (url.pathname === "/v1/graph" && request.method === "GET") return handleGraph(url, env, ctx);
+    if (url.pathname === "/v1/graph" && request.method === "GET") return handleGraph(request, url, env, ctx);
     return new Response("not found", { status: 404, headers: cors() });
   },
 };

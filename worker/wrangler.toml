@@ -7,3 +7,11 @@ compatibility_date = "2026-06-01"
 [[r2_buckets]]
 binding = "GRAPH"
 bucket_name = "legwork-graph-cache"
+
+# Per-IP rate limit on /v1/graph (60 requests / 60 s). Belt-and-suspenders on top
+# of the free plan's 100k-requests/day ceiling — stops one client burning the
+# daily budget. Native Workers Rate Limiting binding; no custom domain needed.
+[[ratelimits]]
+name = "GRAPH_RL"
+namespace_id = "1001"
+simple = { limit = 60, period = 60 }

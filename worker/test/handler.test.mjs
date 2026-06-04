@@ -4,7 +4,7 @@ import worker from "../src/index.js";
 
 // Minimal R2 mock: in-memory map. .get returns an object whose .body is the
 // stored string (Response accepts a string body, mirroring R2's stream body).
-function mockEnv(initial = {}) {
+function mockEnv(initial = {}, rlSuccess = true) {
   const store = new Map(Object.entries(initial));
   return {
     store,
@@ -12,6 +12,7 @@ function mockEnv(initial = {}) {
       get: async (k) => (store.has(k) ? { body: store.get(k) } : null),
       put: async (k, v) => { store.set(k, v); },
     },
+    GRAPH_RL: { limit: async () => ({ success: rlSuccess }) },
   };
 }
 const ctx = { waitUntil: (p) => p };
@@ -75,6 +76,16 @@ test("graph MISS sends a descriptive User-Agent to Overpass (avoids 406)", async
   assert.equal(res.status, 200);
   const ua = sentInit && sentInit.headers && (sentInit.headers["user-agent"] || sentInit.headers["User-Agent"]);
   assert.ok(ua && /legwork/i.test(ua), "Overpass fetch must send a descriptive Legwork User-Agent");
+});
+
+test("graph returns 429 when the rate limit is exceeded, and skips Overpass", async () => {
+  const env = mockEnv({}, false); // rate limiter denies
+  let called = false;
+  const res = await withFetch(async () => { called = true; return new Response("x"); }, () =>
+    worker.fetch(new Request("https://w.dev/v1/graph?lat=-31.95&lon=115.861&radius=2000"), env, ctx));
+  assert.equal(res.status, 429);
+  assert.equal(res.headers.get("retry-after"), "60");
+  assert.equal(called, false, "must not call Overpass when rate-limited");
 });
 
 test("graph returns 400 on bad params", async () => {
