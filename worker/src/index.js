@@ -1,4 +1,4 @@
-import { OVERPASS_URL, buildOverpassQuery, parseGraphParams, cacheKey } from "./lib.js";
+import { OVERPASS_URL, buildOverpassQuery, parseGraphParams, cacheKey, snap } from "./lib.js";
 
 const APP_ORIGIN = "https://fractionasian.github.io";
 
@@ -30,7 +30,12 @@ async function handleGraph(request, url, env, ctx) {
   const p = parseGraphParams(url);
   if (!p.ok) return new Response(p.error, { status: 400, headers: cors() });
 
-  const key = cacheKey(p.lat, p.lon, p.radius);
+  // Snap the pin to the shared grid: nearby pins collapse to one cell so they
+  // share a single cached fetch. Both the key and the Overpass centre use the
+  // snapped coords (see snap()/GRID_DEG in lib.js).
+  const slat = snap(p.lat);
+  const slon = snap(p.lon);
+  const key = cacheKey(slat, slon, p.radius);
 
   const hit = await env.GRAPH.get(key);
   if (hit) {
@@ -40,7 +45,7 @@ async function handleGraph(request, url, env, ctx) {
     });
   }
 
-  const query = buildOverpassQuery(p.lat, p.lon, p.radius);
+  const query = buildOverpassQuery(slat, slon, p.radius);
   let r;
   try {
     r = await fetch(OVERPASS_URL, {

@@ -30,7 +30,8 @@ test("health endpoint returns 200 ok", async () => {
 });
 
 test("graph cache HIT returns stored body, never calls Overpass", async () => {
-  const env = mockEnv({ "g:-31.950:115.861:2000": '{"elements":[1]}' });
+  // Request lon 115.861 snaps to the grid cell keyed 115.860 (GRID_DEG 0.005).
+  const env = mockEnv({ "g:-31.950:115.860:2000": '{"elements":[1]}' });
   let called = false;
   const res = await withFetch(async () => { called = true; return new Response("nope"); }, () =>
     worker.fetch(new Request("https://w.dev/v1/graph?lat=-31.95&lon=115.861&radius=2000"), env, ctx));
@@ -47,7 +48,22 @@ test("graph cache MISS fetches Overpass, returns it, and writes R2", async () =>
   assert.equal(res.status, 200);
   assert.equal(res.headers.get("cache-status"), "miss");
   assert.equal(await res.text(), '{"elements":[42]}');
-  assert.equal(env.store.get("g:-31.950:115.861:2000"), '{"elements":[42]}', "R2 should be written");
+  assert.equal(env.store.get("g:-31.950:115.860:2000"), '{"elements":[42]}', "R2 should be written under the snapped key");
+});
+
+test("nearby pins in the same grid cell share one cached fetch", async () => {
+  const env = mockEnv();
+  let overpassCalls = 0;
+  const impl = async () => { overpassCalls++; return new Response('{"elements":[9]}', { status: 200 }); };
+  // Pin A: miss → fetches Overpass, caches under the snapped key.
+  await withFetch(impl, () =>
+    worker.fetch(new Request("https://w.dev/v1/graph?lat=-36.849&lon=174.763&radius=2000"), env, ctx));
+  // Pin B: ~220 m away, same cell → must HIT, no second Overpass call.
+  const res = await withFetch(impl, () =>
+    worker.fetch(new Request("https://w.dev/v1/graph?lat=-36.851&lon=174.764&radius=2000"), env, ctx));
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get("cache-status"), "hit");
+  assert.equal(overpassCalls, 1, "the two nearby pins should share one Overpass fetch");
 });
 
 test("graph returns 502 when Overpass errors (client will fall back)", async () => {

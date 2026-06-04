@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildOverpassQuery, parseGraphParams, cacheKey, OVERPASS_URL } from "../src/lib.js";
+import { buildOverpassQuery, parseGraphParams, cacheKey, OVERPASS_URL, snap, GRID_DEG } from "../src/lib.js";
 
 test("buildOverpassQuery includes runner highway types and the around clause", () => {
   const q = buildOverpassQuery(-31.95, 115.86, 2000);
@@ -55,4 +55,18 @@ test("parseGraphParams boundary values", () => {
 
 test("OVERPASS_URL points at the interpreter endpoint", () => {
   assert.equal(OVERPASS_URL, "https://overpass-api.de/api/interpreter");
+});
+
+test("snap collapses nearby pins to one grid cell, separates distant ones", () => {
+  // Two pins ~220 m apart → same cell.
+  assert.equal(snap(-36.849).toFixed(3), snap(-36.851).toFixed(3));
+  assert.equal(snap(-36.849).toFixed(3), "-36.850");
+  // A pin in the next cell → distinct.
+  assert.notEqual(snap(-36.849).toFixed(3), snap(-36.856).toFixed(3));
+});
+
+test("snap output lands on a GRID_DEG multiple", () => {
+  const s = snap(174.7632);
+  assert.ok(Math.abs(s / GRID_DEG - Math.round(s / GRID_DEG)) < 1e-9);
+  assert.equal(GRID_DEG, 0.005);
 });

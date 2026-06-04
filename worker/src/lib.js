@@ -37,3 +37,22 @@ export function parseGraphParams(url) {
   if (!Number.isInteger(radius) || radius < 100 || radius > 30000) return { ok: false, error: "bad radius" };
   return { ok: true, lat, lon, radius };
 }
+
+// Cache-key / fetch-centre grid. Pins are snapped to this grid before BOTH the
+// cache key and the Overpass `around:` centre, so a whole ~550 m neighbourhood
+// shares one cached fetch instead of one fetch per ~110 m pin. Coverage-safe at
+// every zoom: the worst-case offset from a snapped centre is the cell half-
+// diagonal ≈ 0.005·√2/2 ≈ 390 m, well inside even the smallest 1000 m fetch
+// radius. This can be widened toward 0.01 (~1.1 km) once hit-rate telemetry
+// justifies bigger cells — a one-line change here + a Worker redeploy, no
+// client change.
+export const GRID_DEG = 0.005;
+
+// Snap a coordinate to the nearest GRID_DEG multiple. Applied server-side so the
+// grid is tunable by redeploying the Worker alone (the client keeps sending
+// exact coords). Snapping both the key and the query centre makes a cell's
+// cached graph deterministically centred on the cell, not on whoever fetched
+// first.
+export function snap(coord) {
+  return Math.round(coord / GRID_DEG) * GRID_DEG;
+}
