@@ -12,6 +12,11 @@
 // Pre-baked tiles live in the separate legwork-tiles repo (keeps this repo light).
 // Same origin (fractionasian.github.io), so no CORS. Source: github.com/fractionasian/legwork-tiles
 var TILES_BASE = "https://fractionasian.github.io/legwork-tiles/";
+// Layer 2 shared cache (Cloudflare Worker). On an IDB miss, loadPaths fetches
+// the path graph from here; if the Worker is unreachable it falls through to a
+// direct Overpass POST (Layer 3), so this is strictly additive — never a
+// regression. Swap the subdomain to the real deployed Worker at deploy time.
+var WORKER_BASE = "https://legwork-tiles.peterbnguyen.workers.dev";
 var _manifest = null;
 var _manifestFetchedAt = 0;
 var MANIFEST_TTL = 30 * 60 * 1000; // 30 min — re-fetch so a server-side tile rebuild is picked up mid-session
@@ -301,6 +306,22 @@ function radiusFromZoom() {
     return 10000;
 }
 
+// Fetch raw Overpass JSON from the Layer-2 Worker cache. Returns the parsed
+// object on success, or null to signal "fall back to direct Overpass". Never
+// throws — a null return is the only failure signal the caller needs.
+async function loadGraphFromWorker(lat, lon, radius) {
+    try {
+        var url = WORKER_BASE + "/v1/graph?lat=" + lat.toFixed(3) +
+            "&lon=" + lon.toFixed(3) + "&radius=" + radius;
+        var resp = await fetchWithTimeout(url, null, 60000);
+        if (!resp.ok) return null; // 400/502/etc → fall back
+        return await resp.json();
+    } catch (e) {
+        console.warn("Worker graph fetch failed, falling back to Overpass:", e.message);
+        return null;
+    }
+}
+
 async function loadPaths(lat, lon) {
     var radius = radiusFromZoom();
     // Bumped from paths: to paths2: when we started carrying node tags through
@@ -339,16 +360,28 @@ async function loadPaths(lat, lon) {
         // — needed for barrier/crossing/traffic-signal weighting in applyPaths.
         ');\nout body;\n>;\nout body qt;';
 
+    // Layer 2 first: try the shared Worker cache ONCE, up front. A null result
+    // (Worker unreachable, non-2xx, or a thrown fetch) falls through to the
+    // direct Overpass POST in the retry loop below. A populated result is a
+    // faithful copy of what Overpass itself would return — the Worker only ever
+    // caches real Overpass responses — so a truthy-but-empty {elements:[]} for a
+    // genuinely path-less area is correct and intentionally NOT a fallback
+    // trigger: the direct path would return the same empty set. (lat/lon are
+    // sent at .toFixed(3) ≈ 110 m, the Worker's cache-key bucket granularity.)
+    var raw = await loadGraphFromWorker(lat, lon, radius);
+
     var maxRetries = 3, delay = 2000;
     for (var attempt = 0; attempt <= maxRetries; attempt++) {
         try {
-            var resp = await fetchWithTimeout("https://overpass-api.de/api/interpreter", {
-                method: "POST",
-                body: "data=" + encodeURIComponent(query),
-                headers: { "Content-Type": "application/x-www-form-urlencoded" },
-            }, 60000);
-            if (!resp.ok) throw new Error("HTTP " + resp.status);
-            var raw = await resp.json();
+            if (!raw) {
+                var resp = await fetchWithTimeout("https://overpass-api.de/api/interpreter", {
+                    method: "POST",
+                    body: "data=" + encodeURIComponent(query),
+                    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+                }, 60000);
+                if (!resp.ok) throw new Error("HTTP " + resp.status);
+                raw = await resp.json();
+            }
             var geojson = osmToGeoJSON(raw);
             await cacheSet(cacheKey, geojson);
             applyPaths(geojson, { skipRender: true });
