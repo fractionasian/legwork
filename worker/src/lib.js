@@ -1,0 +1,39 @@
+// Pure, dependency-free helpers for the Legwork graph-cache Worker.
+// No Worker globals at module scope so node --test can import this directly.
+
+export const OVERPASS_URL = "https://overpass-api.de/api/interpreter";
+
+// Verbatim from tiles.js:320-337 (loadPaths). The set is identical for run and
+// bike — profile only changes edge WEIGHTING client-side, not what is fetched —
+// so the Worker cache key omits profile.
+const HIGHWAY_TYPES = [
+  "footway", "cycleway", "path", "residential", "living_street",
+  "pedestrian", "service", "unclassified", "tertiary", "tertiary_link",
+  "secondary", "secondary_link", "primary", "primary_link", "trunk",
+  "trunk_link", "crossing", "steps",
+];
+
+export function buildOverpassQuery(lat, lon, radius) {
+  let query = "[out:json][timeout:30];\n(\n";
+  for (const hw of HIGHWAY_TYPES) {
+    query += '  way["highway"="' + hw + '"](around:' + radius + "," + lat + "," + lon + ");\n";
+  }
+  // `out body; >; out body qt;` brings node tags through for client-side
+  // crossing/barrier/signal weighting (tiles.js:338-340).
+  query += ");\nout body;\n>;\nout body qt;";
+  return query;
+}
+
+export function cacheKey(lat, lon, radius) {
+  return "g:" + lat.toFixed(3) + ":" + lon.toFixed(3) + ":" + radius;
+}
+
+export function parseGraphParams(url) {
+  const lat = Number(url.searchParams.get("lat"));
+  const lon = Number(url.searchParams.get("lon"));
+  const radius = Number(url.searchParams.get("radius"));
+  if (!Number.isFinite(lat) || lat < -90 || lat > 90) return { ok: false, error: "bad lat" };
+  if (!Number.isFinite(lon) || lon < -180 || lon > 180) return { ok: false, error: "bad lon" };
+  if (!Number.isInteger(radius) || radius < 100 || radius > 30000) return { ok: false, error: "bad radius" };
+  return { ok: true, lat, lon, radius };
+}
