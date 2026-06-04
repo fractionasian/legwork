@@ -1,0 +1,9 @@
+name = "legwork-tiles"
+main = "src/index.js"
+compatibility_date = "2026-06-01"
+
+# R2 bucket binding. The bucket must be created once before first deploy:
+#   wrangler r2 bucket create legwork-graph-cache
+[[r2_buckets]]
+binding = "GRAPH"
+bucket_name = "legwork-graph-cache"
