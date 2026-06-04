@@ -2,6 +2,12 @@ import { OVERPASS_URL, buildOverpassQuery, parseGraphParams, cacheKey } from "./
 
 const APP_ORIGIN = "https://fractionasian.github.io";
 
+// Overpass-api.de returns HTTP 406 to requests with a missing or generic
+// User-Agent (its usage policy requires an identifying UA). A browser sends its
+// own UA so the client path works; a Worker subrequest must set one explicitly.
+// (Workers — unlike browsers — allow setting User-Agent on outbound fetch.)
+const OVERPASS_UA = "Legwork/1.0 (+https://fractionasian.github.io/legwork)";
+
 function cors(extra = {}) {
   return {
     "access-control-allow-origin": APP_ORIGIN,
@@ -30,7 +36,10 @@ async function handleGraph(url, env, ctx) {
     r = await fetch(OVERPASS_URL, {
       method: "POST",
       body: "data=" + encodeURIComponent(query),
-      headers: { "content-type": "application/x-www-form-urlencoded" },
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        "user-agent": OVERPASS_UA,
+      },
     });
   } catch (e) {
     return new Response("overpass unreachable", { status: 502, headers: cors({ "cache-status": "miss-overpass-error" }) });

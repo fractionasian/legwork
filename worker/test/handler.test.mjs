@@ -67,6 +67,16 @@ test("graph returns 502 when the Overpass fetch THROWS (network unreachable)", a
   assert.equal(env.store.has("g:-31.950:115.861:2000"), false);
 });
 
+test("graph MISS sends a descriptive User-Agent to Overpass (avoids 406)", async () => {
+  const env = mockEnv();
+  let sentInit = null;
+  const res = await withFetch(async (u, init) => { sentInit = init; return new Response('{"elements":[7]}', { status: 200 }); }, () =>
+    worker.fetch(new Request("https://w.dev/v1/graph?lat=-31.95&lon=115.861&radius=2000"), env, ctx));
+  assert.equal(res.status, 200);
+  const ua = sentInit && sentInit.headers && (sentInit.headers["user-agent"] || sentInit.headers["User-Agent"]);
+  assert.ok(ua && /legwork/i.test(ua), "Overpass fetch must send a descriptive Legwork User-Agent");
+});
+
 test("graph returns 400 on bad params", async () => {
   const res = await worker.fetch(new Request("https://w.dev/v1/graph?lat=abc&lon=1&radius=2000"), mockEnv(), ctx);
   assert.equal(res.status, 400);
