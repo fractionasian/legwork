@@ -1,6 +1,9 @@
 import { OVERPASS_URL, buildOverpassQuery, parseGraphParams, cacheKey, snap } from "./lib.js";
+import { validateRouteHash, validateVanitySlug, apiCors, json } from "./links-lib.js";
+import { createRandomLink, getActive, requestVanity, setStatus, listPending, bumpHits, TakenError } from "./links-db.js";
 
 const APP_ORIGIN = "https://fractionasian.github.io";
+const APP_BASE = "https://fractionasian.github.io/legwork";
 
 // Overpass-api.de returns HTTP 406 to requests with a missing or generic
 // User-Agent (its usage policy requires an identifying UA). A browser sends its
@@ -72,9 +75,98 @@ async function handleGraph(request, url, env, ctx) {
   });
 }
 
+// ── Share short-links (/api/*) ──────────────────────────────────────────────
+
+async function readJson(request) {
+  try { return await request.json(); } catch (e) { return null; }
+}
+
+function adminOk(request, env) {
+  const m = (request.headers.get("authorization") || "").match(/^Bearer\s+(.+)$/i);
+  return !!env.ADMIN_SECRET && !!m && m[1] === env.ADMIN_SECRET;
+}
+
+async function rateLimited(request, env) {
+  if (!env.LINKS_RL) return false; // binding absent (e.g. tests) → don't block
+  const ip = request.headers.get("cf-connecting-ip") || "anon";
+  const { success } = await env.LINKS_RL.limit({ key: ip });
+  return !success;
+}
+
+// Exported for unit tests. Handles every /api/* route; leaves /v1/* to handleGraph.
+export async function handleApi(request, env, ctx) {
+  const url = new URL(request.url);
+  const method = request.method;
+  if (method === "OPTIONS") return new Response(null, { status: 204, headers: apiCors() });
+
+  const seg = url.pathname.split("/").filter(Boolean); // ["api", ...]
+
+  // POST /api/links { hash } → mint a random short code
+  if (method === "POST" && seg.length === 2 && seg[1] === "links") {
+    if (await rateLimited(request, env)) return json({ error: "rate limited" }, 429);
+    const body = await readJson(request);
+    if (!body) return json({ error: "bad json" }, 400);
+    const v = validateRouteHash(body.hash);
+    if (!v.ok) return json({ error: "not a valid route: " + v.reason }, 400);
+    const slug = await createRandomLink(env.DB, { hash: v.hash, now: Date.now() });
+    return json({ slug, url: APP_BASE + "/?s=" + slug }, 200);
+  }
+
+  // GET /api/links/:slug → resolve (active only)
+  if (method === "GET" && seg.length === 3 && seg[1] === "links") {
+    const row = await getActive(env.DB, seg[2]);
+    if (!row) return json({ error: "not found" }, 404);
+    ctx.waitUntil(bumpHits(env.DB, seg[2]));
+    return json({ hash: row.hash }, 200);
+  }
+
+  // POST /api/vanity { slug, hash, contact?, note? } → park a pending request
+  if (method === "POST" && seg.length === 2 && seg[1] === "vanity") {
+    if (await rateLimited(request, env)) return json({ error: "rate limited" }, 429);
+    const body = await readJson(request);
+    if (!body) return json({ error: "bad json" }, 400);
+    const sv = validateVanitySlug(body.slug || "");
+    if (!sv.ok) return json({ error: "bad slug: " + sv.reason }, 400);
+    const rv = validateRouteHash(body.hash);
+    if (!rv.ok) return json({ error: "not a valid route: " + rv.reason }, 400);
+    try {
+      await requestVanity(env.DB, {
+        slug: body.slug, hash: rv.hash,
+        contact: body.contact ?? null, note: body.note ?? null, now: Date.now(),
+      });
+    } catch (e) {
+      if (e instanceof TakenError) return json({ error: "slug taken" }, 409);
+      throw e;
+    }
+    return json({ status: "pending" }, 200);
+  }
+
+  // Admin (Bearer ADMIN_SECRET): approve/reject vanity, purge, list pending
+  if (seg[1] === "admin") {
+    if (!adminOk(request, env)) return json({ error: "unauthorized" }, 401);
+    if (method === "GET" && seg.length === 3 && seg[2] === "pending") {
+      return json({ pending: await listPending(env.DB) }, 200);
+    }
+    if (method === "POST" && seg.length === 4 && seg[2] === "vanity") {
+      const body = (await readJson(request)) || {};
+      const status = body.action === "approve" ? "active" : "rejected";
+      await setStatus(env.DB, seg[3], status);
+      return json({ slug: seg[3], status }, 200);
+    }
+    if (method === "POST" && seg.length === 4 && seg[2] === "purge") {
+      await setStatus(env.DB, seg[3], "purged");
+      return json({ slug: seg[3], status: "purged" }, 200);
+    }
+    return json({ error: "not found" }, 404);
+  }
+
+  return json({ error: "not found" }, 404);
+}
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
+    if (url.pathname.startsWith("/api/")) return handleApi(request, env, ctx);
     if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: cors() });
     if (url.pathname === "/v1/health") return new Response("ok", { status: 200, headers: cors() });
     if (url.pathname === "/v1/graph" && request.method === "GET") return handleGraph(request, url, env, ctx);
