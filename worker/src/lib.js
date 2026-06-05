@@ -34,7 +34,12 @@ export function parseGraphParams(url) {
   const radius = Number(url.searchParams.get("radius"));
   if (!Number.isFinite(lat) || lat < -90 || lat > 90) return { ok: false, error: "bad lat" };
   if (!Number.isFinite(lon) || lon < -180 || lon > 180) return { ok: false, error: "bad lon" };
-  if (!Number.isInteger(radius) || radius < 100 || radius > 30000) return { ok: false, error: "bad radius" };
+  // Floor is 1000 m, not an arbitrary small value: snap() can shift the fetch
+  // centre up to the cell half-diagonal (~390 m) from the requested pin, so a
+  // radius smaller than that could return a graph that misses the pin entirely.
+  // 1000 m keeps the snapped circle comfortably over the pin and matches the
+  // smallest radius the client ever sends (radiusFromZoom in tiles.js).
+  if (!Number.isInteger(radius) || radius < 1000 || radius > 30000) return { ok: false, error: "bad radius" };
   return { ok: true, lat, lon, radius };
 }
 
@@ -42,8 +47,9 @@ export function parseGraphParams(url) {
 // cache key and the Overpass `around:` centre, so a whole ~550 m neighbourhood
 // shares one cached fetch instead of one fetch per ~110 m pin. Coverage-safe at
 // every zoom: the worst-case offset from a snapped centre is the cell half-
-// diagonal ≈ 0.005·√2/2 ≈ 390 m, well inside even the smallest 1000 m fetch
-// radius. This can be widened toward 0.01 (~1.1 km) once hit-rate telemetry
+// diagonal ≈ 0.005·√2/2 ≈ 390 m, well inside the 1000 m minimum radius enforced
+// by parseGraphParams. This can be widened toward 0.01 (~1.1 km) once hit-rate
+// telemetry
 // justifies bigger cells — a one-line change here + a Worker redeploy, no
 // client change.
 export const GRID_DEG = 0.005;

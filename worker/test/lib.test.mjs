@@ -42,13 +42,13 @@ test("parseGraphParams rejects out-of-range and NaN", () => {
 });
 
 test("parseGraphParams boundary values", () => {
-  // Endpoints accepted
-  for (const [lat, lon, radius] of [[90, 180, 100], [-90, -180, 30000]]) {
+  // Endpoints accepted (radius floor is 1000 m — see parseGraphParams)
+  for (const [lat, lon, radius] of [[90, 180, 1000], [-90, -180, 30000]]) {
     const u = new URL(`https://w.dev/v1/graph?lat=${lat}&lon=${lon}&radius=${radius}`);
     assert.equal(parseGraphParams(u).ok, true, `should accept ${lat},${lon},${radius}`);
   }
-  // Just outside / wrong type rejected
-  for (const qs of ["?lat=-31.95&lon=115.86&radius=99", "?lat=-31.95&lon=115.86&radius=30001", "?lat=-31.95&lon=115.86&radius=2000.5"]) {
+  // Just outside / wrong type rejected (999 is one below the 1000 m floor)
+  for (const qs of ["?lat=-31.95&lon=115.86&radius=999", "?lat=-31.95&lon=115.86&radius=30001", "?lat=-31.95&lon=115.86&radius=2000.5"]) {
     assert.equal(parseGraphParams(new URL("https://w.dev/v1/graph" + qs)).ok, false, "should reject: " + qs);
   }
 });
