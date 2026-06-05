@@ -2296,6 +2296,12 @@ setupInstallPrompt();
         for (var i = 0; i < sharedPoints.length; i++) {
             await addWaypointAt(sharedPoints[i].lat, sharedPoints[i].lon, { exactPosition: i === 0 });
         }
+        // addWaypointAt fires updateRoute() fire-and-forget, so the per-waypoint
+        // routes can race against still-loading tiles and settle on a graph that
+        // was incomplete for distant legs (huge Dijkstra detours, wrong total).
+        // One awaited final pass — against the now fully-loaded graph — recomputes
+        // the route correctly. This is what an accidental map click used to fix.
+        await updateRoute();
         await autoSaveSharedRoute();
         return;
     }
@@ -2316,6 +2322,9 @@ setupInstallPrompt();
         for (var i = 0; i < sw.length; i++) {
             await addWaypointAt(sw[i].lat, sw[i].lon, { exactPosition: i === 0 });
         }
+        // Same race as the share-restore path: settle the route once, awaited,
+        // after all per-waypoint tile loads have finished.
+        await updateRoute();
         return;
     }
 
