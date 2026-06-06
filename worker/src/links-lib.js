@@ -54,20 +54,35 @@ export function validateRouteHash(input) {
   return { ok: true, hash: "#r=" + r + "&m=" + m };
 }
 
-// Words a user-chosen vanity slug may not take: app route prefixes + obvious
-// confusables. Trademark squatting can't be fully pre-blocked here — that's why
-// vanity is approval-gated, not auto-granted.
+// Words a user-chosen vanity slug may not take. Two groups:
+//  (a) app route prefixes + obvious confusables, and
+//  (b) names of real static files/routes served at the site root — GitHub Pages
+//      serves those files BEFORE the 404.html short-link router runs, so a vanity
+//      slug colliding with one would be shadowed (and could silently break if the
+//      host's static set ever changes). Keep this in sync with the repo root.
+// Trademark squatting can't be fully pre-blocked here — that's why vanity is
+// approval-gated, not auto-granted.
 export const RESERVED = new Set([
+  // route prefixes + confusables
   "api", "r", "admin", "official", "legwork", "app", "www", "help", "about",
+  // real root files/assets (shadow the slug if requested)
+  "index", "sw", "tiles", "routing", "storage", "style", "data", "docs",
+  "scripts", "test", "cname", "manifest", "welcome-init", "robots", "sitemap",
+  "assets", "static", "favicon", "icons", "og",
 ]);
 
 const VANITY_RE = /^[a-z0-9-]{3,40}$/i;
 
+// Returns { ok, slug } with a canonical LOWERCASE slug on success. Slugs are
+// stored and resolved case-insensitively (D1 PK is case-sensitive, the 404.html
+// router forwards the path as-typed, and users will type any case) — so we
+// canonicalise to lowercase here, the single source of truth.
 export function validateVanitySlug(slug) {
   if (typeof slug !== "string") return { ok: false, reason: "not a string" };
   if (!VANITY_RE.test(slug)) return { ok: false, reason: "must be 3-40 chars of a-z 0-9 -" };
-  if (RESERVED.has(slug.toLowerCase())) return { ok: false, reason: "reserved word" };
-  return { ok: true };
+  const canonical = slug.toLowerCase();
+  if (RESERVED.has(canonical)) return { ok: false, reason: "reserved word" };
+  return { ok: true, slug: canonical };
 }
 
 // Response helpers shared by the /api handlers.

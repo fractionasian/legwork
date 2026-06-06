@@ -118,7 +118,10 @@ export async function handleApi(request, env, ctx) {
   if (method === "GET" && seg.length === 3 && seg[1] === "links") {
     const row = await getActive(env.DB, seg[2]);
     if (!row) return json({ error: "not found" }, 404);
-    ctx.waitUntil(bumpHits(env.DB, seg[2]));
+    // Sample hit-counting: a write on EVERY resolve would let an unauthenticated
+    // GET flood exhaust D1's daily write quota (account-wide). At 1% the count is
+    // a ~100× undercount (multiply for an estimate) but the write rate is bounded.
+    if (Math.random() < 0.01) ctx.waitUntil(bumpHits(env.DB, seg[2]));
     return json({ hash: row.hash }, 200);
   }
 
@@ -131,10 +134,16 @@ export async function handleApi(request, env, ctx) {
     if (!sv.ok) return json({ error: "bad slug: " + sv.reason }, 400);
     const rv = validateRouteHash(body.hash);
     if (!rv.ok) return json({ error: "not a valid route: " + rv.reason }, 400);
+    // contact/note are free-text and admin-reviewed — bound their size so a
+    // request can't write an oversized blob to D1 (and keep the admin list sane).
+    const contact = body.contact == null ? null : String(body.contact);
+    const note = body.note == null ? null : String(body.note);
+    if (contact !== null && contact.length > 200) return json({ error: "contact too long (max 200)" }, 400);
+    if (note !== null && note.length > 1000) return json({ error: "note too long (max 1000)" }, 400);
     try {
       await requestVanity(env.DB, {
-        slug: body.slug, hash: rv.hash,
-        contact: body.contact ?? null, note: body.note ?? null, now: Date.now(),
+        slug: sv.slug, hash: rv.hash,
+        contact, note, now: Date.now(),
       });
     } catch (e) {
       if (e instanceof TakenError) return json({ error: "slug taken" }, 409);

@@ -93,3 +93,28 @@ test("OPTIONS preflight returns CORS 204", async () => {
   assert.equal(res.status, 204);
   assert.equal(res.headers.get("access-control-allow-origin"), "*");
 });
+
+test("vanity slugs resolve case-insensitively (typed-case independence)", async () => {
+  const e = env();
+  // Request with mixed case, approve via a DIFFERENT case, resolve via lowercase.
+  await handleApi(req("POST", "/api/vanity", { body: { slug: "Melbourne2027", hash: GOOD_HASH } }), e, CTX);
+  const approve = await handleApi(req("POST", "/api/admin/vanity/MELBOURNE2027", { body: { action: "approve" }, auth: "s3cret" }), e, CTX);
+  assert.equal(approve.status, 200);
+  for (const cased of ["melbourne2027", "Melbourne2027", "MELBOURNE2027"]) {
+    const r = await handleApi(req("GET", "/api/links/" + cased), e, CTX);
+    assert.equal(r.status, 200, "should resolve regardless of case: " + cased);
+    assert.equal((await r.json()).hash, GOOD_HASH);
+  }
+});
+
+test("vanity rejects slugs that collide with real root asset names", async () => {
+  for (const word of ["sw", "tiles", "index", "manifest"]) {
+    const res = await handleApi(req("POST", "/api/vanity", { body: { slug: word, hash: GOOD_HASH } }), env(), CTX);
+    assert.equal(res.status, 400, word + " should be reserved");
+  }
+});
+
+test("vanity rejects an oversized note", async () => {
+  const res = await handleApi(req("POST", "/api/vanity", { body: { slug: "bigrace", hash: GOOD_HASH, note: "x".repeat(1001) } }), env(), CTX);
+  assert.equal(res.status, 400);
+});

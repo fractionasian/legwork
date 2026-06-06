@@ -56,7 +56,8 @@ test("listPending returns only pending vanity rows, oldest first", async () => {
   await createRandomLink(db, { hash: "#r=a;b&m=oneway", now: NOW });
   const pending = await listPending(db);
   assert.equal(pending.length, 2);
-  assert.deepEqual(pending.map((r) => r.slug), ["Race1", "Race2"]);
+  // requestVanity canonicalises slugs to lowercase (case-insensitive resolution).
+  assert.deepEqual(pending.map((r) => r.slug), ["race1", "race2"]);
 });
 
 test("bumpHits increments the hit counter", async () => {

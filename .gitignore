@@ -1,6 +1,7 @@
 .claude/
 .DS_Store
 .playwright-mcp/
+node_modules/
 
 # Generated map tiles now live in the legwork-tiles repo (served via its Pages site).
 # Build pipeline: github.com/fractionasian/legwork-tiles/.github/workflows/build-tiles.yml

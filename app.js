@@ -1808,6 +1808,15 @@ function loadFromHash() {
         return parseNodeKey(p);
     });
     if (points.length < 2) return false;
+    // Reject any non-finite or out-of-range coordinate. parseNodeKey uses
+    // parseFloat, so a malformed "#r=foo;bar" yields NaN points that would
+    // otherwise pass the length check and feed NaN into setView/addWaypointAt
+    // (dead-boots the map). Defends the restore path against a bad share link.
+    for (var pi = 0; pi < points.length; pi++) {
+        var pt = points[pi];
+        if (!isFinite(pt.lat) || !isFinite(pt.lon) ||
+            pt.lat < -90 || pt.lat > 90 || pt.lon < -180 || pt.lon > 180) return false;
+    }
     var m = params.get("m");
     if (m === "outback" || m === "loop" || m === "oneway") {
         state.mode = m;
@@ -2286,16 +2295,31 @@ setupInstallPrompt();
 // waypoint's tiles may not have been loaded (addWaypointAt's fast path reuses
 // whatever graph is already present), leaving mid-corridor gaps that make
 // Dijkstra detour. loadTilesForLocation pulls a 5 km radius and merges into the
-// graph, so visiting each waypoint (deduped at ~3 km, since 5 km radii overlap)
-// fills the corridor. Idempotent: already-cached tiles return instantly.
+// graph — but a 5 km disc per waypoint only covers the corridor where waypoints
+// are <10 km apart. For a sparse route (e.g. a shared start+end 42 km apart)
+// that leaves a huge mid-leg hole and the detour bug persists. So we step ALONG
+// each leg (~4 km spacing), not just at the waypoints, deduping at 3 km so dense
+// routes don't re-load overlapping discs. Idempotent: cached tiles return fast.
 async function ensureTilesAlongRoute() {
     var loaded = [];
+    async function loadOnce(lat, lon) {
+        var covered = loaded.some(function (p) { return haversine(p.lat, p.lon, lat, lon) < 3000; });
+        if (covered) return;
+        await loadTilesForLocation(lat, lon);
+        loaded.push({ lat: lat, lon: lon });
+    }
     for (var j = 0; j < state.waypoints.length; j++) {
         var w = state.waypoints[j];
-        var covered = loaded.some(function (p) { return haversine(p.lat, p.lon, w.lat, w.lon) < 3000; });
-        if (covered) continue;
-        await loadTilesForLocation(w.lat, w.lon);
-        loaded.push({ lat: w.lat, lon: w.lon });
+        await loadOnce(w.lat, w.lon);
+        if (j + 1 < state.waypoints.length) {
+            var n = state.waypoints[j + 1];
+            var dist = haversine(w.lat, w.lon, n.lat, n.lon);
+            var steps = Math.ceil(dist / 4000); // one load every ~4 km along the leg
+            for (var s = 1; s < steps; s++) {
+                var t = s / steps;
+                await loadOnce(w.lat + t * (n.lat - w.lat), w.lon + t * (n.lon - w.lon));
+            }
+        }
     }
 }
 
@@ -2358,9 +2382,16 @@ async function maybeResolveShortLink() {
         var resp = await fetch(WORKER_BASE + "/api/links/" + encodeURIComponent(s));
         if (resp.ok) {
             var data = await resp.json();
-            if (data && data.hash) {
+            // Validate the server-returned hash shape before trusting it into the
+            // address bar — defense in depth, so a compromised/buggy resolve can't
+            // forge an arbitrary same-origin path via replaceState. It must be a
+            // bare "#r=<coords>&m=<mode>" route fragment, nothing else.
+            if (data && typeof data.hash === "string" &&
+                /^#r=[-0-9.,;]+&m=(loop|outback|oneway)$/.test(data.hash)) {
                 // Replace ?s=… with the resolved #r=… (clean URL, no extra history entry).
                 window.history.replaceState(null, "", window.location.pathname + data.hash);
+            } else {
+                showBanner("That short link wasn't found");
             }
         } else if (resp.status === 404) {
             showBanner("That short link wasn't found");

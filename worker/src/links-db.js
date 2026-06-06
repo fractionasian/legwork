@@ -36,10 +36,13 @@ export async function createRandomLink(db, { hash, now, genSlug = defaultGenSlug
 }
 
 // Resolve a slug — only 'active' rows resolve, so pending/rejected/purged are 404.
+// Slugs are stored lowercase (random codes already are; vanity is canonicalised
+// in validateVanitySlug), so lowercase the lookup to make resolution
+// case-insensitive regardless of how the user typed the URL.
 export async function getActive(db, slug) {
   return db
     .prepare("SELECT * FROM links WHERE slug = ? AND status = 'active'")
-    .bind(slug)
+    .bind(String(slug).toLowerCase())
     .first();
 }
 
@@ -49,7 +52,7 @@ export async function requestVanity(db, { slug, hash, contact = null, note = nul
   try {
     await db
       .prepare("INSERT INTO links (slug, hash, type, status, created_at, hits, contact, note) VALUES (?, ?, 'vanity', 'pending', ?, 0, ?, ?)")
-      .bind(slug, hash, now, contact, note)
+      .bind(String(slug).toLowerCase(), hash, now, contact, note)
       .run();
   } catch (e) {
     if (isUniqueViolation(e)) throw new TakenError(slug);
@@ -58,7 +61,7 @@ export async function requestVanity(db, { slug, hash, contact = null, note = nul
 }
 
 export async function setStatus(db, slug, status) {
-  await db.prepare("UPDATE links SET status = ? WHERE slug = ?").bind(status, slug).run();
+  await db.prepare("UPDATE links SET status = ? WHERE slug = ?").bind(status, String(slug).toLowerCase()).run();
 }
 
 export async function listPending(db) {
@@ -69,5 +72,5 @@ export async function listPending(db) {
 }
 
 export async function bumpHits(db, slug) {
-  await db.prepare("UPDATE links SET hits = hits + 1 WHERE slug = ?").bind(slug).run();
+  await db.prepare("UPDATE links SET hits = hits + 1 WHERE slug = ?").bind(String(slug).toLowerCase()).run();
 }
