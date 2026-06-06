@@ -114,7 +114,7 @@ test("unknown path returns 404", async () => {
   assert.equal(res.status, 404);
 });
 
-test("CORS header allows the app origin", async () => {
+test("CORS header allows any origin (public API)", async () => {
   const res = await worker.fetch(new Request("https://w.dev/v1/health"), mockEnv(), ctx);
-  assert.equal(res.headers.get("access-control-allow-origin"), "https://fractionasian.github.io");
+  assert.equal(res.headers.get("access-control-allow-origin"), "*");
 });

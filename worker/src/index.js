@@ -2,18 +2,19 @@ import { OVERPASS_URL, buildOverpassQuery, parseGraphParams, cacheKey, snap } fr
 import { validateRouteHash, validateVanitySlug, apiCors, json } from "./links-lib.js";
 import { createRandomLink, getActive, requestVanity, setStatus, listPending, bumpHits, TakenError } from "./links-db.js";
 
-const APP_ORIGIN = "https://fractionasian.github.io";
-const APP_BASE = "https://fractionasian.github.io/legwork";
+// App now lives at legwork.day (github.io/legwork stays as a working alias).
+// APP_BASE builds the short-link URLs returned by POST /api/links.
+const APP_BASE = "https://legwork.day";
 
 // Overpass-api.de returns HTTP 406 to requests with a missing or generic
 // User-Agent (its usage policy requires an identifying UA). A browser sends its
 // own UA so the client path works; a Worker subrequest must set one explicitly.
 // (Workers — unlike browsers — allow setting User-Agent on outbound fetch.)
-const OVERPASS_UA = "Legwork/1.0 (+https://fractionasian.github.io/legwork)";
+const OVERPASS_UA = "Legwork/1.0 (+https://legwork.day)";
 
 function cors(extra = {}) {
   return {
-    "access-control-allow-origin": APP_ORIGIN,
+    "access-control-allow-origin": "*",
     "access-control-allow-methods": "GET, OPTIONS",
     ...extra,
   };

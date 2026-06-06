@@ -71,11 +71,13 @@ export function validateVanitySlug(slug) {
 }
 
 // Response helpers shared by the /api handlers.
-const APP_ORIGIN = "https://fractionasian.github.io";
-
+// ACAO is "*" — the API is public (graph cache + short links), responses carry
+// no secrets and no cookie/credentialed auth (admin is Bearer-gated, which CORS
+// doesn't govern). "*" lets both legwork.day and the github.io alias call it
+// without an origin allowlist.
 export function apiCors(extra = {}) {
   return {
-    "access-control-allow-origin": APP_ORIGIN,
+    "access-control-allow-origin": "*",
     "access-control-allow-methods": "GET, POST, OPTIONS",
     "access-control-allow-headers": "content-type, authorization",
     ...extra,
