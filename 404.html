@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Legwork</title>
+<script>
+// Pretty short-link router. GitHub Pages serves this file (HTTP 404) for any
+// path that isn't a real file — e.g. legwork.day/Melbourne2027 or /a3f9c2.
+// A single clean path segment is treated as a short-link slug and handed to the
+// app's ?s= resolver; anything else (asset-like or nested) goes home.
+(function () {
+  var path = location.pathname.replace(/^\/+|\/+$/g, "");
+  if (path && path.indexOf("/") === -1 && /^[A-Za-z0-9-]{3,40}$/.test(path)) {
+    location.replace("/?s=" + encodeURIComponent(path) + location.search.replace(/^\?/, "&"));
+  } else {
+    location.replace("/");
+  }
+})();
+</script>
+</head>
+<body>
+<noscript>Page not found. <a href="/">Go to Legwork</a></noscript>
+</body>
+</html>

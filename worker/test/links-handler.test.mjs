@@ -30,7 +30,7 @@ test("POST /api/links mints a resolvable short link", async () => {
   const res = await handleApi(req("POST", "/api/links", { body: { hash: GOOD_HASH } }), e, CTX);
   assert.equal(res.status, 200);
   const { slug, url } = await res.json();
-  assert.match(url, new RegExp("\\?s=" + slug + "$"));
+  assert.match(url, new RegExp("/" + slug + "$")); // bare pretty path: legwork.day/<slug>
 
   const got = await handleApi(req("GET", "/api/links/" + slug), e, CTX);
   assert.equal(got.status, 200);
