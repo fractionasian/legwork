@@ -1605,6 +1605,10 @@ document.getElementById("dm-share").addEventListener("click", function (e) {
     }
     clipboardFallback();
 });
+
+document.getElementById("dm-shorten").addEventListener("click", function (e) {
+    e.stopPropagation(); closeDistMenu(); shortenCurrentRoute();
+});
 document.addEventListener("keydown", function (e) {
     if ((e.ctrlKey || e.metaKey) && e.key === "z") {
         e.preventDefault();
@@ -2295,10 +2299,83 @@ async function ensureTilesAlongRoute() {
     }
 }
 
+// ── Share short-links (?s=<slug>) ──────────────────────
+// Copy `text` to the clipboard with a banner confirmation; fall back to a
+// read-only input the user can select if the Clipboard API is unavailable.
+function copyText(text, okMsg) {
+    function fallback() {
+        var banner = document.getElementById("info-banner");
+        banner.textContent = "";
+        var label = document.createElement("span");
+        label.textContent = "Copy: ";
+        var input = document.createElement("input");
+        input.type = "text"; input.readOnly = true; input.value = text; input.className = "share-input";
+        banner.appendChild(label); banner.appendChild(input);
+        banner.dataset.type = "share"; banner.className = "info-banner share"; banner.style.display = "block";
+        input.focus(); input.select();
+        setTimeout(function () { if (banner.dataset.type === "share") showBanner(""); }, 8000);
+    }
+    if (navigator.clipboard) {
+        navigator.clipboard.writeText(text).then(function () {
+            showBanner(okMsg); setTimeout(function () { showBanner(""); }, 2500);
+        }).catch(fallback);
+    } else {
+        fallback();
+    }
+}
+
+// "Shorten link" menu action: POST the current route hash to the Worker and copy
+// the returned short URL. Opt-in (stores the route server-side); if the Worker is
+// unreachable the full #r= link still works, so we copy that instead.
+async function shortenCurrentRoute() {
+    var hash = window.location.hash;
+    if (!hash || hash.indexOf("r=") === -1) {
+        showBanner("Add at least 2 waypoints first");
+        return;
+    }
+    showBanner("Shortening…", "loading");
+    try {
+        var resp = await fetch(WORKER_BASE + "/api/links", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ hash: hash }),
+        });
+        if (!resp.ok) throw new Error("status " + resp.status);
+        var data = await resp.json();
+        copyText(data.url, "Short link copied!");
+    } catch (e) {
+        copyText(window.location.href, "Couldn't shorten — copied the full link");
+    }
+}
+
+// Boot: if the URL is a short link (?s=<slug>), resolve it to the route hash and
+// hand it to the existing #r= restore path. Worker/network failure falls through
+// to a normal boot — short links degrade, the app doesn't.
+async function maybeResolveShortLink() {
+    var s = new URLSearchParams(window.location.search).get("s");
+    if (!s || !/^[A-Za-z0-9-]{3,40}$/.test(s)) return;
+    try {
+        var resp = await fetch(WORKER_BASE + "/api/links/" + encodeURIComponent(s));
+        if (resp.ok) {
+            var data = await resp.json();
+            if (data && data.hash) {
+                // Replace ?s=… with the resolved #r=… (clean URL, no extra history entry).
+                window.history.replaceState(null, "", window.location.pathname + data.hash);
+            }
+        } else if (resp.status === 404) {
+            showBanner("That short link wasn't found");
+        }
+    } catch (e) {
+        /* Worker/network down — fall through to normal boot. */
+    }
+}
+
 // Migrate old localStorage to IndexedDB first so autosaveGet sees migrated data.
 (async function () {
     await migrateLocalStorage();
     renderSavedRoutes();
+
+    await maybeResolveShortLink();
 
     var sharedPoints = loadFromHash();
     var savedRoute = !sharedPoints ? await autosaveGet() : null;
