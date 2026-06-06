@@ -613,6 +613,77 @@ button.menu-item:disabled {
     line-height: 1.5;
 }
 
+/* ── Tip nudge toast (post-export delight moment) ── */
+.tip-toast {
+    position: fixed;
+    left: 50%;
+    bottom: 24px;
+    transform: translateX(-50%) translateY(8px);
+    z-index: 1200;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    max-width: calc(100vw - 32px);
+    padding: 10px 12px 10px 16px;
+    background: #20232e;
+    border: 1px solid #2f3340;
+    border-radius: 10px;
+    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.4);
+    color: #d0d0d0;
+    font-size: 13px;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.25s ease, transform 0.25s ease;
+}
+
+.tip-toast.hidden {
+    display: none;
+}
+
+.tip-toast.show {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+    pointer-events: auto;
+}
+
+.tip-toast-msg {
+    line-height: 1.4;
+}
+
+.tip-toast-link {
+    flex: none;
+    color: #6ee7b7;
+    font-weight: 600;
+    text-decoration: none;
+    white-space: nowrap;
+}
+
+.tip-toast-link:hover {
+    text-decoration: underline;
+}
+
+.tip-toast-close {
+    flex: none;
+    background: none;
+    border: none;
+    color: #6b6e7a;
+    font-size: 18px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0 2px;
+}
+
+.tip-toast-close:hover {
+    color: #d0d0d0;
+}
+
+@media (max-width: 480px) {
+    .tip-toast {
+        flex-wrap: wrap;
+        bottom: 16px;
+    }
+}
+
 /* ── Credits footer ─────────────────────────────── */
 .menu-credits {
     padding: 10px 18px 16px;

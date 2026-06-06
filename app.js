@@ -1319,7 +1319,52 @@ async function exportGPX() {
     var url = URL.createObjectURL(blob);
     var a = document.createElement("a"); a.href = url; a.download = name + ".gpx"; a.click();
     URL.revokeObjectURL(url);
+    maybeShowTipNudge();
 }
+
+// ── Tip nudge (post-export delight moment) ─────────────
+// Surface the Ko-fi link only once the user has gotten real repeat value
+// (their 2nd export), then back off for 90 days. The menu link stays for
+// anyone who wants to tip sooner. Storage-blocked (private mode) → never nag.
+var TIP_NUDGE_AFTER = 2;                                  // exports before first nudge
+var TIP_NUDGE_COOLDOWN_MS = 90 * 24 * 60 * 60 * 1000;    // re-show at most every 90 days
+var tipToast = document.getElementById("tip-toast");
+var tipToastTimer = null;
+
+function hideTipToast() {
+    if (!tipToast) return;
+    clearTimeout(tipToastTimer);
+    tipToast.classList.remove("show");
+    setTimeout(function () { tipToast.classList.add("hidden"); }, 300);
+}
+
+function showTipToast() {
+    if (!tipToast) return;
+    tipToast.classList.remove("hidden");
+    requestAnimationFrame(function () { tipToast.classList.add("show"); });
+    clearTimeout(tipToastTimer);
+    tipToastTimer = setTimeout(hideTipToast, 12000);   // never linger
+}
+
+function maybeShowTipNudge() {
+    var count, seen;
+    try {
+        count = parseInt(localStorage.getItem("lw_export_count") || "0", 10) + 1;
+        localStorage.setItem("lw_export_count", String(count));
+        seen = parseInt(localStorage.getItem("lw_tip_seen") || "0", 10);
+    } catch (e) { return; }
+    if (count < TIP_NUDGE_AFTER) return;
+    if (seen && (Date.now() - seen) < TIP_NUDGE_COOLDOWN_MS) return;
+    try { localStorage.setItem("lw_tip_seen", String(Date.now())); } catch (e) {}
+    showTipToast();
+}
+
+(function wireTipToast() {
+    var closeBtn = document.getElementById("tip-toast-close");
+    if (closeBtn) closeBtn.addEventListener("click", hideTipToast);
+    var link = document.getElementById("tip-toast-link");
+    if (link) link.addEventListener("click", hideTipToast);   // click-through counts as handled
+})();
 
 // ── Utils ──────────────────────────────────────────────
 // Abort any external fetch after ms to prevent stuck-spinner states.

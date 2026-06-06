@@ -11,7 +11,7 @@
         script-src 'self' https://unpkg.com https://cdn.jsdelivr.net https://cloud.umami.is;
         style-src 'self' 'unsafe-inline' https://unpkg.com;
         img-src 'self' data: https://tile.openstreetmap.org https://*.tile.openstreetmap.org https://server.arcgisonline.com https://tile.opentopomap.org https://*.tile.opentopomap.org https://s3.amazonaws.com https://fractionasian.github.io https://unpkg.com;
-        connect-src 'self' https://photon.komoot.io https://api.open-meteo.com https://overpass-api.de https://*.overpass-api.de https://*.workers.dev https://overpass.kumi.systems https://overpass.private.coffee https://s3.amazonaws.com https://fractionasian.github.io https://cloud.umami.is https://*.umami.dev;
+        connect-src 'self' https://photon.komoot.io https://api.open-meteo.com https://overpass-api.de https://*.overpass-api.de https://*.workers.dev https://overpass.kumi.systems https://overpass.private.coffee https://s3.amazonaws.com https://fractionasian.github.io https://cloud.umami.is https://gateway.umami.is https://*.umami.dev;
         font-src 'self';
         manifest-src 'self';
         worker-src 'self';
@@ -117,6 +117,11 @@
         </div>
     </aside>
     <div class="info-banner" id="info-banner" role="alert" aria-live="assertive"></div>
+    <div class="tip-toast hidden" id="tip-toast" role="dialog" aria-live="polite" aria-label="Support Legwork">
+        <span class="tip-toast-msg">Nice route. Legwork is free — no ads, no account.</span>
+        <a class="tip-toast-link" id="tip-toast-link" href="https://ko-fi.com/fractionasian" target="_blank" rel="noopener noreferrer">☕ Buy me a coffee</a>
+        <button class="tip-toast-close" id="tip-toast-close" type="button" aria-label="Dismiss">&times;</button>
+    </div>
     <div class="map-area">
         <div id="map" role="application" aria-label="Route planning map"></div>
         <div class="elevation-panel" id="elevation-panel">
