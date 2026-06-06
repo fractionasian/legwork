@@ -91,5 +91,5 @@ test("rate limiter blocks creates with 429", async () => {
 test("OPTIONS preflight returns CORS 204", async () => {
   const res = await handleApi(req("OPTIONS", "/api/links"), env(), CTX);
   assert.equal(res.status, 204);
-  assert.equal(res.headers.get("access-control-allow-origin"), "https://fractionasian.github.io");
+  assert.equal(res.headers.get("access-control-allow-origin"), "*");
 });
