@@ -110,7 +110,8 @@ export async function handleApi(request, env, ctx) {
     const v = validateRouteHash(body.hash);
     if (!v.ok) return json({ error: "not a valid route: " + v.reason }, 400);
     const slug = await createRandomLink(env.DB, { hash: v.hash, now: Date.now() });
-    return json({ slug, url: APP_BASE + "/?s=" + slug }, 200);
+    // Pretty bare path (legwork.day/<slug>); 404.html routes it to the ?s= resolver.
+    return json({ slug, url: APP_BASE + "/" + slug }, 200);
   }
 
   // GET /api/links/:slug → resolve (active only)
