@@ -62,3 +62,18 @@ Feedback I'd love: drop a pin somewhere you know well and tell me if it picks sa
 - [ ] Tip-jar nudge live on legwork.day (shipped 2026-06-06, commit `897f727`).
 - [ ] Umami recording (CSP fix shipped same commit — verify a test visit shows in the dashboard).
 - [ ] You're free for the 2–3h after posting.
+
+---
+
+## Traffic baseline (pre-launch) — Umami, 2026-06-06 21:25 AWST
+
+The "before" to compare the Show HN lift against. Re-run the same query (NAS: `UMAMI_API_KEY` → `GET /websites/{id}/stats`) after launch.
+
+| Window | Pageviews | Visitors | Sessions | Bounce | Avg session |
+|---|---|---|---|---|---|
+| All-time | 576 | 41 | 55 | 33% | ~5.0 min |
+| Last 30d | 241 | 15 | 20 | 30% | ~7.6 min |
+| Last 7d | 76 | 7 | 10 | 30% | ~10.4 min |
+| Last 24h | 8 | 4 | 4 | 50% | ~0.6 min |
+
+**Read:** ~41 all-time visitors → distribution is the whole game. But ~5–10 min sessions + ~30% bounce = good engagement; the product holds attention, it just needs eyeballs. Treat 41 as a conservative floor (ad-blockers + the just-fixed CSP send-gap undercount); going-forward capture is better, so the post-launch comparison won't be inflated by the fix.
