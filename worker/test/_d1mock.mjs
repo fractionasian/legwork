@@ -35,6 +35,11 @@ export function makeD1Mock() {
           if (rows.has(slug)) rows.get(slug).hits += 1;
           return { success: true, meta: { changes: rows.has(slug) ? 1 : 0 } };
         }
+        if (/^\s*DELETE\s+FROM\s+links/i.test(sql)) {
+          const [slug] = args;
+          const existed = rows.delete(slug);
+          return { success: true, meta: { changes: existed ? 1 : 0 } };
+        }
         throw new Error("d1mock: unhandled run() sql: " + sql);
       },
 

@@ -1,6 +1,6 @@
 import { OVERPASS_URL, buildOverpassQuery, parseGraphParams, cacheKey, snap } from "./lib.js";
 import { validateRouteHash, validateVanitySlug, apiCors, json } from "./links-lib.js";
-import { createRandomLink, getActive, requestVanity, setStatus, listPending, bumpHits, TakenError } from "./links-db.js";
+import { createRandomLink, getActive, requestVanity, setStatus, deleteLink, listPending, bumpHits, TakenError } from "./links-db.js";
 
 // App now lives at legwork.day (github.io/legwork stays as a working alias).
 // APP_BASE builds the short-link URLs returned by POST /api/links.
@@ -165,7 +165,7 @@ export async function handleApi(request, env, ctx) {
       return json({ slug: seg[3], status }, 200);
     }
     if (method === "POST" && seg.length === 4 && seg[2] === "purge") {
-      await setStatus(env.DB, seg[3], "purged");
+      await deleteLink(env.DB, seg[3]);
       return json({ slug: seg[3], status: "purged" }, 200);
     }
     return json({ error: "not found" }, 404);

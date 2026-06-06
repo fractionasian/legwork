@@ -64,6 +64,12 @@ export async function setStatus(db, slug, status) {
   await db.prepare("UPDATE links SET status = ? WHERE slug = ?").bind(status, String(slug).toLowerCase()).run();
 }
 
+// Hard-delete a link. Used by admin purge so the row (and storage) is actually
+// reclaimed — a status flag-flip would leave the row forever and burn the slug.
+export async function deleteLink(db, slug) {
+  await db.prepare("DELETE FROM links WHERE slug = ?").bind(String(slug).toLowerCase()).run();
+}
+
 export async function listPending(db) {
   const { results } = await db
     .prepare("SELECT slug, hash, contact, note, created_at FROM links WHERE status = 'pending' ORDER BY created_at")

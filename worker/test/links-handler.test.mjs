@@ -118,3 +118,14 @@ test("vanity rejects an oversized note", async () => {
   const res = await handleApi(req("POST", "/api/vanity", { body: { slug: "bigrace", hash: GOOD_HASH, note: "x".repeat(1001) } }), env(), CTX);
   assert.equal(res.status, 400);
 });
+
+test("admin purge hard-deletes the row (slug freed, not just flagged)", async () => {
+  const e = env();
+  const mint = await handleApi(req("POST", "/api/links", { body: { hash: GOOD_HASH } }), e, CTX);
+  const { slug } = await mint.json();
+  const purge = await handleApi(req("POST", "/api/admin/purge/" + slug, { body: {}, auth: "s3cret" }), e, CTX);
+  assert.equal(purge.status, 200);
+  assert.equal(e.DB._rows.has(slug), false, "row should be deleted, not retained with a status flag");
+  const resolve = await handleApi(req("GET", "/api/links/" + slug), e, CTX);
+  assert.equal(resolve.status, 404);
+});
