@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildOverpassQuery, parseGraphParams, cacheKey, OVERPASS_URL, snap, GRID_DEG } from "../src/lib.js";
+import { buildOverpassQuery, parseGraphParams, cacheKey, OVERPASS_URL, snap, GRID_DEG, snapRadius, RADIUS_BUCKETS } from "../src/lib.js";
 
 test("buildOverpassQuery includes runner highway types and the around clause", () => {
   const q = buildOverpassQuery(-31.95, 115.86, 2000);
@@ -69,4 +69,23 @@ test("snap output lands on a GRID_DEG multiple", () => {
   const s = snap(174.7632);
   assert.ok(Math.abs(s / GRID_DEG - Math.round(s / GRID_DEG)) < 1e-9);
   assert.equal(GRID_DEG, 0.005);
+});
+
+test("snapRadius is identity for the radii the client sends", () => {
+  // The exact radiusFromZoom set (tiles.js) — these must pass through unchanged
+  // so existing cached R2 objects stay addressable.
+  for (const r of [1000, 1500, 2000, 4000, 5000, 10000, 20000]) {
+    assert.equal(snapRadius(r), r);
+  }
+});
+
+test("snapRadius rounds arbitrary radii UP to the next bucket", () => {
+  assert.equal(snapRadius(1001), 1500);   // never shrink coverage
+  assert.equal(snapRadius(3000), 4000);
+  assert.equal(snapRadius(20001), 30000);
+  assert.equal(snapRadius(30000), 30000);
+  // Cardinality cap: every accepted radius maps into the bucket set.
+  for (let r = 1000; r <= 30000; r += 97) {
+    assert.ok(RADIUS_BUCKETS.includes(snapRadius(r)), "unbucketed: " + r);
+  }
 });

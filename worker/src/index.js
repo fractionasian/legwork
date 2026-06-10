@@ -1,4 +1,4 @@
-import { OVERPASS_URL, buildOverpassQuery, parseGraphParams, cacheKey, snap } from "./lib.js";
+import { OVERPASS_URL, buildOverpassQuery, parseGraphParams, cacheKey, snap, snapRadius } from "./lib.js";
 import { validateRouteHash, validateVanitySlug, apiCors, json } from "./links-lib.js";
 import { createRandomLink, getActive, requestVanity, setStatus, deleteLink, listPending, bumpHits, TakenError } from "./links-db.js";
 
@@ -36,10 +36,12 @@ async function handleGraph(request, url, env, ctx) {
 
   // Snap the pin to the shared grid: nearby pins collapse to one cell so they
   // share a single cached fetch. Both the key and the Overpass centre use the
-  // snapped coords (see snap()/GRID_DEG in lib.js).
+  // snapped coords (see snap()/GRID_DEG in lib.js). The radius is bucketed for
+  // the same reason — see snapRadius()/RADIUS_BUCKETS.
   const slat = snap(p.lat);
   const slon = snap(p.lon);
-  const key = cacheKey(slat, slon, p.radius);
+  const sradius = snapRadius(p.radius);
+  const key = cacheKey(slat, slon, sradius);
 
   const hit = await env.GRAPH.get(key);
   if (hit) {
@@ -49,7 +51,7 @@ async function handleGraph(request, url, env, ctx) {
     });
   }
 
-  const query = buildOverpassQuery(slat, slon, p.radius);
+  const query = buildOverpassQuery(slat, slon, sradius);
   let r;
   try {
     r = await fetch(OVERPASS_URL, {

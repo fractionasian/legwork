@@ -62,3 +62,21 @@ export const GRID_DEG = 0.005;
 export function snap(coord) {
   return Math.round(coord / GRID_DEG) * GRID_DEG;
 }
+
+// Radius buckets. snap() collapses coordinates to ~550 m cells, but the cache
+// key also embeds the radius — and parseGraphParams accepts ANY integer
+// 1000–30000, so one grid cell could mint up to 29,000 distinct R2 objects
+// (each a guaranteed cache miss → an Overpass fetch + an R2 write that never
+// expires). Bucketing the radius server-side caps that at |RADIUS_BUCKETS|
+// per cell. The set is the exact values radiusFromZoom (tiles.js) sends, plus
+// the 30 km ceiling; any other value rounds UP to the next bucket so coverage
+// is never smaller than requested, and a future client tweak can't be broken
+// by a server-side allowlist.
+export const RADIUS_BUCKETS = [1000, 1500, 2000, 4000, 5000, 10000, 20000, 30000];
+
+export function snapRadius(radius) {
+  for (const b of RADIUS_BUCKETS) {
+    if (radius <= b) return b;
+  }
+  return RADIUS_BUCKETS[RADIUS_BUCKETS.length - 1];
+}
