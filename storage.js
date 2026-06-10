@@ -85,6 +85,66 @@ async function cacheSet(key, value) {
     } catch (e) { return false; }
 }
 
+// Batched variants of cacheGet/cacheSet: one transaction per store instead of
+// one per key. A 10 km route samples ~200 elevation points; per-key
+// transactions serialised hundreds of IDB round-trips on the warm-cache path,
+// delaying the gradient repaint for no reason.
+async function cacheGetMany(keys, ttlMs) {
+    var out = new Array(keys.length);
+    for (var z = 0; z < out.length; z++) out[z] = null;
+    try {
+        var db = await openDB();
+        var byStore = {};
+        for (var i = 0; i < keys.length; i++) {
+            var store = cacheStoreFor(keys[i]);
+            (byStore[store] = byStore[store] || []).push(i);
+        }
+        await Promise.all(Object.keys(byStore).map(function (store) {
+            return new Promise(function (resolve) {
+                var tx = db.transaction(store, "readonly");
+                var os = tx.objectStore(store);
+                byStore[store].forEach(function (idx) {
+                    var req = os.get(keys[idx]);
+                    req.onsuccess = function () {
+                        var entry = req.result;
+                        if (entry && (!ttlMs || Date.now() - entry.ts <= ttlMs)) out[idx] = entry.v;
+                    };
+                });
+                tx.oncomplete = resolve;
+                tx.onerror = tx.onabort = function () { resolve(); };
+            });
+        }));
+    } catch (e) { /* all-null result reads as a clean miss */ }
+    return out;
+}
+
+async function cacheSetMany(pairs) { // [{ key, value }]
+    if (!pairs.length) return;
+    try {
+        var db = await openDB();
+        var byStore = {};
+        for (var i = 0; i < pairs.length; i++) {
+            var store = cacheStoreFor(pairs[i].key);
+            (byStore[store] = byStore[store] || []).push(pairs[i]);
+        }
+        await Promise.all(Object.keys(byStore).map(function (store) {
+            return new Promise(function (resolve) {
+                var tx = db.transaction(store, "readwrite");
+                var os = tx.objectStore(store);
+                var ts = Date.now();
+                byStore[store].forEach(function (p) { os.put({ v: p.value, ts: ts }, p.key); });
+                tx.oncomplete = function () { resolve(true); };
+                tx.onerror = tx.onabort = function () {
+                    if (tx.error && tx.error.name === "QuotaExceededError") {
+                        console.warn("IndexedDB quota exceeded — batched cache write dropped.");
+                    }
+                    resolve(false);
+                };
+            });
+        }));
+    } catch (e) { /* ignore */ }
+}
+
 // ── Autosave store ────────────────────────────────────
 async function autosaveGet() {
     try {

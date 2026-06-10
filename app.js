@@ -373,14 +373,15 @@ async function fetchElevation(points) {
     var pendingIdx = []; // indices not yet resolved
     var pendingPts = [];
 
-    // ── Step 1: per-point IndexedDB cache lookup ────
+    // ── Step 1: batched IndexedDB cache lookup (one transaction, not one per point) ──
+    var cacheKeys = points.map(function (p) { return "elev4:" + p.lat.toFixed(5) + ":" + p.lon.toFixed(5); });
+    var cachedVals = await cacheGetMany(cacheKeys);
     for (var i = 0; i < points.length; i++) {
-        var ck = "elev4:" + points[i].lat.toFixed(5) + ":" + points[i].lon.toFixed(5);
-        var cached = await cacheGet(ck);
-        if (cached) { results[i] = cached; }
+        if (cachedVals[i]) { results[i] = cachedVals[i]; }
         else { results[i] = null; pendingIdx.push(i); pendingPts.push(points[i]); }
     }
     if (pendingPts.length === 0) return results;
+    var toCache = []; // accumulated {key, value}; written once at the end
 
     // ── Step 2: group pending points by tile ────────
     var tileGroups = {}; // "xtile/ytile" → [{ origIdx, pt, px, py }]
@@ -448,7 +449,7 @@ async function fetchElevation(points) {
             var elev = bilinearSample(getPixel, p.px, p.py);
             var entry = { lat: p.pt.lat, lon: p.pt.lon, elevation: elev };
             results[p.origIdx] = entry;
-            await cacheSet("elev4:" + p.pt.lat.toFixed(5) + ":" + p.pt.lon.toFixed(5), entry);
+            toCache.push({ key: "elev4:" + p.pt.lat.toFixed(5) + ":" + p.pt.lon.toFixed(5), value: entry });
         }
     }
 
@@ -472,7 +473,7 @@ async function fetchElevation(points) {
                     var entry = { lat: batch[j].lat, lon: batch[j].lon, elevation: elev };
                     results[batchIdx[j]] = entry;
                     if (elevArr[j] != null) {
-                        await cacheSet("elev4:" + entry.lat.toFixed(5) + ":" + entry.lon.toFixed(5), entry);
+                        toCache.push({ key: "elev4:" + entry.lat.toFixed(5) + ":" + entry.lon.toFixed(5), value: entry });
                     }
                 }
             } catch (e) {
@@ -483,6 +484,10 @@ async function fetchElevation(points) {
             }
         }
     }
+
+    // One batched write for everything resolved this call (don't await — the
+    // caller needs the repaint, not the cache commit).
+    cacheSetMany(toCache);
 
     // Defensive: ensure no null in output
     for (var i = 0; i < results.length; i++) {
@@ -1336,14 +1341,26 @@ async function exportGPX() {
 
     var trkType = state.profile === "bike" ? "cycling" : "running";
     var gpx = ['<?xml version="1.0" encoding="UTF-8"?>','<gpx version="1.1" creator="Legwork" xmlns="http://www.topografix.com/GPX/1/1">','  <trk>','    <name>'+name+'</name>','    <type>'+trkType+'</type>','    <trkseg>'];
+    // One batched IDB probe for every coordinate missing from elevLookup — the
+    // old per-point awaited cacheGet serialised 1000+ transactions per export
+    // (and almost all missed: the cache is keyed at sampled points, not raw
+    // route coordinates).
+    var missingIdx = [];
+    for (var m = 0; m < coords.length; m++) {
+        if (elevLookup[coords[m][0].toFixed(5) + "," + coords[m][1].toFixed(5)] === undefined) missingIdx.push(m);
+    }
+    var probed = await cacheGetMany(missingIdx.map(function (mi) {
+        return "elev4:" + coords[mi][0].toFixed(5) + ":" + coords[mi][1].toFixed(5);
+    }));
+    for (var pm = 0; pm < missingIdx.length; pm++) {
+        if (probed[pm]) {
+            var mc = coords[missingIdx[pm]];
+            elevLookup[mc[0].toFixed(5) + "," + mc[1].toFixed(5)] = probed[pm].elevation;
+        }
+    }
     for (var i = 0; i < coords.length; i++) {
         var elevKey = coords[i][0].toFixed(5) + "," + coords[i][1].toFixed(5);
         var elev = elevLookup[elevKey];
-        // Also check IndexedDB elevation cache
-        if (elev === undefined) {
-            var cached = await cacheGet("elev4:" + coords[i][0].toFixed(5) + ":" + coords[i][1].toFixed(5));
-            if (cached) elev = cached.elevation;
-        }
         if (elev !== undefined) {
             gpx.push('      <trkpt lat="'+coords[i][0]+'" lon="'+coords[i][1]+'"><ele>'+elev.toFixed(1)+'</ele></trkpt>');
         } else {

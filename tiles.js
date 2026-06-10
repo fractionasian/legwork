@@ -66,18 +66,33 @@ function tilesInRadius(city, lat, lon, radiusKm) {
     return selected;
 }
 
+// In-memory record of tile payloads already merged into the live graph.
+// loadTilesInViewport refires on every pan (500 ms moveend debounce) with
+// mostly the same tiles; without this memo each pan re-read multi-MB payloads
+// out of IndexedDB on the main thread only for applyPaths to discard every
+// feature as already-seen. Cleared on graph reset (city change).
+var _appliedTiles = {};
+
 // Apply cached tiles immediately, fetch missing ones in parallel, update banner.
 async function loadTilesFromList(cityId, manifestVersion, tiles, opts) {
     var toFetch = [];
     var cachedCount = 0;
+    var lookups = [];
     for (var i = 0; i < tiles.length; i++) {
-        var cacheKey = "tile:" + cityId + ":" + tiles[i].file + ":" + manifestVersion;
-        var cached = await cacheGet(cacheKey);
-        if (cached) {
-            applyPaths(cached, { skipRender: true });
+        var key = "tile:" + cityId + ":" + tiles[i].file + ":" + manifestVersion;
+        if (_appliedTiles[key]) { cachedCount++; continue; } // already in the graph
+        lookups.push({ tile: tiles[i], key: key });
+    }
+    // Parallel IDB reads — the old per-tile await serialised up to 40
+    // transactions per viewport change.
+    var results = await Promise.all(lookups.map(function (l) { return cacheGet(l.key); }));
+    for (var j = 0; j < lookups.length; j++) {
+        if (results[j]) {
+            applyPaths(results[j], { skipRender: true });
+            _appliedTiles[lookups[j].key] = true;
             cachedCount++;
         } else {
-            toFetch.push(tiles[i]);
+            toFetch.push(lookups[j].tile);
         }
     }
 
@@ -107,6 +122,7 @@ async function loadTilesFromList(cityId, manifestVersion, tiles, opts) {
             var geojson = compactToGeoJSON(data);
             applyPaths(geojson, { skipRender: true });
             var cacheKey = "tile:" + cityId + ":" + tile.file + ":" + manifestVersion;
+            _appliedTiles[cacheKey] = true;
             cacheSet(cacheKey, geojson);
             loaded++;
             if (showProgress && loaded < total) {
@@ -210,6 +226,7 @@ async function resetGraphIfCityChanged(lat, lon) {
     state.seenIds = {};
     state.edgeSet = {};
     state.nodeAttrs = {};
+    _appliedTiles = {}; // graph is gone — tiles must re-apply on next load
     resetSpatialGrid(); // single reset path (was a direct spatialGrid = {} reaching across files)
     if (state.pathLayer) {
         state.map.removeLayer(state.pathLayer);
@@ -477,7 +494,6 @@ function applyPaths(geojson, opts) {
     if (!state.edgeSet) state.edgeSet = {};
     var adj = state.graph;
     var profile = routingProfile(state.profile || "run");
-    state.graphProfile = state.profile || "run";
     for (var f = 0; f < newFeatures.length; f++) {
         var props = newFeatures[f].properties;
         var coords = newFeatures[f].geometry.coordinates;
@@ -509,10 +525,7 @@ function applyPaths(geojson, opts) {
 // Re-weight the existing graph against state.profile without re-fetching.
 // Used by the cycling toggle: tile features stay, only edge costs change.
 function rebuildGraphForProfile() {
-    if (!state.pathFeatures) {
-        state.graphProfile = state.profile || "run";
-        return;
-    }
+    if (!state.pathFeatures) return;
     var snapshot = state.pathFeatures;
     state.graph = null;
     state.edgeSet = null;
