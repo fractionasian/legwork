@@ -46,6 +46,16 @@ test("dijkstra — shortest path + edge cases", () => {
   assert.equal(R.dijkstra({ A: [] }, "Z", "A"), null); // unknown start
 });
 
+test("pathGeomLength — sums haversine over consecutive nodes, independent of weights", () => {
+  // Two legs of ~111 km each (1° latitude steps). dijkstra's weighted dist
+  // would differ under road weighting; the geometric length must not.
+  const path = ["-31.000000,115.860000", "-32.000000,115.860000", "-33.000000,115.860000"];
+  const len = R.pathGeomLength(path);
+  assert.ok(len > 220_000 && len < 224_000, `got ${len}`);
+  assert.equal(R.pathGeomLength(["-31.000000,115.860000"]), 0); // single node
+  assert.equal(R.pathGeomLength([]), 0);
+});
+
 test("dijkstra — self-loop edge does not hang reconstruction", () => {
   // visited-guard means a self-edge is skipped; this asserts no infinite loop.
   const graph = { A: [{ key: "A", dist: 0 }, { key: "B", dist: 1 }], B: [] };

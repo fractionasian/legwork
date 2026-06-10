@@ -119,6 +119,23 @@ function pathToCoords(path) {
     return coords;
 }
 
+// Geometric (on-the-ground) length of a node-key path in metres. Distinct from
+// dijkstra's result.dist, which is the WEIGHTED cost (haversine × road weight ×
+// node multipliers) — comparing that against a straight-line distance overstates
+// detours on penalised surfaces (trunk ×2.5, bike-over-steps ×5) and falsely
+// triggers gap-fill refetches.
+function pathGeomLength(path) {
+    var total = 0;
+    var prev = null;
+    for (var i = 0; i < path.length; i++) {
+        var parts = path[i].split(",");
+        var lat = parseFloat(parts[0]), lon = parseFloat(parts[1]);
+        if (prev) total += haversine(prev[0], prev[1], lat, lon);
+        prev = [lat, lon];
+    }
+    return total;
+}
+
 // ── Binary min-heap for Dijkstra ──────────────────────
 function MinHeap() {
     this.data = [];
@@ -179,7 +196,10 @@ function dijkstra(graph, startKey, endKey) {
     if (dist[endKey] === undefined) return null;
     var path = [];
     var cur = endKey;
-    while (cur) { path.unshift(cur); cur = prev[cur]; }
+    // push+reverse, not unshift: unshift is O(n) per call → O(n²) reconstruction
+    // on long paths (thousands of nodes on a 20 km leg).
+    while (cur) { path.push(cur); cur = prev[cur]; }
+    path.reverse();
     return { dist: dist[endKey], path: path };
 }
 
@@ -436,6 +456,7 @@ if (typeof module !== "undefined" && module.exports) {
         // Routing/graph helpers — exported for the headless test suite and for
         // asserting parity with the duplicated pure functions in build-tiles.js.
         nodeKey: nodeKey,
+        pathGeomLength: pathGeomLength,
         dijkstra: dijkstra,
         MinHeap: MinHeap,
         closestNode: closestNode,

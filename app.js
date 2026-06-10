@@ -723,8 +723,12 @@ var MIN_DETOUR_DIST = 200;
 async function resolveSegment(fromWp, toWp, gen) {
     var result = dijkstra(state.graph, fromWp.nodeKey, toWp.nodeKey);
     var straight = haversine(fromWp.lat, fromWp.lon, toWp.lat, toWp.lon);
+    // Compare GEOMETRIC path length against the straight line — result.dist is
+    // the weighted cost (road weights × node multipliers), which overstates
+    // "detour" on penalised surfaces (trunk ×2.5, bike-over-steps ×5) and made
+    // perfectly valid legs re-trigger the multi-fetch gap-fill on every recompute.
     var needsGapFill = !result || result.path.length < 2 ||
-        (result.dist > straight * MAX_DETOUR_RATIO && straight > MIN_DETOUR_DIST);
+        (pathGeomLength(result.path) > straight * MAX_DETOUR_RATIO && straight > MIN_DETOUR_DIST);
     if (needsGapFill) {
         result = await fillGapAndRetry(fromWp, toWp);
         if (gen !== _routeGen) return { superseded: true };
