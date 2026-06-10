@@ -1,6 +1,6 @@
 // CACHE_NAME is auto-bumped by .github/workflows/bump-sw.yml on push to main.
 // It versions the APP SHELL cache only — bumping it evicts stale HTML/JS/CSS.
-var CACHE_NAME = "legwork-9b180a5e";
+var CACHE_NAME = "legwork-2d425a68";
 
 // Map/path tiles live in a SEPARATE, stable cache that survives shell bumps, so a
 // code push doesn't throw away the user's accumulated offline map data. Capped so
