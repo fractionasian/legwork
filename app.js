@@ -1116,7 +1116,7 @@ function updateDistanceMarkers() {
             var lon = coords[i-1][1] + ratio * (coords[i][1] - coords[i-1][1]);
             var mkr = L.marker([lat, lon], {
                 icon: L.divIcon({
-                    html: '<div class="distance-pill">' + (markNum + suffix) + '</div>',
+                    html: '<div class="km-pill">' + (markNum + suffix) + '</div>',
                     className: "",
                     iconSize: [30, 16],
                     iconAnchor: [15, 8],
@@ -1139,7 +1139,7 @@ function updateDistanceMarkers() {
         var endLabel = totalUnitsOneDp.toFixed(1) + suffix;
         var endMkr = L.marker([endCoord[0], endCoord[1]], {
             icon: L.divIcon({
-                html: '<div class="distance-pill">' + endLabel + '</div>',
+                html: '<div class="km-pill">' + endLabel + '</div>',
                 className: "",
                 iconSize: [40, 16],
                 iconAnchor: [20, 8],

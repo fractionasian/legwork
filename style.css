@@ -69,6 +69,20 @@ body {
     cursor: default;
 }
 
+/* Shared keyboard-focus ring. Only .distance-pill and .menu-install had one;
+   tabbing through everything else gave no visible position. */
+.controls button:focus-visible,
+.menu-item:focus-visible,
+.distance-menu button:focus-visible,
+.menu-close:focus-visible,
+.address-clear:focus-visible,
+.save-confirm:focus-visible,
+.saved-item-delete:focus-visible,
+.welcome-card button:focus-visible {
+    outline: 2px solid #6ee7b7;
+    outline-offset: 1px;
+}
+
 .distance-wrapper {
     margin-left: auto;
     position: relative;
@@ -554,7 +568,9 @@ button.menu-item:disabled {
 /* ── Saved route detail ──────────────────────────── */
 .saved-item-detail {
     font-size: 11px;
-    color: #6b6e7a;
+    /* #6b6e7a on #1a1d28 was ~3.3:1 — fails the sunlight test for a line
+       runners actually read (distance, ascent, date). #9aa0b0 clears 4.5:1. */
+    color: #9aa0b0;
     margin-top: 1px;
 }
 
@@ -1069,6 +1085,7 @@ kbd {
 .wp-marker {
     position: relative;
     background: #2e86de;
+    /* visual stays 28px; ::before below extends the touch target to ~44px */
     color: #fff;
     border: 2px solid #fff;
     border-radius: 50%;
@@ -1080,6 +1097,14 @@ kbd {
     font-size: 13px;
     font-weight: bold;
     box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+}
+
+/* Invisible hit-extender (same idiom as .menu-close::before): tap-to-delete
+   and drag both land on these markers — 28px visual is too small a target. */
+.wp-marker::before {
+    content: "";
+    position: absolute;
+    inset: -8px;
 }
 
 /* Pending state — pin is rendered but path data is still loading */
@@ -1120,6 +1145,7 @@ kbd {
 }
 
 .wp-midpoint {
+    position: relative;
     background: rgba(110,231,183,0.4);
     border: 2px dashed #6ee7b7;
     border-radius: 50%;
@@ -1128,7 +1154,18 @@ kbd {
     cursor: grab;
 }
 
-.distance-pill {
+/* Drag-to-insert on an 18px dashed circle is a precision task on a phone —
+   extend the grab target to ~44px without growing the visual. Waypoint
+   markers stack above midpoints, so overlap resolves in their favour. */
+.wp-midpoint::before {
+    content: "";
+    position: absolute;
+    inset: -13px;
+}
+
+/* On-map km markers. Was named .distance-pill, colliding with the toolbar
+   button of the same name — box-shadow and font-weight leaked through. */
+.km-pill {
     background: #fff;
     color: #1a1d28;
     border-radius: 8px;
