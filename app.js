@@ -756,6 +756,13 @@ async function updateRoute() {
     if (state.waypoints.length < 2) {
         updateDistance();
         updateElevation([]);
+        // Keep the share hash and autosave in sync even below 2 waypoints —
+        // otherwise Clear (or deleting down to 1) leaves the old route in the
+        // URL and in autosave, and it resurrects on the next reload. Safe at
+        // boot: loadFromHash() has already read the incoming hash before any
+        // updateRoute() can run.
+        updateShareHash();
+        saveRoute();
         // First-run nudge: one marker on the map, no route yet. Only show if no
         // louder banner is up (loading / error), and clear when we dismiss later.
         var bannerEl = document.getElementById("info-banner");
