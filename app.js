@@ -1590,7 +1590,10 @@ document.addEventListener("click", function (e) {
 });
 
 document.getElementById("dm-save").addEventListener("click", function (e) {
-    e.stopPropagation(); closeDistMenu(); saveNamedRoute();
+    // saveNamedRoute reveals the name input INSIDE the side menu — open it
+    // first, or the tap is an invisible no-op (keyboard pops for a field the
+    // user can't see) and the saved route lands in a list they aren't shown.
+    e.stopPropagation(); closeDistMenu(); openMenu(); saveNamedRoute();
 });
 
 document.getElementById("dm-export").addEventListener("click", function (e) {
