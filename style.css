@@ -905,6 +905,15 @@ button.menu-item:disabled {
     border-bottom-color: #2a3a34;
 }
 
+/* Success confirmations ("Route saved", "Link copied!"). Same green family as
+   .hint — kept as a distinct type because updateRoute() clears/replaces hint
+   banners as part of the first-run nudge logic. */
+.info-banner.success {
+    background: #1a2a24;
+    color: #a8e0c4;
+    border-bottom-color: #2a3a34;
+}
+
 .banner-retry {
     display: inline-block;
     margin-left: 6px;

@@ -1638,7 +1638,7 @@ document.getElementById("dm-share").addEventListener("click", function (e) {
     function clipboardFallback() {
         if (navigator.clipboard) {
             navigator.clipboard.writeText(url).then(function () {
-                showBanner("Link copied!");
+                showBanner("Link copied!", "success");
                 setTimeout(function () { showBanner(""); }, 2000);
             }).catch(inlineInputFallback);
         } else {
@@ -1983,7 +1983,11 @@ async function confirmSaveRoute() {
             tx.oncomplete = resolve;
             tx.onerror = function () { reject(tx.error); };
         });
-        showBanner("Route saved: " + name);
+        showBanner("Route saved: " + name, "success");
+        setTimeout(function () {
+            var el = document.getElementById("info-banner");
+            if (el.dataset.type === "success") showBanner("");
+        }, 2500);
         renderSavedRoutes();
     } catch (e) {
         console.error("save route:", e);
@@ -2032,7 +2036,7 @@ async function autoSaveSharedRoute() {
         return; // storage failure — don't toast, don't crash
     }
 
-    showBanner("Saved to your routes");
+    showBanner("Saved to your routes", "success");
     setTimeout(function () { showBanner(""); }, 3000);
     renderSavedRoutes();
 
@@ -2126,7 +2130,11 @@ async function restoreSavedRoute(id) {
         // Rebuild route fully (includes closing segment, elevation, gradient colours)
         await updateRoute();
         closeMenu();
-        showBanner("Loaded: " + route.name);
+        showBanner("Loaded: " + route.name, "success");
+        setTimeout(function () {
+            var el = document.getElementById("info-banner");
+            if (el.dataset.type === "success") showBanner("");
+        }, 2500);
     } catch (e) {
         console.error("load route:", e);
         showBanner("Couldn't open that route — try again");
@@ -2396,7 +2404,7 @@ function copyText(text, okMsg) {
     }
     if (navigator.clipboard) {
         navigator.clipboard.writeText(text).then(function () {
-            showBanner(okMsg); setTimeout(function () { showBanner(""); }, 2500);
+            showBanner(okMsg, "success"); setTimeout(function () { showBanner(""); }, 2500);
         }).catch(fallback);
     } else {
         fallback();
