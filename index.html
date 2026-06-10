@@ -29,6 +29,9 @@
          engines at legwork.day to avoid a duplicate-content split. -->
     <link rel="canonical" href="https://legwork.day/" />
     <link rel="icon" href="data:image/svg+xml,&lt;svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'&gt;&lt;text y='.9em' font-size='90'&gt;&#129461;&lt;/text&gt;&lt;/svg&gt;" />
+    <!-- iOS ignores manifest icons for Add to Home Screen; without this the
+         installed icon is a screenshot of the page. -->
+    <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
     <link rel="manifest" href="manifest.json" />
     <meta name="theme-color" content="#1a1d28" />
     <meta name="mobile-web-app-capable" content="yes" />
