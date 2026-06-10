@@ -27,8 +27,13 @@ export function makeD1Mock() {
         }
         if (/^\s*UPDATE\s+links\s+SET\s+status/i.test(sql)) {
           const [status, slug] = args;
-          if (rows.has(slug)) rows.get(slug).status = status;
-          return { success: true, meta: { changes: rows.has(slug) ? 1 : 0 } };
+          const r = rows.get(slug);
+          // setStatus constrains to pending vanity rows; purge's tombstone
+          // update is unconstrained. Honour whichever WHERE the SQL carries.
+          const constrained = /type\s*=\s*'vanity'/i.test(sql) && /status\s*=\s*'pending'/i.test(sql);
+          const matched = !!r && (!constrained || (r.type === "vanity" && r.status === "pending"));
+          if (matched) r.status = status;
+          return { success: true, meta: { changes: matched ? 1 : 0 } };
         }
         if (/^\s*UPDATE\s+links\s+SET\s+hits/i.test(sql)) {
           const [slug] = args;
@@ -44,6 +49,15 @@ export function makeD1Mock() {
       },
 
       async first() {
+        // Dedup lookup (createRandomLink): WHERE hash = ?. Must be checked
+        // BEFORE the slug+active branch — this SQL also says status='active'.
+        if (/WHERE\s+hash\s*=\s*\?/i.test(sql)) {
+          const hash = args[0];
+          const r = [...rows.values()].find(
+            (x) => x.hash === hash && x.type === "random" && x.status === "active",
+          );
+          return r ? { ...r } : null;
+        }
         if (/status\s*=\s*'active'/i.test(sql)) {
           const slug = args[0];
           const r = rows.get(slug);

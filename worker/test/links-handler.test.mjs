@@ -119,13 +119,92 @@ test("vanity rejects an oversized note", async () => {
   assert.equal(res.status, 400);
 });
 
-test("admin purge hard-deletes the row (slug freed, not just flagged)", async () => {
+test("admin purge hard-deletes a RANDOM row (storage reclaimed, not just flagged)", async () => {
   const e = env();
   const mint = await handleApi(req("POST", "/api/links", { body: { hash: GOOD_HASH } }), e, CTX);
   const { slug } = await mint.json();
   const purge = await handleApi(req("POST", "/api/admin/purge/" + slug, { body: {}, auth: "s3cret" }), e, CTX);
   assert.equal(purge.status, 200);
+  assert.equal((await purge.json()).op, "deleted");
   assert.equal(e.DB._rows.has(slug), false, "row should be deleted, not retained with a status flag");
   const resolve = await handleApi(req("GET", "/api/links/" + slug), e, CTX);
   assert.equal(resolve.status, 404);
+});
+
+test("admin purge tombstones a VANITY row (slug stays reserved, never re-resolvable)", async () => {
+  const e = env();
+  await handleApi(req("POST", "/api/vanity", { body: { slug: "Melbourne2027", hash: GOOD_HASH } }), e, CTX);
+  await handleApi(req("POST", "/api/admin/vanity/Melbourne2027", { body: { action: "approve" }, auth: "s3cret" }), e, CTX);
+  const purge = await handleApi(req("POST", "/api/admin/purge/Melbourne2027", { body: {}, auth: "s3cret" }), e, CTX);
+  assert.equal(purge.status, 200);
+  assert.equal((await purge.json()).op, "tombstoned");
+  assert.equal(e.DB._rows.get("melbourne2027").status, "purged", "row retained as a tombstone");
+  // The circulated URL must never resolve to different content later:
+  const resolve = await handleApi(req("GET", "/api/links/Melbourne2027"), e, CTX);
+  assert.equal(resolve.status, 404);
+  const reReq = await handleApi(req("POST", "/api/vanity", { body: { slug: "Melbourne2027", hash: GOOD_HASH } }), e, CTX);
+  assert.equal(reReq.status, 409, "tombstoned slug stays taken");
+});
+
+test("admin purge 404s an unknown slug", async () => {
+  const res = await handleApi(req("POST", "/api/admin/purge/nosuch", { body: {}, auth: "s3cret" }), env(), CTX);
+  assert.equal(res.status, 404);
+});
+
+test("admin vanity rejects a typo'd action with 400 naming the valid actions", async () => {
+  const e = env();
+  await handleApi(req("POST", "/api/vanity", { body: { slug: "Boston", hash: GOOD_HASH } }), e, CTX);
+  // "aprove" must NOT silently map to rejected — that's the bug this guards.
+  const res = await handleApi(req("POST", "/api/admin/vanity/Boston", { body: { action: "aprove" }, auth: "s3cret" }), e, CTX);
+  assert.equal(res.status, 400);
+  const { error } = await res.json();
+  assert.match(error, /approve/);
+  assert.match(error, /reject/);
+  assert.equal(e.DB._rows.get("boston").status, "pending", "request must be left undecided");
+});
+
+test("admin vanity 404s when no pending vanity row matches", async () => {
+  const e = env();
+  // Unknown slug:
+  const unknown = await handleApi(req("POST", "/api/admin/vanity/nosuch", { body: { action: "approve" }, auth: "s3cret" }), e, CTX);
+  assert.equal(unknown.status, 404);
+  // Active random link: must not be flippable via the vanity route.
+  const mint = await handleApi(req("POST", "/api/links", { body: { hash: GOOD_HASH } }), e, CTX);
+  const { slug } = await mint.json();
+  const flip = await handleApi(req("POST", "/api/admin/vanity/" + slug, { body: { action: "reject" }, auth: "s3cret" }), e, CTX);
+  assert.equal(flip.status, 404);
+  assert.equal(e.DB._rows.get(slug).status, "active", "random link must be untouched");
+});
+
+test("rate limiter blocks resolves with 429 (quota-burn guard on the GET)", async () => {
+  const e = env({ LINKS_RL: { limit: async () => ({ success: false }) } });
+  const res = await handleApi(req("GET", "/api/links/abcdef"), e, CTX);
+  assert.equal(res.status, 429);
+});
+
+test("POST /api/links re-share of the same route returns the same slug", async () => {
+  const e = env();
+  const a = await (await handleApi(req("POST", "/api/links", { body: { hash: GOOD_HASH } }), e, CTX)).json();
+  const b = await (await handleApi(req("POST", "/api/links", { body: { hash: GOOD_HASH } }), e, CTX)).json();
+  assert.equal(b.slug, a.slug);
+});
+
+test("an uncaught DB error returns a JSON 500 with CORS headers (not an opaque 1101)", async () => {
+  const e = env({ DB: { prepare() { throw new Error("D1_ERROR: storage caught fire"); } } });
+  // Silence the intentional console.error so test output stays readable.
+  const realErr = console.error;
+  console.error = () => {};
+  try {
+    const res = await handleApi(req("POST", "/api/links", { body: { hash: GOOD_HASH } }), e, CTX);
+    assert.equal(res.status, 500);
+    assert.equal(res.headers.get("access-control-allow-origin"), "*", "browser must be able to read the failure");
+    assert.deepEqual(await res.json(), { error: "server error" });
+  } finally {
+    console.error = realErr;
+  }
+});
+
+test("API responses carry x-content-type-options: nosniff", async () => {
+  const res = await handleApi(req("GET", "/api/links/nosuch"), env(), CTX);
+  assert.equal(res.headers.get("x-content-type-options"), "nosniff");
 });

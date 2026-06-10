@@ -105,6 +105,8 @@ export function apiCors(extra = {}) {
     "access-control-allow-origin": "*",
     "access-control-allow-methods": "GET, POST, OPTIONS",
     "access-control-allow-headers": "content-type, authorization",
+    // Stops browsers MIME-sniffing a JSON body into something executable.
+    "x-content-type-options": "nosniff",
     ...extra,
   };
 }

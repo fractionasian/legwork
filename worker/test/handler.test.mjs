@@ -118,3 +118,9 @@ test("CORS header allows any origin (public API)", async () => {
   const res = await worker.fetch(new Request("https://w.dev/v1/health"), mockEnv(), ctx);
   assert.equal(res.headers.get("access-control-allow-origin"), "*");
 });
+
+test("graph responses carry x-content-type-options: nosniff", async () => {
+  const env = mockEnv({ "g:-31.950:115.860:2000": '{"elements":[1]}' });
+  const res = await worker.fetch(new Request("https://w.dev/v1/graph?lat=-31.95&lon=115.861&radius=2000"), env, ctx);
+  assert.equal(res.headers.get("x-content-type-options"), "nosniff");
+});

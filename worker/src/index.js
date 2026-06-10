@@ -1,6 +1,6 @@
 import { OVERPASS_URL, buildOverpassQuery, parseGraphParams, cacheKey, snap, snapRadius } from "./lib.js";
 import { validateRouteHash, validateVanitySlug, apiCors, json } from "./links-lib.js";
-import { createRandomLink, getActive, requestVanity, setStatus, deleteLink, listPending, bumpHits, TakenError } from "./links-db.js";
+import { createRandomLink, getActive, requestVanity, setStatus, purgeLink, listPending, bumpHits, TakenError } from "./links-db.js";
 
 // App now lives at legwork.day (github.io/legwork stays as a working alias).
 // APP_BASE builds the short-link URLs returned by POST /api/links.
@@ -16,6 +16,8 @@ function cors(extra = {}) {
   return {
     "access-control-allow-origin": "*",
     "access-control-allow-methods": "GET, OPTIONS",
+    // Stops browsers MIME-sniffing the graph JSON into something executable.
+    "x-content-type-options": "nosniff",
     ...extra,
   };
 }
@@ -97,7 +99,21 @@ async function rateLimited(request, env) {
 }
 
 // Exported for unit tests. Handles every /api/* route; leaves /v1/* to handleGraph.
+// Wraps the real handler so an uncaught error (D1 outage, bug) returns a JSON
+// 500 WITH CORS headers — without this it surfaces as a Workers 1101, which has
+// no CORS headers, so the browser reports an opaque network failure instead of
+// a server error the client can show. console.error keeps the underlying cause
+// visible in `wrangler tail`.
 export async function handleApi(request, env, ctx) {
+  try {
+    return await handleApiInner(request, env, ctx);
+  } catch (e) {
+    console.error("handleApi:", e);
+    return json({ error: "server error" }, 500);
+  }
+}
+
+async function handleApiInner(request, env, ctx) {
   const url = new URL(request.url);
   const method = request.method;
   if (method === "OPTIONS") return new Response(null, { status: 204, headers: apiCors() });
@@ -118,6 +134,10 @@ export async function handleApi(request, env, ctx) {
 
   // GET /api/links/:slug → resolve (active only)
   if (method === "GET" && seg.length === 3 && seg[1] === "links") {
+    // Same per-IP limit as the creates: an unthrottled resolve loop would burn
+    // D1 read quota. 20/60s is generous for the legitimate hot path — a human
+    // opening shared links uses far fewer than 20/min.
+    if (await rateLimited(request, env)) return json({ error: "rate limited" }, 429);
     const row = await getActive(env.DB, seg[2]);
     if (!row) return json({ error: "not found" }, 404);
     // Sample hit-counting: a write on EVERY resolve would let an unauthenticated
@@ -162,13 +182,22 @@ export async function handleApi(request, env, ctx) {
     }
     if (method === "POST" && seg.length === 4 && seg[2] === "vanity") {
       const body = (await readJson(request)) || {};
+      // Explicit allowlist: a typo'd action ("aprove") must not silently
+      // reject someone's request.
+      if (body.action !== "approve" && body.action !== "reject") {
+        return json({ error: "action must be 'approve' or 'reject'" }, 400);
+      }
       const status = body.action === "approve" ? "active" : "rejected";
-      await setStatus(env.DB, seg[3], status);
+      // 0 changes ⇒ no pending vanity row by that slug (unknown, already
+      // decided, or a random link) — tell the admin instead of a phantom 200.
+      const changes = await setStatus(env.DB, seg[3], status);
+      if (changes === 0) return json({ error: "not found" }, 404);
       return json({ slug: seg[3], status }, 200);
     }
     if (method === "POST" && seg.length === 4 && seg[2] === "purge") {
-      await deleteLink(env.DB, seg[3]);
-      return json({ slug: seg[3], status: "purged" }, 200);
+      const op = await purgeLink(env.DB, seg[3]);
+      if (!op) return json({ error: "not found" }, 404);
+      return json({ slug: seg[3], status: "purged", op }, 200);
     }
     return json({ error: "not found" }, 404);
   }
