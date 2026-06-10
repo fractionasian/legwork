@@ -61,7 +61,9 @@
                 <button id="dm-save" role="menuitem">Save route</button>
                 <button id="dm-export" role="menuitem">Export GPX</button>
                 <button id="dm-share" role="menuitem">Copy share link</button>
-                <button id="dm-shorten" role="menuitem" title="Stores this route on the server so the link can be short">Shorten link</button>
+                <!-- The server-storage caveat lives in the label, not only the
+                     title tooltip — tooltips are invisible on touch. -->
+                <button id="dm-shorten" role="menuitem" title="Stores this route on the server so the link can be short">Short link (saves to server)</button>
             </div>
         </div>
     </nav>
@@ -120,7 +122,9 @@
         </div>
     </aside>
     <div class="info-banner" id="info-banner" role="alert" aria-live="assertive"></div>
-    <div class="tip-toast hidden" id="tip-toast" role="dialog" aria-live="polite" aria-label="Support Legwork">
+    <!-- role=status, not dialog: screen readers announce a passive nudge
+         instead of treating it as a modal that traps focus expectations. -->
+    <div class="tip-toast hidden" id="tip-toast" role="status" aria-label="Support Legwork">
         <span class="tip-toast-msg">Nice route. Legwork is free — no ads, no account.</span>
         <a class="tip-toast-link" id="tip-toast-link" href="https://ko-fi.com/fractionasian" target="_blank" rel="noopener noreferrer">☕ Buy me a coffee</a>
         <button class="tip-toast-close" id="tip-toast-close" type="button" aria-label="Dismiss">&times;</button>

@@ -528,17 +528,33 @@ function wireMarkerEvents(marker) {
             await loadTilesOrPaths(pos.lat, pos.lng);
             newKey = closestNode(state.graph, pos.lat, pos.lng);
         }
+        // Enforce the 200 m snap rule on whatever we ended with — the post-load
+        // closestNode used to be accepted unconditionally, so a drag into a
+        // lake could bind the waypoint to a node far from the pin.
+        if (newKey) {
+            var _nkCheck = parseNodeKey(newKey);
+            if (haversine(pos.lat, pos.lng, _nkCheck.lat, _nkCheck.lon) > 200) newKey = null;
+        }
+        var wp = null;
+        for (var w = 0; w < state.waypoints.length; w++) {
+            if (state.waypoints[w].marker === marker) { wp = state.waypoints[w]; break; }
+        }
+        if (!wp) return;
         if (newKey) {
             var _nk = parseNodeKey(newKey);
             marker.setLatLng([_nk.lat, _nk.lon]);
-            for (var w = 0; w < state.waypoints.length; w++) {
-                if (state.waypoints[w].marker === marker) {
-                    state.waypoints[w].lat = _nk.lat;
-                    state.waypoints[w].lon = _nk.lon;
-                    state.waypoints[w].nodeKey = newKey;
-                    break;
-                }
-            }
+            wp.lat = _nk.lat;
+            wp.lon = _nk.lon;
+            wp.nodeKey = newKey;
+        } else {
+            // Nothing routable at the drop point — snap the pin back so marker
+            // and drawn route can't silently disagree, and say why.
+            marker.setLatLng([wp.lat, wp.lon]);
+            showBanner("No path near there — drop the pin on a road or footpath", "hint");
+            setTimeout(function () {
+                var el = document.getElementById("info-banner");
+                if (el.dataset.type === "hint" && el.textContent.indexOf("No path near there") === 0) showBanner("");
+            }, 2500);
         }
         updateRoute();
     });
@@ -700,6 +716,16 @@ function removeWaypoint(idx) {
     state.waypoints.splice(idx, 1);
     for (var i = 0; i < state.waypoints.length; i++) updateMarkerNumber(state.waypoints[i], i + 1);
     updateRoute();
+    // Awareness for accidental taps mid-pan (tap-to-delete is deliberate — no
+    // undo — but the deletion shouldn't be silent). Below 2 waypoints the
+    // emptied map + the updateRoute nudge already make it obvious.
+    if (state.waypoints.length >= 2) {
+        showBanner("Waypoint " + (idx + 1) + " removed", "hint");
+        setTimeout(function () {
+            var el = document.getElementById("info-banner");
+            if (el.dataset.type === "hint" && el.textContent.indexOf("removed") !== -1) showBanner("");
+        }, 1500);
+    }
 }
 
 // ── Route drawing ──────────────────────────────────────
@@ -1316,7 +1342,12 @@ function updateElevation(elevData) {
 
 // ── GPX export ─────────────────────────────────────────
 async function exportGPX() {
-    if (state.routeSegments.length === 0) return;
+    // Say why nothing happened — the side-menu Export closes the menu first,
+    // so a silent early-return read as a broken button.
+    if (state.routeSegments.length === 0) {
+        showBanner("Add at least 2 waypoints first");
+        return;
+    }
     var coords = [];
     for (var s = 0; s < state.routeSegments.length; s++) {
         var seg = state.routeSegments[s];
@@ -1724,6 +1755,13 @@ document.addEventListener("keydown", function (e) {
         e.preventDefault();
         if (state.waypoints.length > 1) removeWaypoint(state.waypoints.length - 1);
     }
+    // Esc closes the distance dropdown, then the side menu — previously it
+    // only dismissed the welcome modal and autocomplete, which read as
+    // inconsistent. Inputs keep their own Esc semantics (clear/hide).
+    if (e.key === "Escape" && !(e.target && e.target.tagName === "INPUT")) {
+        if (!distMenu.classList.contains("hidden")) { closeDistMenu(); return; }
+        if (document.getElementById("side-menu").classList.contains("open")) closeMenu();
+    }
 });
 
 // ── Hamburger menu ────────────────────────────────────
@@ -1772,8 +1810,16 @@ if (elevToggle) elevToggle.addEventListener("click", function () {
 applyElevationCollapsed();
 
 // ── Unit toggle (in menu) ─────────────────────────────
+// A manual choice persists; autoDetectUnits only runs while lw:useMiles is unset.
+try {
+    if (localStorage.getItem("lw:useMiles") === "1") {
+        state.useMiles = true;
+        document.getElementById("unit-label").textContent = "mi";
+    }
+} catch (e) { /* blocked storage */ }
 document.getElementById("unit-toggle").addEventListener("click", function () {
     state.useMiles = !state.useMiles;
+    try { localStorage.setItem("lw:useMiles", state.useMiles ? "1" : "0"); } catch (e) {}
     document.getElementById("unit-label").textContent = state.useMiles ? "mi" : "km";
     updateDistance();
 });
@@ -1818,6 +1864,9 @@ if (anyPoisVisible()) setTimeout(refreshPois, 1200);
 // ── Auto-detect miles for US/UK/MM/LR ─────────────────
 var MILES_COUNTRIES = ["US", "GB", "MM", "LR"];
 function autoDetectUnits(lat, lon) {
+    // The user's explicit toggle beats geo-detection — without this, a manual
+    // override reset on every boot.
+    try { if (localStorage.getItem("lw:useMiles") !== null) return; } catch (e) {}
     fetchWithTimeout("https://photon.komoot.io/reverse?lat=" + lat + "&lon=" + lon + "&limit=1", null, 10000)
         .then(function (r) { return r.json(); })
         .then(function (data) {
@@ -1939,6 +1988,13 @@ function loadFromHash() {
 // ── Welcome modal ──────────────────────────────────────
 // Wired once at boot; openWelcomeModal() can be re-invoked from the Tips
 // menu item and the dismiss listeners are already in place.
+
+// Resolves when the welcome modal is dismissed. The boot geolocate awaits this
+// on first run so the OS location prompt doesn't stack on top of the welcome
+// modal — permission asked after "Start planning" has given it context.
+var _welcomeDismissResolve = null;
+var _welcomeDismissed = new Promise(function (res) { _welcomeDismissResolve = res; });
+
 function wireWelcomeModal() {
     var modal = document.getElementById("welcome-modal");
     var isMacDesktop = /Mac/.test(navigator.platform) && navigator.maxTouchPoints < 2;
@@ -1947,6 +2003,7 @@ function wireWelcomeModal() {
 
     function dismiss() {
         modal.classList.add("hidden");
+        if (_welcomeDismissResolve) _welcomeDismissResolve();
         try { localStorage.setItem("lw:welcomed", "1"); } catch (e) { /* blocked storage */ }
     }
     document.getElementById("welcome-dismiss").addEventListener("click", dismiss);
@@ -1967,6 +2024,7 @@ function showWelcome() {
     try {
         if (localStorage.getItem("lw:welcomed")) {
             document.getElementById("welcome-modal").classList.add("hidden");
+            if (_welcomeDismissResolve) _welcomeDismissResolve(); // never shown → nothing to wait for
             return;
         }
     } catch (e) { /* blocked storage — show modal every time */ }
@@ -2579,7 +2637,13 @@ async function maybeResolveShortLink() {
     }
 
     if (navigator.geolocation) {
-        // Fresh start — geolocate
+        // Fresh start — geolocate. On first run the welcome modal is still up;
+        // wait for "Start planning" so the OS permission prompt arrives with
+        // context instead of stacked on top of the modal (the classic cause of
+        // a reflexive "Don't Allow"). Returning users resolve immediately.
+        if (!document.getElementById("welcome-modal").classList.contains("hidden")) {
+            await _welcomeDismissed;
+        }
         navigator.geolocation.getCurrentPosition(
             function (pos) {
                 var lat = pos.coords.latitude;
