@@ -865,7 +865,14 @@ function escapeText(s) {
     return d.innerHTML;
 }
 
+var _poiGen = 0;
 async function refreshPois() {
+    // Generation guard: two overlapping refreshes (toggle click + moveend
+    // debounce, with loadPois taking seconds on an Overpass miss) both read
+    // state.poiMarkers before either wrote it — the later finisher overwrote
+    // the array and orphaned the earlier call's markers on the map, untracked
+    // and unremovable by the toggle-off loop.
+    var gen = ++_poiGen;
     if (!state.map) return;
     // If neither type is visible, clear immediately and stop.
     if (!anyPoisVisible()) {
@@ -875,6 +882,7 @@ async function refreshPois() {
     }
     var c = state.map.getCenter();
     var pois = await loadPois(c.lat, c.lng);
+    if (gen !== _poiGen) return; // a newer refresh owns reconciliation
     // User may have toggled everything off during the fetch.
     if (!anyPoisVisible()) {
         for (var j = 0; j < state.poiMarkers.length; j++) state.map.removeLayer(state.poiMarkers[j]);
@@ -1130,6 +1138,11 @@ function updateDistanceMarkers() {
 
 // ── Elevation profile ──────────────────────────────────
 async function fetchRouteElevation(coords) {
+    // Same generation guard as updateRoute/resolveSegment: an in-flight fetch
+    // for route A must not repaint after route B has redrawn — without this,
+    // A's late resolve cleared B's lines and drew A's gradient over them (and
+    // left state.lastElevationData, used for GPX <ele>, holding A's samples).
+    var gen = _routeGen;
     if (coords.length < 2) { updateElevation([]); return; }
     var sampled = sampleRoute(coords, 50);
     var locations = sampled.map(function (p) { return { lat: p[0], lon: p[1] }; });
@@ -1137,10 +1150,12 @@ async function fetchRouteElevation(coords) {
 
     try {
         var results = await fetchElevation(locations);
+        if (gen !== _routeGen) return; // a newer route owns the map now
         state.lastElevationData = results;
         updateElevation(results);
         colourRouteByGradient(results);
     } catch (e) {
+        if (gen !== _routeGen) return;
         console.warn("Elevation fetch failed:", e.message);
         state.lastElevationData = [];
         updateElevation([]);
