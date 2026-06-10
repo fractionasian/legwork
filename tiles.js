@@ -531,10 +531,22 @@ async function fillGapAndRetry(fromWp, toWp) {
 
     if (!loaded) return null;
 
-    var newFromKey = closestNode(state.graph, fromWp.lat, fromWp.lon);
-    var newToKey = closestNode(state.graph, toWp.lat, toWp.lon);
+    // Re-snap endpoints to the (possibly rebuilt) graph — but only within the
+    // same 200 m rule resolveWaypointNode enforces. Unconditional reassignment
+    // could route a leg from a node kilometres away without moving the pin,
+    // silently desyncing the drawn route from the marker.
+    var newFromKey = nodeKeyWithinSnap(fromWp);
+    var newToKey = nodeKeyWithinSnap(toWp);
     if (newFromKey) fromWp.nodeKey = newFromKey;
     if (newToKey) toWp.nodeKey = newToKey;
 
     return dijkstra(state.graph, fromWp.nodeKey, toWp.nodeKey);
+}
+
+function nodeKeyWithinSnap(wp) {
+    var nk = closestNode(state.graph, wp.lat, wp.lon);
+    if (!nk) return null;
+    var parts = nk.split(",");
+    var dist = haversine(wp.lat, wp.lon, parseFloat(parts[0]), parseFloat(parts[1]));
+    return dist <= 200 ? nk : null;
 }

@@ -139,8 +139,13 @@ function createNumberedMarker(lat, lon, num, markerState) {
     return L.marker([lat, lon], { icon: numberedMarkerIcon(num, markerState), draggable: true }).addTo(state.map);
 }
 
-function updateMarkerNumber(marker, num) {
-    marker.setIcon(numberedMarkerIcon(num));
+// Takes the waypoint (not the bare marker) so a renumber re-renders the icon in
+// the waypoint's CURRENT state — the old marker-only version always rendered
+// "ready", erasing the spinner/retry affordance on a still-pending/failed
+// waypoint whenever a sibling was removed, reversed, or midpoint-inserted.
+function updateMarkerNumber(wp, num) {
+    var markerState = wp.pending ? "pending" : wp.failed ? "failed" : null;
+    wp.marker.setIcon(numberedMarkerIcon(num, markerState));
 }
 
 function setMarkerState(marker, num, markerState) {
@@ -688,7 +693,7 @@ function removeWaypoint(idx) {
     if (idx < 0 || idx >= state.waypoints.length) return;
     state.map.removeLayer(state.waypoints[idx].marker);
     state.waypoints.splice(idx, 1);
-    for (var i = 0; i < state.waypoints.length; i++) updateMarkerNumber(state.waypoints[i].marker, i + 1);
+    for (var i = 0; i < state.waypoints.length; i++) updateMarkerNumber(state.waypoints[i], i + 1);
     updateRoute();
 }
 
@@ -721,6 +726,11 @@ var MIN_DETOUR_DIST = 200;
 // mutating shared route state. This is the concurrency guard; the gen check stays
 // immediately after the await and before any caller-side mutation.
 async function resolveSegment(fromWp, toWp, gen) {
+    // A pending/failed endpoint (nodeKey null) can't be routed — dijkstra would
+    // return null and we'd fire the multi-fetch gap-fill for a leg whose
+    // endpoint was never resolved. Draw the red fallback and let the waypoint's
+    // own resolution (or tap-to-retry) trigger the re-route.
+    if (!fromWp.nodeKey || !toWp.nodeKey) return { result: null };
     var result = dijkstra(state.graph, fromWp.nodeKey, toWp.nodeKey);
     var straight = haversine(fromWp.lat, fromWp.lon, toWp.lat, toWp.lon);
     // Compare GEOMETRIC path length against the straight line — result.dist is
@@ -1026,7 +1036,7 @@ function addMidpointMarkers() {
 
                 // Renumber all markers
                 for (var i = 0; i < state.waypoints.length; i++) {
-                    updateMarkerNumber(state.waypoints[i].marker, i + 1);
+                    updateMarkerNumber(state.waypoints[i], i + 1);
                 }
 
                 updateRoute();
@@ -1523,7 +1533,7 @@ document.getElementById("mode-btn").addEventListener("click", function () {
 document.getElementById("reverse-btn").addEventListener("click", function () {
     if (state.waypoints.length < 2) return;
     state.waypoints.reverse();
-    for (var i = 0; i < state.waypoints.length; i++) updateMarkerNumber(state.waypoints[i].marker, i + 1);
+    for (var i = 0; i < state.waypoints.length; i++) updateMarkerNumber(state.waypoints[i], i + 1);
     updateRoute();
     showBanner("Route reversed", "hint");
     setTimeout(function () {
