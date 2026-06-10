@@ -891,7 +891,16 @@ button.menu-item:disabled {
 }
 
 /* ── Info banner ──────────────────────────────────── */
+/* Overlay across the top of the map area (not in document flow — an in-flow
+   banner resized the map on every transient toast, and Leaflet was never told
+   via invalidateSize, so the viewport went subtly stale). z-index clears
+   Leaflet's panes/controls (≤1000). */
 .info-banner {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 1100;
     padding: 8px 16px;
     text-align: center;
     font-size: 13px;

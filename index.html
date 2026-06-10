@@ -121,7 +121,6 @@
             <div class="menu-version">v<span id="app-version">2d425a68</span></div>
         </div>
     </aside>
-    <div class="info-banner" id="info-banner" role="alert" aria-live="assertive"></div>
     <!-- role=status, not dialog: screen readers announce a passive nudge
          instead of treating it as a modal that traps focus expectations. -->
     <div class="tip-toast hidden" id="tip-toast" role="status" aria-label="Support Legwork">
@@ -130,6 +129,9 @@
         <button class="tip-toast-close" id="tip-toast-close" type="button" aria-label="Dismiss">&times;</button>
     </div>
     <div class="map-area">
+        <!-- Inside .map-area as an overlay: when this was in body flow, every
+             transient toast resized the map (and Leaflet was never told). -->
+        <div class="info-banner" id="info-banner" role="alert" aria-live="assertive"></div>
         <div id="map" role="application" aria-label="Route planning map"></div>
         <div class="elevation-panel" id="elevation-panel">
             <div class="elevation-stats" id="elevation-stats">
