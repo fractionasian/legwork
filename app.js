@@ -2436,6 +2436,12 @@ async function shortenCurrentRoute() {
         });
         if (!resp.ok) throw new Error("status " + resp.status);
         var data = await resp.json();
+        // Trust boundary: the resolve path validates data.hash strictly, but this
+        // path copied data.url verbatim — a compromised/buggy Worker could put an
+        // arbitrary string (e.g. a phishing URL) straight onto the clipboard.
+        if (typeof data.url !== "string" || data.url.indexOf("https://legwork.day/") !== 0) {
+            throw new Error("unexpected url shape");
+        }
         copyText(data.url, "Short link copied!");
     } catch (e) {
         copyText(window.location.href, "Couldn't shorten — copied the full link");
