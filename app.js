@@ -1419,6 +1419,15 @@ function showBanner(msg, type) {
     el.style.display = msg ? "block" : "none";
 }
 
+// Auto-dismiss for success toasts. Guarded on the current banner type so a
+// stale timer can't wipe an error that appeared during the dismiss window.
+function clearBannerAfter(ms) {
+    setTimeout(function () {
+        var el = document.getElementById("info-banner");
+        if (el.dataset.type === "success") showBanner("");
+    }, ms);
+}
+
 // Error banner with an inline "Retry" chip. onRetry fires with the banner
 // cleared; caller re-triggers the failing operation.
 function showBannerWithRetry(msg, onRetry) {
@@ -1639,7 +1648,7 @@ document.getElementById("dm-share").addEventListener("click", function (e) {
         if (navigator.clipboard) {
             navigator.clipboard.writeText(url).then(function () {
                 showBanner("Link copied!", "success");
-                setTimeout(function () { showBanner(""); }, 2000);
+                clearBannerAfter(2000);
             }).catch(inlineInputFallback);
         } else {
             inlineInputFallback();
@@ -1984,10 +1993,7 @@ async function confirmSaveRoute() {
             tx.onerror = function () { reject(tx.error); };
         });
         showBanner("Route saved: " + name, "success");
-        setTimeout(function () {
-            var el = document.getElementById("info-banner");
-            if (el.dataset.type === "success") showBanner("");
-        }, 2500);
+        clearBannerAfter(2500);
         renderSavedRoutes();
     } catch (e) {
         console.error("save route:", e);
@@ -2037,7 +2043,7 @@ async function autoSaveSharedRoute() {
     }
 
     showBanner("Saved to your routes", "success");
-    setTimeout(function () { showBanner(""); }, 3000);
+    clearBannerAfter(3000);
     renderSavedRoutes();
 
     // Async geocode replacement of the placeholder name.
@@ -2131,10 +2137,7 @@ async function restoreSavedRoute(id) {
         await updateRoute();
         closeMenu();
         showBanner("Loaded: " + route.name, "success");
-        setTimeout(function () {
-            var el = document.getElementById("info-banner");
-            if (el.dataset.type === "success") showBanner("");
-        }, 2500);
+        clearBannerAfter(2500);
     } catch (e) {
         console.error("load route:", e);
         showBanner("Couldn't open that route — try again");
@@ -2404,7 +2407,7 @@ function copyText(text, okMsg) {
     }
     if (navigator.clipboard) {
         navigator.clipboard.writeText(text).then(function () {
-            showBanner(okMsg, "success"); setTimeout(function () { showBanner(""); }, 2500);
+            showBanner(okMsg, "success"); clearBannerAfter(2500);
         }).catch(fallback);
     } else {
         fallback();
