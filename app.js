@@ -1992,6 +1992,9 @@ function saveNamedRoute() {
 async function confirmSaveRoute() {
     var inputRow = document.getElementById("save-route-input");
     var nameInput = document.getElementById("save-route-name");
+    // Re-entry guard: Enter + a fast second Enter (or Enter + button click)
+    // both fire before the first async save completes, writing two records.
+    if (inputRow.classList.contains("hidden")) return;
     var name = nameInput.value.trim();
     if (!name) return;
 

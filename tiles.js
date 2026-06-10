@@ -181,7 +181,13 @@ async function resetGraphIfCityChanged(lat, lon) {
     var manifest = await fetchManifest();
     if (!manifest) return;
     var match = findCityForLocation(manifest, lat, lon);
-    var newId = match ? match.id : null;
+    // Unknown locations get a coarse 0.5° bucket id (same bucketing as the
+    // telemetry below) instead of null — with null, moving between two
+    // UNTILED towns compared null === null and never reset, accumulating both
+    // towns' graphs and re-creating exactly the cross-town gap-fill surface
+    // this function exists to prevent.
+    var newId = match ? match.id
+        : "unknown:" + (Math.round(lat * 2) / 2).toFixed(1) + "," + (Math.round(lon * 2) / 2).toFixed(1);
     if (newId === _currentCityId) return;
     _currentCityId = newId;
     // Fire a custom Umami event at the semantic moment "user resolved into a
@@ -388,6 +394,10 @@ async function loadPaths(lat, lon) {
             showBanner("");
             return true;
         } catch (e) {
+            // If the Worker returned truthy-but-malformed JSON, osmToGeoJSON
+            // threw with raw still set — without clearing it, every retry would
+            // re-parse the same bad object instead of falling back to Overpass.
+            raw = null;
             if (attempt < maxRetries) {
                 showBanner("Loading paths (retry " + (attempt + 1) + "/" + maxRetries + ")...", "loading");
                 await new Promise(function (r) { setTimeout(r, delay * Math.pow(2, attempt)); });

@@ -71,10 +71,13 @@ self.addEventListener("fetch", function (e) {
     if (e.request.method !== "GET") return;
     var url = e.request.url;
 
-    // App shell: cache-first (exact URL match, not substring).
+    // App shell: cache-first (exact URL match, not substring). Navigations
+    // match with ignoreSearch — an offline navigate to "/?s=slug" (short-link
+    // resolve) must still hit the cached shell, not respondWith(undefined).
     if (e.request.mode === "navigate" || SHELL_URLS.indexOf(url) !== -1) {
+        var matchOpts = e.request.mode === "navigate" ? { ignoreSearch: true } : undefined;
         e.respondWith(
-            caches.match(e.request).then(function (cached) {
+            caches.match(e.request, matchOpts).then(function (cached) {
                 var fetchPromise = fetch(e.request).then(function (resp) {
                     if (resp && resp.ok) {
                         var clone = resp.clone();
