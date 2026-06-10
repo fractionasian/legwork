@@ -22,6 +22,15 @@ export function genSlug(rng = defaultRng) {
 
 const MODES = new Set(["oneway", "loop", "outback"]);
 const MAX_POINTS = 500;
+// MAX_POINTS bounds the point COUNT but not the string length — Number()
+// accepts arbitrarily long numeric strings, so without a length cap a single
+// "valid" 500-point hash could be tens of MB written verbatim to D1. A legit
+// 500-point hash at the client's 5-decimal precision is ~10 KB; 16 KB is ample.
+const MAX_HASH_LEN = 16384;
+// Each coordinate must look like what the client emits (toFixed(5), optional
+// sign). The digit caps also bound per-coordinate length, and the strict shape
+// rejects Number()'s lax accepts ("" → 0, "0x41" → 65, exponent forms).
+const COORD_RE = /^-?\d{1,3}(\.\d{1,7})?$/;
 
 // Validate that a string is a well-formed Legwork route hash and nothing else.
 // This is the security boundary: the stored payload can ONLY be a route, never
@@ -30,6 +39,7 @@ const MAX_POINTS = 500;
 // normalised leading-# hash, or { ok:false, reason }.
 export function validateRouteHash(input) {
   if (typeof input !== "string") return { ok: false, reason: "not a string" };
+  if (input.length > MAX_HASH_LEN) return { ok: false, reason: "hash too long (max " + MAX_HASH_LEN + " chars)" };
   const body = input.startsWith("#") ? input.slice(1) : input;
   const params = new URLSearchParams(body);
   const r = params.get("r");
@@ -44,9 +54,9 @@ export function validateRouteHash(input) {
   for (const p of points) {
     const parts = p.split(",");
     if (parts.length !== 2) return { ok: false, reason: "malformed point: " + p };
+    if (!COORD_RE.test(parts[0]) || !COORD_RE.test(parts[1])) return { ok: false, reason: "malformed coordinate: " + p };
     const lat = Number(parts[0]);
     const lon = Number(parts[1]);
-    if (!Number.isFinite(lat) || !Number.isFinite(lon)) return { ok: false, reason: "non-numeric: " + p };
     if (lat < -90 || lat > 90) return { ok: false, reason: "lat out of range: " + p };
     if (lon < -180 || lon > 180) return { ok: false, reason: "lon out of range: " + p };
   }

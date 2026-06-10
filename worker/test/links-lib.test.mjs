@@ -56,6 +56,29 @@ test("validateRouteHash enforces a sane max point count", () => {
   assert.equal(validateRouteHash("#r=" + many + "&m=oneway").ok, false);
 });
 
+test("validateRouteHash caps total hash length (D1 write-size bound)", () => {
+  // 500 points is within MAX_POINTS, but one coordinate padded to multi-KB
+  // would blow past any sane payload — Number() alone would accept it.
+  const fat = "-37.8" + "0".repeat(20000) + ",144.9;-37.9,145.0";
+  assert.equal(validateRouteHash("#r=" + fat + "&m=oneway").ok, false);
+  // A maximal legitimate hash (500 points, full toFixed(5) precision) still fits.
+  const legit = Array.from({ length: 500 }, () => "-37.81710,144.97313").join(";");
+  assert.equal(validateRouteHash("#r=" + legit + "&m=oneway").ok, true);
+});
+
+test("validateRouteHash rejects degenerate coordinates Number() would accept", () => {
+  for (const bad of [
+    "#r=,;-37.9,145.0&m=oneway",                 // "" → 0 under Number()
+    "#r=0x41,144.9;-37.9,145.0&m=oneway",        // hex
+    "#r=1e2,144.9;-37.9,145.0&m=oneway",         // exponent form
+    "#r= 37.8,144.9;-37.9,145.0&m=oneway",       // leading whitespace → 37.8 under Number()
+    "#r=-37.80000001,144.9;-37.9,145.0&m=oneway", // > 7 decimals (client sends 5)
+    "#r=Infinity,144.9;-37.9,145.0&m=oneway",
+  ]) {
+    assert.equal(validateRouteHash(bad).ok, false, "should reject: " + bad);
+  }
+});
+
 test("validateVanitySlug enforces pattern, length and blocklist", () => {
   assert.equal(validateVanitySlug("Melbourne2027").ok, true);
   assert.equal(validateVanitySlug("perth-city-2027").ok, true);
