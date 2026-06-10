@@ -124,6 +124,12 @@ async function migrateLocalStorage() {
         if (k === "lw:savedRoute" || k === "lw:welcomed") continue;
         try {
             var raw = JSON.parse(localStorage.getItem(k));
+            // Only legacy cache entries have the {v, ts} shape. Live preference
+            // keys (lw:showToilets "1"/"0", lw:profile, lw:elevCollapsed, ...)
+            // also parse as JSON, and without this guard the loop "migrated"
+            // them as junk and DELETED them — silently resetting preferences on
+            // every boot, since this migration is not gated to first run.
+            if (!raw || typeof raw !== "object" || !("v" in raw)) continue;
             var cacheKey = k.substring(3);
             await cacheSet(cacheKey, raw.v);
             localStorage.removeItem(k);
