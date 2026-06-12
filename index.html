@@ -155,13 +155,12 @@
     <div class="modal-overlay" id="welcome-modal">
         <div class="modal">
             <h2>&#129461; Welcome to Legwork</h2>
+            <!-- Only the two things you can't discover by poking the map.
+                 Everything else (mode cycling, undo, gradient colours) is
+                 visible in the UI or under Tips & shortcuts in the menu. -->
             <ul>
                 <li><strong>Tap the map</strong> to add waypoints — routes follow footpaths automatically</li>
-                <li><strong>Tap a waypoint</strong> to remove it, or <strong>drag</strong> to reposition</li>
                 <li><strong>Drag the green circles</strong> between waypoints to insert a new one</li>
-                <li>Tap the <strong>&#8635; Loop</strong> button to cycle between <em>Loop</em>, <em>Out &amp; Back</em>, and <em>One Way</em></li>
-                <li class="desktop-only"><kbd id="undo-key">Ctrl</kbd> + <kbd>Z</kbd> to undo the last waypoint</li>
-                <li>Routes are coloured by gradient: <span style="color:#6ee7b7">green</span> (flat), <span style="color:#fbbf24">yellow</span> (uphill), <span style="color:#f87171">red</span> (steep), <span style="color:#60a5fa">blue</span> (downhill)</li>
             </ul>
             <button id="welcome-dismiss">Start planning</button>
         </div>

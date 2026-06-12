@@ -469,6 +469,12 @@ button.menu-item {
     display: none;
 }
 
+.saved-empty {
+    padding: 4px 0 8px;
+    font-size: 12px;
+    color: #6b6e7a;
+}
+
 .saved-item {
     display: flex;
     align-items: center;

@@ -2364,11 +2364,16 @@ async function renderSavedRoutes() {
         });
     }
     while (list.firstChild) list.removeChild(list.firstChild);
+    list.classList.remove("hidden");
     if (routes.length === 0) {
-        list.classList.add("hidden");
+        // A bare "SAVED ROUTES" header over nothing reads as broken — say
+        // what the section is for instead of hiding it.
+        var empty = document.createElement("div");
+        empty.className = "saved-empty";
+        empty.textContent = "Routes you save appear here";
+        list.appendChild(empty);
         return;
     }
-    list.classList.remove("hidden");
     for (var i = 0; i < routes.length; i++) {
         (function (route) {
             var row = document.createElement("div");
