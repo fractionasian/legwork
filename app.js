@@ -27,6 +27,8 @@ var state = {
     midpointMarkers: [],  // draggable midpoints for inserting waypoints
     useMiles: false,
     lastElevationData: [], // cached elevation results for GPX export
+    scrubDot: null,        // transient map dot driven by the elevation scrub
+    scrubData: null,       // {points, distances, unitMetres, unitLabel} for the scrub
     poiMarkers: [],
     showToilets: false,
     showWater: false,
@@ -1270,7 +1272,9 @@ function colourRouteByGradient(elevData) {
 function updateElevation(elevData) {
     var container = document.getElementById("elevation-container");
     var statsEl = document.getElementById("elevation-stats");
+    hideElevationScrub(); // route data is changing under the scrub dot
     if (elevData.length < 2) {
+        state.scrubData = null;
         container.style.display = "none";
         statsEl.style.display = "none";
         return;
@@ -1322,6 +1326,7 @@ function updateElevation(elevData) {
     var totalUnits = distances[distances.length - 1] / unitMetres;
     var stepUnits = distanceMarkerIntervalUnits(totalUnits);
     var points = distances.map(function (d, i) { return { x: d / unitMetres, y: elevations[i] }; });
+    state.scrubData = { points: elevData, distances: distances, unitMetres: unitMetres, unitLabel: unitLabel };
     function tickLabel(value) {
         return Number.isInteger(value) ? value : value.toFixed(1);
     }
@@ -1378,6 +1383,80 @@ function updateElevation(elevData) {
                 y: { title: { display: true, text: "Elevation (m)", color: "#888", padding: { bottom: 6 } }, ticks: { color: "#888" }, grid: { color: "#1a1a2e" } },
             },
         },
+    });
+}
+
+// ── Elevation scrub ────────────────────────────────────
+// Pointer over the chart walks a dot along the route at the corresponding
+// distance — answers "where on the map is that hill?". Desktop is pure hover
+// (no click, no mode); on touch the canvas owns horizontal drags only
+// (touch-action: pan-y in CSS) so vertical swipes still scroll. Deliberately
+// no auto-pan: the dot may leave the viewport rather than yank the map
+// around mid-scrub. The dot is a third visual species — not a blue numbered
+// waypoint, not a white km pill — so the map grammar stays unambiguous.
+
+function hideElevationScrub() {
+    var tip = document.getElementById("scrub-tip");
+    if (tip) tip.classList.add("hidden");
+    if (state.scrubDot) { state.scrubDot.remove(); state.scrubDot = null; }
+}
+
+function initElevationScrub() {
+    var container = document.getElementById("elevation-container");
+    var canvas = document.getElementById("elevation-canvas");
+    var tip = document.createElement("div");
+    tip.id = "scrub-tip";
+    tip.className = "scrub-tip hidden";
+    container.appendChild(tip);
+
+    function onScrub(e) {
+        var chart = state.elevationChart;
+        var sd = state.scrubData;
+        if (!chart || !sd) return;
+        var rect = canvas.getBoundingClientRect();
+        var x = e.clientX - rect.left;
+        var units = chart.scales.x.getValueForPixel(x);
+        var total = sd.distances[sd.distances.length - 1];
+        var metres = Math.max(0, Math.min(total, units * sd.unitMetres));
+
+        // Nearest route point by cumulative distance (distances is sorted).
+        var lo = 0, hi = sd.distances.length - 1;
+        while (lo < hi) {
+            var mid = (lo + hi) >> 1;
+            if (sd.distances[mid] < metres) lo = mid + 1; else hi = mid;
+        }
+        if (lo > 0 && metres - sd.distances[lo - 1] < sd.distances[lo] - metres) lo--;
+        var p = sd.points[lo];
+
+        if (!state.scrubDot) {
+            state.scrubDot = L.marker([p.lat, p.lon], {
+                icon: L.divIcon({
+                    html: '<div class="scrub-dot"></div>',
+                    className: "",
+                    iconSize: [14, 14],
+                    iconAnchor: [7, 7],
+                }),
+                interactive: false,
+                zIndexOffset: 500,
+            }).addTo(state.map);
+        } else {
+            state.scrubDot.setLatLng([p.lat, p.lon]);
+        }
+
+        tip.textContent = (metres / sd.unitMetres).toFixed(1) + " " + sd.unitLabel +
+            " · " + Math.round(p.elevation) + " m";
+        tip.classList.remove("hidden");
+        tip.style.left = Math.max(36, Math.min(rect.width - 36, x)) + "px";
+    }
+
+    canvas.addEventListener("pointermove", onScrub);
+    canvas.addEventListener("pointerdown", onScrub);
+    canvas.addEventListener("pointerleave", hideElevationScrub);
+    canvas.addEventListener("pointercancel", hideElevationScrub);
+    // Mouse users get hover persistence until the pointer leaves; a lifted
+    // finger has no hover, so clean up on touch release.
+    canvas.addEventListener("pointerup", function (e) {
+        if (e.pointerType !== "mouse") hideElevationScrub();
     });
 }
 
@@ -2505,6 +2584,7 @@ window.addEventListener("resize", function () {
 // ── Boot ───────────────────────────────────────────────
 initMap();
 setupAutocomplete();
+initElevationScrub();
 placeSearchBox();
 if (topbarSearchMQ.addEventListener) topbarSearchMQ.addEventListener("change", placeSearchBox);
 setupOsmIssueLink();
