@@ -51,6 +51,10 @@
         </div>
         <button id="clear-btn" aria-label="Clear all waypoints">&#10005;</button>
         <button id="locate-btn" aria-label="Centre on my location" title="Centre on my location">&#8982;</button>
+        <!-- On >=768px the .menu-search node is reparented in here (see
+             placeSearchBox in app.js) so desktop's most common first action —
+             typing a suburb — doesn't need the hamburger menu first. -->
+        <div class="topbar-search-slot" id="topbar-search-slot"></div>
         <div class="distance-wrapper">
             <button class="distance-pill" id="distance-pill" type="button"
                     aria-haspopup="menu" aria-expanded="false" aria-controls="distance-menu" disabled>

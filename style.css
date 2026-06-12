@@ -83,6 +83,40 @@ body {
     outline-offset: 1px;
 }
 
+/* Desktop top-bar search slot — the .menu-search node is reparented in here
+   on >=768px (placeSearchBox, app.js). Empty and collapsed on phones. */
+.topbar-search-slot {
+    display: none;
+}
+
+@media (min-width: 768px) {
+    .topbar-search-slot {
+        display: block;
+        position: relative;
+        flex: 1;
+        max-width: 380px;
+        margin-left: 4px;
+    }
+    .topbar-search-slot .menu-search {
+        padding: 0;
+    }
+    .topbar-search-slot .menu-search input[type="text"] {
+        padding: 9px 32px 9px 12px;
+        min-height: 40px;
+        box-sizing: border-box;
+    }
+    .topbar-search-slot .address-clear {
+        right: 8px;
+    }
+    .topbar-search-slot .menu-search .autocomplete-list {
+        left: 0;
+        right: 0;
+        margin-top: 4px;
+        border-top: 1px solid #3a3d4a;
+        border-radius: 6px;
+    }
+}
+
 .distance-wrapper {
     margin-left: auto;
     position: relative;

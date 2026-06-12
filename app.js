@@ -209,6 +209,22 @@ function setupAutocomplete() {
     });
 }
 
+// ── Desktop top-bar search ─────────────────────────────
+// The address search lives in the side menu on phones but surfaces in the
+// top bar on wide screens. The same .menu-search node is reparented (not
+// duplicated) so its input/autocomplete listeners and state survive the move.
+var topbarSearchMQ = window.matchMedia("(min-width: 768px)");
+function placeSearchBox() {
+    var search = document.querySelector(".menu-search");
+    var slot = document.getElementById("topbar-search-slot");
+    if (!search || !slot) return;
+    if (topbarSearchMQ.matches) {
+        if (search.parentElement !== slot) slot.appendChild(search);
+    } else if (search.parentElement === slot) {
+        document.querySelector(".menu-body").insertBefore(search, document.getElementById("save-route-btn"));
+    }
+}
+
 function updateActiveItem(items, idx, input) {
     for (var i = 0; i < items.length; i++) {
         items[i].classList.remove("active");
@@ -2484,6 +2500,8 @@ window.addEventListener("resize", function () {
 // ── Boot ───────────────────────────────────────────────
 initMap();
 setupAutocomplete();
+placeSearchBox();
+if (topbarSearchMQ.addEventListener) topbarSearchMQ.addEventListener("change", placeSearchBox);
 setupOsmIssueLink();
 buildMenuLegend();
 updateReverseVisibility();
@@ -2691,9 +2709,11 @@ async function maybeResolveShortLink() {
                 });
             },
             function () {
-                // Geolocation failed — prompt user to search
-                openMenu();
+                // Geolocation failed — prompt user to search. Only open the
+                // menu when the search box actually lives there; on desktop
+                // it's already visible in the top bar.
                 var input = document.getElementById("address-input");
+                if (!(input && input.closest(".topbar-search-slot"))) openMenu();
                 if (input) { input.focus(); input.placeholder = "Search for your location to get started"; }
             },
             { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
