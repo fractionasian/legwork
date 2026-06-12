@@ -1420,14 +1420,28 @@ function initElevationScrub() {
         var total = sd.distances[sd.distances.length - 1];
         var metres = Math.max(0, Math.min(total, units * sd.unitMetres));
 
-        // Nearest route point by cumulative distance (distances is sorted).
+        // Interpolate between the two bracketing sample points rather than
+        // snapping to the nearest — samples are ~50 m apart, so snapping made
+        // the dot hop in visible steps. The drawn polyline is straight lines
+        // between these same points, so the lerp keeps the dot on the line.
         var lo = 0, hi = sd.distances.length - 1;
         while (lo < hi) {
             var mid = (lo + hi) >> 1;
             if (sd.distances[mid] < metres) lo = mid + 1; else hi = mid;
         }
-        if (lo > 0 && metres - sd.distances[lo - 1] < sd.distances[lo] - metres) lo--;
-        var p = sd.points[lo];
+        var p;
+        if (lo === 0) {
+            p = sd.points[0];
+        } else {
+            var d0 = sd.distances[lo - 1], d1 = sd.distances[lo];
+            var t = d1 > d0 ? (metres - d0) / (d1 - d0) : 0;
+            var a = sd.points[lo - 1], b = sd.points[lo];
+            p = {
+                lat: a.lat + t * (b.lat - a.lat),
+                lon: a.lon + t * (b.lon - a.lon),
+                elevation: a.elevation + t * (b.elevation - a.elevation),
+            };
+        }
 
         if (!state.scrubDot) {
             state.scrubDot = L.marker([p.lat, p.lon], {
