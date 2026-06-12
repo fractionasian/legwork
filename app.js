@@ -223,7 +223,8 @@ function placeSearchBox() {
     if (topbarSearchMQ.matches) {
         if (search.parentElement !== slot) slot.appendChild(search);
     } else if (search.parentElement === slot) {
-        document.querySelector(".menu-body").insertBefore(search, document.getElementById("save-route-btn"));
+        var menuBody = document.querySelector(".menu-body");
+        if (menuBody) menuBody.insertBefore(search, document.getElementById("save-route-btn"));
     }
 }
 
