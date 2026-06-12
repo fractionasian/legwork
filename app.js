@@ -1107,11 +1107,16 @@ function updateDistance() {
 // Single source of truth for the round-distance interval, shared by the
 // on-map km pills and the elevation chart's x-axis ticks — the two surfaces
 // must always speak the same distance language (pill "6k" ↔ gridline 6).
+//
+// Bands match the split a runner at that distance actually thinks in, not
+// just map density: building to 5k you count every km; at 10–12k you think
+// in 2k; from half marathon up it's 5k blocks (how the timing mats fall).
+// The 10-unit tier survives for >50k — that's cycling territory, not a run.
 function distanceMarkerIntervalUnits(totalUnits) {
     if (state.useMiles) {
-        return totalUnits <= 10 ? 1 : totalUnits <= 25 ? 2 : totalUnits <= 50 ? 5 : 10;
+        return totalUnits <= 4 ? 1 : totalUnits <= 10 ? 2 : totalUnits <= 35 ? 5 : 10;
     }
-    return totalUnits <= 15 ? 1 : totalUnits <= 40 ? 2 : totalUnits <= 80 ? 5 : 10;
+    return totalUnits <= 7 ? 1 : totalUnits <= 15 ? 2 : totalUnits <= 50 ? 5 : 10;
 }
 
 function updateDistanceMarkers() {
@@ -1162,25 +1167,10 @@ function updateDistanceMarkers() {
         }
     }
 
-    // End marker: show the total distance at the route's final coord, but only if
-    // the last interval marker didn't already land exactly there.
-    var lastIntervalUnits = markNum - intervalUnits;
-    var totalUnitsOneDp = Math.round(totalUnits * 10) / 10;
-    if (totalUnitsOneDp > lastIntervalUnits + 0.05) {
-        var endCoord = coords[coords.length - 1];
-        var endLabel = totalUnitsOneDp.toFixed(1) + suffix;
-        var endMkr = L.marker([endCoord[0], endCoord[1]], {
-            icon: L.divIcon({
-                html: '<div class="km-pill">' + endLabel + '</div>',
-                className: "",
-                iconSize: [40, 16],
-                iconAnchor: [20, 8],
-            }),
-            interactive: false,
-            zIndexOffset: -100,
-        }).addTo(state.map);
-        state.distanceMarkers.push(endMkr);
-    }
+    // No end-of-route total pill: the route's final coord IS a waypoint in
+    // every mode (wp1 for loop/out-and-back, the last wp for one-way), so the
+    // pill always rendered underneath a waypoint circle — only its edges ever
+    // showed. The toolbar distance pill already carries the exact total.
 }
 
 // ── Elevation profile ──────────────────────────────────
