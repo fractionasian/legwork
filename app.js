@@ -1103,6 +1103,17 @@ function updateDistance() {
 }
 
 // ── Distance markers ───────────────────────────────────
+
+// Single source of truth for the round-distance interval, shared by the
+// on-map km pills and the elevation chart's x-axis ticks — the two surfaces
+// must always speak the same distance language (pill "6k" ↔ gridline 6).
+function distanceMarkerIntervalUnits(totalUnits) {
+    if (state.useMiles) {
+        return totalUnits <= 10 ? 1 : totalUnits <= 25 ? 2 : totalUnits <= 50 ? 5 : 10;
+    }
+    return totalUnits <= 15 ? 1 : totalUnits <= 40 ? 2 : totalUnits <= 80 ? 5 : 10;
+}
+
 function updateDistanceMarkers() {
     clearLayerArray("distanceMarkers");
     var unitMetres = state.useMiles ? 1609.344 : 1000;
@@ -1111,12 +1122,7 @@ function updateDistanceMarkers() {
     if (totalUnits < 1) return;
 
     // Scale interval by total distance so long routes don't crowd the map.
-    var intervalUnits;
-    if (state.useMiles) {
-        intervalUnits = totalUnits <= 10 ? 1 : totalUnits <= 25 ? 2 : totalUnits <= 50 ? 5 : 10;
-    } else {
-        intervalUnits = totalUnits <= 15 ? 1 : totalUnits <= 40 ? 2 : totalUnits <= 80 ? 5 : 10;
-    }
+    var intervalUnits = distanceMarkerIntervalUnits(totalUnits);
     var interval = intervalUnits * unitMetres;
 
     var coords = [];
@@ -1272,11 +1278,12 @@ function updateElevation(elevData) {
         distances.push(distances[i-1] + haversine(elevData[i-1].lat, elevData[i-1].lon, elevData[i].lat, elevData[i].lon));
     }
     elevData = smoothElevations(elevData);
-    var absoluteElevations = elevData.map(function (e) { return e.elevation; });
-    // Plot relative to the start point — runners care about climb from where they
-    // began, not metres above sea level. Stats below use deltas so are unaffected.
-    var baseline = absoluteElevations[0];
-    var elevations = absoluteElevations.map(function (e) { return e - baseline; });
+    // Plot absolute elevation. A relative-to-start baseline was tried first and
+    // had two failure modes: routes starting at their high point drew an
+    // all-negative axis under a "Climb" label, and negative values made
+    // Chart.js fill toward y=0 (the chart TOP), painting full-height colour
+    // columns instead of under-curve shading.
+    var elevations = elevData.map(function (e) { return e.elevation; });
 
     // Ascent/descent via the shared dead-band accumulator (routing.js) — same
     // function the saved-routes list uses, so the two never diverge. Diffs are
@@ -1300,18 +1307,32 @@ function updateElevation(elevData) {
     function gradeColor(grade) { return gradeBand(grade).color; }
     function gradeFill(grade) { return gradeBand(grade).fill; }
 
-    var labels = distances.map(function (d) { return (d/1000).toFixed(1); });
+    // Linear x-axis in the active unit, ticked at the same round interval the
+    // on-map pills use. The previous category axis labelled every Nth data
+    // point, so ticks landed wherever point density put them (1.6, 3.7, 5.7…)
+    // while the pills said 2k/4k/6k.
+    var unitMetres = state.useMiles ? 1609.344 : 1000;
+    var unitLabel = state.useMiles ? "mi" : "km";
+    var totalUnits = distances[distances.length - 1] / unitMetres;
+    var stepUnits = distanceMarkerIntervalUnits(totalUnits);
+    var points = distances.map(function (d, i) { return { x: d / unitMetres, y: elevations[i] }; });
+    function tickLabel(value) {
+        return Number.isInteger(value) ? value : value.toFixed(1);
+    }
+
     if (state.elevationChart) {
         // Reuse the chart — cheaper than destroy/rebuild and avoids canvas flash.
         var chart = state.elevationChart;
-        chart.data.labels = labels;
-        chart.data.datasets[0].data = elevations;
+        chart.data.datasets[0].data = points;
         // Segment callbacks close over segGradients via the outer scope of the
         // previous build; rebind them against the fresh array on each update.
         chart.data.datasets[0].segment = {
             borderColor: function (ctx) { return gradeColor(segGradients[ctx.p1DataIndex]); },
             backgroundColor: function (ctx) { return gradeFill(segGradients[ctx.p1DataIndex]); },
         };
+        chart.options.scales.x.max = totalUnits;
+        chart.options.scales.x.ticks.stepSize = stepUnits;
+        chart.options.scales.x.title.text = "Distance (" + unitLabel + ")";
         chart.update("none");
         return;
     }
@@ -1319,10 +1340,9 @@ function updateElevation(elevData) {
     state.elevationChart = new Chart(ctx, {
         type: "line",
         data: {
-            labels: labels,
             datasets: [{
-                data: elevations, borderColor: "#6ee7b7", backgroundColor: "rgba(110,231,183,0.1)",
-                fill: true, pointRadius: 0, tension: 0.3, borderWidth: 2,
+                data: points, borderColor: "#6ee7b7", backgroundColor: "rgba(110,231,183,0.1)",
+                fill: "start", pointRadius: 0, tension: 0.3, borderWidth: 2,
                 segment: {
                     borderColor: function (ctx) { return gradeColor(segGradients[ctx.p1DataIndex]); },
                     backgroundColor: function (ctx) { return gradeFill(segGradients[ctx.p1DataIndex]); },
@@ -1333,8 +1353,23 @@ function updateElevation(elevData) {
             responsive: true, maintainAspectRatio: false,
             plugins: { legend: { display: false } },
             scales: {
-                x: { title: { display: true, text: "Distance (km)", color: "#888", padding: { top: 8 } }, ticks: { color: "#888", maxTicksLimit: 10 }, grid: { color: "#1a1a2e" } },
-                y: { title: { display: true, text: "Climb (m)", color: "#888", padding: { bottom: 6 } }, ticks: { color: "#888" }, grid: { color: "#1a1a2e" } },
+                x: {
+                    type: "linear", min: 0, max: totalUnits,
+                    title: { display: true, text: "Distance (" + unitLabel + ")", color: "#888", padding: { top: 8 } },
+                    ticks: { color: "#888", stepSize: stepUnits, callback: tickLabel },
+                    grid: { color: "#1a1a2e" },
+                    // Ticks at round multiples of the pill interval only.
+                    // Chart.js's own generator appends the (non-round) axis max
+                    // and drops the neighbouring round tick to avoid crowding —
+                    // e.g. an 18.3 km route showed "…12, 14, 17.9".
+                    afterBuildTicks: function (axis) {
+                        var step = axis.options.ticks.stepSize || 1;
+                        var ticks = [];
+                        for (var v = 0; v <= axis.max + 1e-9; v += step) ticks.push({ value: v });
+                        axis.ticks = ticks;
+                    },
+                },
+                y: { title: { display: true, text: "Elevation (m)", color: "#888", padding: { bottom: 6 } }, ticks: { color: "#888" }, grid: { color: "#1a1a2e" } },
             },
         },
     });
@@ -1822,6 +1857,8 @@ document.getElementById("unit-toggle").addEventListener("click", function () {
     try { localStorage.setItem("lw:useMiles", state.useMiles ? "1" : "0"); } catch (e) {}
     document.getElementById("unit-label").textContent = state.useMiles ? "mi" : "km";
     updateDistance();
+    // Re-render the elevation chart so its x-axis follows the active unit.
+    if (state.lastElevationData.length > 1) updateElevation(state.lastElevationData);
 });
 
 // ── Cycling toggle (in menu) ──────────────────────────
