@@ -114,6 +114,11 @@ export function apiCors(extra = {}) {
 export function json(obj, status = 200) {
   return new Response(JSON.stringify(obj), {
     status,
-    headers: apiCors({ "content-type": "application/json" }),
+    // no-store: /api/* reads (e.g. GET /api/links/:slug) can transition from
+    // 404 to 200 the moment a link is created/approved — Workers Cache is
+    // enabled worker-wide, so without this every JSON response here would be
+    // eligible for edge caching under RFC 9111 heuristic freshness and could
+    // serve a stale not-found (or stale admin list) past its actual lifetime.
+    headers: apiCors({ "content-type": "application/json", "cache-control": "no-store" }),
   });
 }
