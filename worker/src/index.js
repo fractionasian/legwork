@@ -12,6 +12,18 @@ const APP_BASE = "https://legwork.day";
 // (Workers — unlike browsers — allow setting User-Agent on outbound fetch.)
 const OVERPASS_UA = "Legwork/1.0 (+https://legwork.day)";
 
+// Workers Cache is enabled worker-wide (wrangler.toml [cache]), so every GET
+// response's Cache-Control decides its own cacheability — there's no per-route
+// opt-out otherwise. R2 has no TTL (path geometry changes slowly enough that
+// staleness is acceptable — see the R2-cache rationale below), so a "revalidate"
+// during the stale-while-revalidate window always re-hits R2, never Overpass;
+// it does not refresh the underlying data. What it buys is edge latency: past
+// the 1-day fresh window, requests get the last-known response immediately
+// while one background request re-warms the edge cache, instead of blocking
+// on a live R2 lookup. Every other response is explicitly no-store so a
+// transient error or a mutable /api/* read is never served stale from the edge.
+const GRAPH_CACHE_CONTROL = "public, max-age=86400, stale-while-revalidate=2592000";
+
 function cors(extra = {}) {
   return {
     "access-control-allow-origin": "*",
@@ -29,12 +41,12 @@ async function handleGraph(request, url, env, ctx) {
     const ip = request.headers.get("cf-connecting-ip") || "anon";
     const { success } = await env.GRAPH_RL.limit({ key: ip });
     if (!success) {
-      return new Response("rate limited", { status: 429, headers: cors({ "retry-after": "60" }) });
+      return new Response("rate limited", { status: 429, headers: cors({ "retry-after": "60", "cache-control": "no-store" }) });
     }
   }
 
   const p = parseGraphParams(url);
-  if (!p.ok) return new Response(p.error, { status: 400, headers: cors() });
+  if (!p.ok) return new Response(p.error, { status: 400, headers: cors({ "cache-control": "no-store" }) });
 
   // Snap the pin to the shared grid: nearby pins collapse to one cell so they
   // share a single cached fetch. Both the key and the Overpass centre use the
@@ -49,7 +61,7 @@ async function handleGraph(request, url, env, ctx) {
   if (hit) {
     return new Response(hit.body, {
       status: 200,
-      headers: cors({ "content-type": "application/json", "cache-status": "hit" }),
+      headers: cors({ "content-type": "application/json", "cache-status": "hit", "cache-control": GRAPH_CACHE_CONTROL }),
     });
   }
 
@@ -65,10 +77,10 @@ async function handleGraph(request, url, env, ctx) {
       },
     });
   } catch (e) {
-    return new Response("overpass unreachable", { status: 502, headers: cors({ "cache-status": "miss-overpass-error" }) });
+    return new Response("overpass unreachable", { status: 502, headers: cors({ "cache-status": "miss-overpass-error", "cache-control": "no-store" }) });
   }
   if (!r.ok) {
-    return new Response("overpass " + r.status, { status: 502, headers: cors({ "cache-status": "miss-overpass-error" }) });
+    return new Response("overpass " + r.status, { status: 502, headers: cors({ "cache-status": "miss-overpass-error", "cache-control": "no-store" }) });
   }
 
   const text = await r.text();
@@ -76,7 +88,7 @@ async function handleGraph(request, url, env, ctx) {
   ctx.waitUntil(env.GRAPH.put(key, text));
   return new Response(text, {
     status: 200,
-    headers: cors({ "content-type": "application/json", "cache-status": "miss" }),
+    headers: cors({ "content-type": "application/json", "cache-status": "miss", "cache-control": GRAPH_CACHE_CONTROL }),
   });
 }
 
@@ -209,9 +221,9 @@ export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     if (url.pathname.startsWith("/api/")) return handleApi(request, env, ctx);
-    if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: cors() });
-    if (url.pathname === "/v1/health") return new Response("ok", { status: 200, headers: cors() });
+    if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: cors({ "cache-control": "no-store" }) });
+    if (url.pathname === "/v1/health") return new Response("ok", { status: 200, headers: cors({ "cache-control": "no-store" }) });
     if (url.pathname === "/v1/graph" && request.method === "GET") return handleGraph(request, url, env, ctx);
-    return new Response("not found", { status: 404, headers: cors() });
+    return new Response("not found", { status: 404, headers: cors({ "cache-control": "no-store" }) });
   },
 };

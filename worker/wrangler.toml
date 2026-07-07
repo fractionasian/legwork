@@ -1,6 +1,14 @@
 name = "legwork-tiles"
 main = "src/index.js"
-compatibility_date = "2026-06-01"
+compatibility_date = "2026-07-07"
+
+# Workers Cache (launched 2026-07-06): edge cache in front of this Worker's
+# fetch handler, keyed by path + query + Cache-Control. A hit never invokes
+# the Worker (no CPU, no R2 read) — only /v1/graph opts in via its own
+# Cache-Control header; every other route explicitly sends no-store so a
+# state-changing/auth-bearing response can never be served stale from cache.
+[cache]
+enabled = true
 
 # R2 bucket binding. The bucket must be created once before first deploy:
 #   wrangler r2 bucket create legwork-graph-cache
