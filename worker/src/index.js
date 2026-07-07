@@ -14,11 +14,14 @@ const OVERPASS_UA = "Legwork/1.0 (+https://legwork.day)";
 
 // Workers Cache is enabled worker-wide (wrangler.toml [cache]), so every GET
 // response's Cache-Control decides its own cacheability — there's no per-route
-// opt-out otherwise. Path geometry changes slowly (see the R2-cache rationale
-// below), so a graph hit is fresh for a day and servable-stale for a month
-// while a background refresh runs; every other response is explicitly
-// no-store so a transient error or a mutable /api/* read is never served
-// stale from the edge.
+// opt-out otherwise. R2 has no TTL (path geometry changes slowly enough that
+// staleness is acceptable — see the R2-cache rationale below), so a "revalidate"
+// during the stale-while-revalidate window always re-hits R2, never Overpass;
+// it does not refresh the underlying data. What it buys is edge latency: past
+// the 1-day fresh window, requests get the last-known response immediately
+// while one background request re-warms the edge cache, instead of blocking
+// on a live R2 lookup. Every other response is explicitly no-store so a
+// transient error or a mutable /api/* read is never served stale from the edge.
 const GRAPH_CACHE_CONTROL = "public, max-age=86400, stale-while-revalidate=2592000";
 
 function cors(extra = {}) {
@@ -218,7 +221,7 @@ export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     if (url.pathname.startsWith("/api/")) return handleApi(request, env, ctx);
-    if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: cors() });
+    if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: cors({ "cache-control": "no-store" }) });
     if (url.pathname === "/v1/health") return new Response("ok", { status: 200, headers: cors({ "cache-control": "no-store" }) });
     if (url.pathname === "/v1/graph" && request.method === "GET") return handleGraph(request, url, env, ctx);
     return new Response("not found", { status: 404, headers: cors({ "cache-control": "no-store" }) });
