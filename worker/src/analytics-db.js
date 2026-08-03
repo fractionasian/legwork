@@ -2,6 +2,8 @@
 // already been validated by analytics-lib.js. Do not add validation in this file
 // — one validation site is the point.
 
+import { isoWeek } from "./analytics-lib.js";
+
 const EVENT_RETENTION_DAYS = 180;
 const DEMAND_RETENTION_WEEKS = 104;
 
@@ -32,8 +34,14 @@ export async function pruneOld(db, { nowSeconds }) {
   const cutoffTs = nowSeconds - EVENT_RETENTION_DAYS * 24 * 3600;
   const ev = await db.prepare("DELETE FROM events WHERE ts < ?").bind(cutoffTs).run();
 
-  const cutoffDate = new Date((nowSeconds - DEMAND_RETENTION_WEEKS * 7 * 24 * 3600) * 1000);
-  const cutoffWeek = cutoffDate.getUTCFullYear() + "-W00";
+  // Must come from isoWeek(), not a hand-built "<year>-W00" string: W00 sorts
+  // below every real week of that year (W01..W53), so a hand-built cutoff never
+  // matches any row from the cutoff year and rows can survive ~155 weeks instead
+  // of 104, only self-correcting at the next year rollover. isoWeek() produces
+  // the same zero-padded YYYY-Www format stored in the table, so the string
+  // comparison in WHERE week < ? is meaningful for every week, including the
+  // cutoff year itself.
+  const cutoffWeek = isoWeek(nowSeconds - DEMAND_RETENTION_WEEKS * 7 * 24 * 3600);
   const dm = await db.prepare("DELETE FROM demand WHERE week < ?").bind(cutoffWeek).run();
 
   return { events: ev.meta.changes ?? 0, demand: dm.meta.changes ?? 0 };
