@@ -75,6 +75,50 @@ test("validateEvent rejects out-of-enum prop values", () => {
   assert.equal(validateEvent({ name: "route-built", props: { km_bucket: "0-5", mode: "loop", profile: "jetpack" } }).ok, false);
 });
 
+test("validateEvent accepts a catalogue city slug and the uncovered sentinel", () => {
+  for (const city of ["perth", "sydney", "london", "tokyo", "uncovered"]) {
+    const r = validateEvent({ name: "route-built", props: { km_bucket: "5-10", mode: "loop", profile: "run", city } });
+    assert.equal(r.ok, true, city);
+    assert.equal(r.props.city, city);
+  }
+});
+
+test("an unrecognised city DROPS THE PROP and KEEPS THE EVENT", () => {
+  // The point of soft-fail. The tile catalogue lives in another repo and gains
+  // cities without a Worker deploy — a hard reject here would silently discard
+  // 100% of route-built from a new city until someone redeployed the Worker.
+  for (const bad of ["Perth", "a", "x".repeat(40), "perth!", "1perth", "", 42, null, {}]) {
+    const r = validateEvent({ name: "route-built", props: { km_bucket: "5-10", mode: "loop", profile: "run", city: bad } });
+    assert.equal(r.ok, true, "event must survive city=" + JSON.stringify(bad));
+    assert.equal("city" in r.props, false, "bad city must not be stored: " + JSON.stringify(bad));
+    // The rest of the event must be intact — a dropped dimension, not a dropped row.
+    assert.deepEqual(
+      { km_bucket: r.props.km_bucket, mode: r.props.mode, profile: r.props.profile },
+      { km_bucket: "5-10", mode: "loop", profile: "run" },
+    );
+  }
+});
+
+test("soft-fail does NOT leak to the hard props", () => {
+  // A bad `mode` must still reject the whole event even when `city` is valid —
+  // otherwise adding one soft prop quietly weakens every other guarantee.
+  const r = validateEvent({ name: "route-built", props: { km_bucket: "5-10", mode: "teleport", profile: "run", city: "perth" } });
+  assert.equal(r.ok, false);
+  assert.match(r.reason, /mode/);
+});
+
+test("route-built without a city is still valid (older client, or manifest not loaded)", () => {
+  const r = validateEvent({ name: "route-built", props: { km_bucket: "0-5", mode: "oneway", profile: "bike" } });
+  assert.equal(r.ok, true);
+  assert.equal("city" in r.props, false);
+});
+
+test("city is not accepted on events that do not declare it", () => {
+  const r = validateEvent({ name: "pin-drop", props: { n: 1, city: "perth" } });
+  assert.equal(r.ok, true);
+  assert.deepEqual(Object.keys(r.props), ["n"]);
+});
+
 test("validateEvent constrains pin-drop n to a sane integer range", () => {
   assert.equal(validateEvent({ name: "pin-drop", props: { n: 3 } }).props.n, 3);
   assert.equal(validateEvent({ name: "pin-drop", props: { n: -5 } }).ok, false);

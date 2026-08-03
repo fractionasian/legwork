@@ -15,16 +15,38 @@ const KM_BUCKETS = ["0-5", "5-10", "10-20", "20+"];
 const MODES = new Set(["loop", "outback", "oneway"]);
 const PROFILES = new Set(["run", "bike"]);
 
+// City slug for `route-built`, e.g. "perth" — or the sentinel "uncovered" when
+// the route is outside every catalogue city.
+//
+// Validated by SHAPE, not by membership in a hardcoded list, and that is the
+// whole design. The tile catalogue lives in a DIFFERENT REPO
+// (fractionasian/legwork-tiles) and gains cities without any Worker deploy, so
+// an allowlist here would silently discard every route-built from city #11 on
+// the day it ships. An allowlist also buys little: this endpoint is
+// unauthenticated, so a hostile client can send an allowlisted value just as
+// easily as any other. The real exposure is unbounded cardinality in the table,
+// and length + charset bound that. Unrecognised slugs are bucketed as "other"
+// at READ time by joining against the current manifest.
+const CITY_RE = /^[a-z][a-z0-9-]{1,30}$/;
+function isCitySlug(v) { return typeof v === "string" && CITY_RE.test(v); }
+
 // Per-event prop schema. A prop absent from its event's schema is DROPPED, not
 // rejected — a newer client can add a field without 400ing against an older
 // Worker. A prop that IS in the schema but carries a bad value is rejected, so
 // a bug cannot quietly write garbage.
+//
+// `soft: true` inverts that last rule for props whose valid set lives OUTSIDE
+// this Worker. For those, a bad value drops the PROP and keeps the EVENT: a
+// missing dimension is recoverable, a missing event is not. Only `city`
+// qualifies today — every other prop comes from an enum that changes only when
+// this file changes, so a bad value there is a real bug and must still reject.
 const PROP_SCHEMA = {
-  "pin-drop": { n: (v) => Number.isInteger(v) && v >= 0 && v <= 1000 },
+  "pin-drop": { n: { test: (v) => Number.isInteger(v) && v >= 0 && v <= 1000 } },
   "route-built": {
-    km_bucket: (v) => KM_BUCKETS.includes(v),
-    mode: (v) => MODES.has(v),
-    profile: (v) => PROFILES.has(v),
+    km_bucket: { test: (v) => KM_BUCKETS.includes(v) },
+    mode: { test: (v) => MODES.has(v) },
+    profile: { test: (v) => PROFILES.has(v) },
+    city: { test: isCitySlug, soft: true },
   },
   "route-export": {},
   "route-save": {},
@@ -81,7 +103,12 @@ export function validateEvent(body) {
   const props = {};
   for (const key of Object.keys(schema)) {
     if (!(key in raw)) continue;
-    if (!schema[key](raw[key])) return { ok: false, reason: "bad value for prop: " + key };
+    const rule = schema[key];
+    if (!rule.test(raw[key])) {
+      // Soft props drop and carry on; hard props still reject the whole event.
+      if (rule.soft) continue;
+      return { ok: false, reason: "bad value for prop: " + key };
+    }
     props[key] = raw[key];
   }
   return { ok: true, name, props };
