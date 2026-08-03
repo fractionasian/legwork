@@ -4,6 +4,8 @@
 // collision-retry and vanity-taken paths are exercised. Not a general SQL engine.
 export function makeD1Mock() {
   const rows = new Map(); // slug -> row
+  const events = [];              // event rows, insertion-ordered
+  const demand = new Map();       // "cell|week" -> hits
 
   function prepare(sql) {
     let args = [];
@@ -11,6 +13,33 @@ export function makeD1Mock() {
       bind(...a) { args = a; return stmt; },
 
       async run() {
+        if (/^\s*INSERT\s+INTO\s+events/i.test(sql)) {
+          const [ts, name, props, country] = args;
+          events.push({ id: events.length + 1, ts, name, props, country: country ?? null });
+          return { success: true, meta: { changes: 1 } };
+        }
+        if (/^\s*INSERT\s+INTO\s+demand/i.test(sql)) {
+          const [cell, week] = args;
+          const key = cell + "|" + week;
+          demand.set(key, (demand.get(key) ?? 0) + 1);
+          return { success: true, meta: { changes: 1 } };
+        }
+        if (/^\s*DELETE\s+FROM\s+events/i.test(sql)) {
+          const [cutoff] = args;
+          const before = events.length;
+          for (let i = events.length - 1; i >= 0; i--) {
+            if (events[i].ts < cutoff) events.splice(i, 1);
+          }
+          return { success: true, meta: { changes: before - events.length } };
+        }
+        if (/^\s*DELETE\s+FROM\s+demand/i.test(sql)) {
+          const [cutoffWeek] = args;
+          let changes = 0;
+          for (const key of [...demand.keys()]) {
+            if (key.split("|")[1] < cutoffWeek) { demand.delete(key); changes++; }
+          }
+          return { success: true, meta: { changes } };
+        }
         if (/^\s*INSERT\s+INTO\s+links/i.test(sql)) {
           const isVanity = sql.includes("'vanity'");
           const slug = args[0];
@@ -84,5 +113,5 @@ export function makeD1Mock() {
     return stmt;
   }
 
-  return { prepare, _rows: rows };
+  return { prepare, _rows: rows, _events: events, _demand: demand };
 }
