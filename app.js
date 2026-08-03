@@ -96,6 +96,32 @@ function kmBucketClient(metres) {
     return "20+";
 }
 
+// Resolve the covered-city slug for the current route, for analytics only.
+// Mirrors nothing on the Worker — the Worker validates by SHAPE, not membership,
+// precisely so this list can change (it lives in the legwork-tiles repo) without
+// a Worker deploy.
+//
+// Reads the ALREADY-FETCHED manifest synchronously and never triggers a fetch:
+// analytics must not add a network dependency to a user action, and this runs
+// inside the route-built debounce timer where an await could outlive the page.
+// No manifest yet -> return null and omit the prop, which is honest ("we don't
+// know") rather than wrong ("uncovered").
+//
+// Attribution is by the route's FIRST waypoint, not the map centre — the map can
+// be panned anywhere after the route is built, but the origin is what the route
+// is about.
+function cityForRoute() {
+    try {
+        if (typeof _manifest === "undefined" || !_manifest) return null;
+        var wp = state.waypoints[0];
+        if (!wp) return null;
+        var hit = findCityForLocation(_manifest, wp.lat, wp.lon);
+        return hit ? hit.id : "uncovered";
+    } catch (e) {
+        return null;   // analytics must never break the app
+    }
+}
+
 // route-built fires on a DEBOUNCE, not on every finalizeRoute(). updateRoute()
 // runs on every waypoint edit and every drag settle, so an undebounced event
 // would outnumber pin-drop and invert the funnel. 3 s after the last redraw
@@ -107,11 +133,16 @@ function trackRouteBuiltDebounced() {
     if (_routeBuiltTimer) clearTimeout(_routeBuiltTimer);
     _routeBuiltTimer = setTimeout(function () {
         _routeBuiltTimer = null;
-        track("route-built", {
+        var props = {
             km_bucket: kmBucketClient(state.totalDistMetres),
             mode: state.mode,
             profile: state.profile,
-        });
+        };
+        // Omitted rather than sent empty when unknown — "prop absent" and
+        // "uncovered" mean different things and must stay distinguishable.
+        var c = cityForRoute();
+        if (c) props.city = c;
+        track("route-built", props);
     }, 3000);
 }
 
@@ -1110,7 +1141,17 @@ function addMidpointMarkers() {
                 midLon = segCoords[0][1];
                 for (var s = 1; s < segCoords.length; s++) {
                     var d = haversine(segCoords[s-1][0], segCoords[s-1][1], segCoords[s][0], segCoords[s][1]);
-                    if (acc + d >= halfDist) {
+                    // `d > 0` guards the division below. A zero-length step makes
+                    // ratio = (halfDist - acc) / 0, and on a fully degenerate
+                    // segment (every coord identical, so totalDist and halfDist
+                    // are both 0) that is 0/0 = NaN on the FIRST iteration —
+                    // which reached Leaflet as "Invalid LatLng object: (NaN,
+                    // NaN)" and threw out of addMidpointMarkers, killing the
+                    // rest of finalizeRoute. Seen 2026-08-04 from a restored
+                    // autosave. Skipping zero-length steps leaves midLat/midLon
+                    // at the seed above, which is correct: a segment of zero
+                    // length IS its own midpoint.
+                    if (d > 0 && acc + d >= halfDist) {
                         var ratio = (halfDist - acc) / d;
                         midLat = segCoords[s-1][0] + ratio * (segCoords[s][0] - segCoords[s-1][0]);
                         midLon = segCoords[s-1][1] + ratio * (segCoords[s][1] - segCoords[s-1][1]);
@@ -1125,6 +1166,15 @@ function addMidpointMarkers() {
                 midLat = (from.lat + to.lat) / 2;
                 midLon = (from.lon + to.lon) / 2;
             }
+
+            // Last line of defence: a non-finite coordinate here (corrupt stored
+            // route, degenerate geometry) makes L.marker THROW, which aborts the
+            // whole loop and the rest of finalizeRoute with it. A midpoint handle
+            // is a convenience affordance — dropping one is invisible, losing the
+            // route redraw is not. Skip it and carry on.
+            // `return`, not `continue`: this loop body is an IIFE, so `continue`
+            // would be a SyntaxError. Returning skips just this pair.
+            if (!isFinite(midLat) || !isFinite(midLon)) return;
 
             var icon = L.divIcon({
                 html: '<div class="wp-midpoint"></div>',

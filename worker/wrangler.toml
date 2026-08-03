@@ -79,5 +79,18 @@ simple = { limit = 5, period = 60 }
 # separate database, which does not isolate an account-wide quota.
 
 # Weekly retention sweep — prunes events past 180 days and demand past 104 weeks.
+#
+# "SUN", not 0, and not 1 either. Cloudflare's weekday field is 1-7 with
+# **1 = Sunday**, deliberately offset from standard cron where 0 = Sunday and
+# 1 = Monday. So the usual "0" is REJECTED outright, and the obvious correction
+# to "1" would read as Monday to anyone who knows cron while actually meaning
+# Sunday to Cloudflare. The 3-letter name is unambiguous under either convention.
+#
+# This bit once: the original "0 17 * * 0" made `wrangler deploy` upload the
+# script fine and then fail only the schedules API call, with the reason
+# ("invalid cron string") visible ONLY under
+# `WRANGLER_LOG=debug WRANGLER_LOG_SANITIZE=false` — the default output just says
+# "a request to the Cloudflare API failed". Deployed 2026-08-04 with no cron
+# attached and nobody would have noticed until the table grew.
 [triggers]
-crons = ["0 17 * * 0"]   # Sunday 17:00 UTC = Monday 01:00 AWST
+crons = ["0 17 * * SUN"]   # Sunday 17:00 UTC = Monday 01:00 AWST
