@@ -53,6 +53,75 @@ try {
 } catch (e) {}
 function anyPoisVisible() { return state.showToilets || state.showWater; }
 
+// ── Analytics ──────────────────────────────────────────
+// Fire-and-forget beacon to our own Worker (POST /v1/event). Never throws,
+// never blocks a user action, never surfaces an error — a failed beacon must be
+// invisible. sendBeacon survives the page navigating away (export and share
+// both can); the keepalive fetch is the fallback for browsers without it.
+//
+// text/plain is deliberate, NOT sloppiness: it is one of the three CORS-
+// safelisted content types, so the beacon skips the preflight entirely.
+// application/json is not safelisted and would force an OPTIONS round trip on
+// every event. The Worker reads request.text() and parses it itself, so the
+// content type is not load-bearing server-side.
+function track(name, props) {
+    try {
+        var payload = JSON.stringify({ name: name, props: props || {} });
+        var url = WORKER_BASE + "/v1/event";
+        if (navigator.sendBeacon) {
+            navigator.sendBeacon(url, new Blob([payload], { type: "text/plain;charset=UTF-8" }));
+            return;
+        }
+        fetch(url, {
+            method: "POST",
+            headers: { "content-type": "text/plain;charset=UTF-8" },
+            body: payload,
+            keepalive: true,
+        }).catch(function () {});
+    } catch (e) {
+        // Analytics must never break the app. Swallowed deliberately.
+    }
+}
+
+// Mirrors kmBucket() in worker/src/analytics-lib.js. Duplicated deliberately:
+// app.js has no build step and cannot import from the Worker. If you change one,
+// change the other — the Worker validates against the same four strings and
+// SILENTLY DROPS an event whose bucket doesn't match (no error anywhere).
+function kmBucketClient(metres) {
+    var m = Number(metres);
+    if (!(m > 0)) return "0-5";
+    if (m < 5000) return "0-5";
+    if (m < 10000) return "5-10";
+    if (m < 20000) return "10-20";
+    return "20+";
+}
+
+// route-built fires on a DEBOUNCE, not on every finalizeRoute(). updateRoute()
+// runs on every waypoint edit and every drag settle, so an undebounced event
+// would outnumber pin-drop and invert the funnel. 3 s after the last redraw
+// ≈ "the user stopped fiddling", which is what "what lengths do people build?"
+// actually asks. The timer reads state at FIRE time, not schedule time, so it
+// reports the settled route, not an intermediate one.
+var _routeBuiltTimer = null;
+function trackRouteBuiltDebounced() {
+    if (_routeBuiltTimer) clearTimeout(_routeBuiltTimer);
+    _routeBuiltTimer = setTimeout(function () {
+        _routeBuiltTimer = null;
+        track("route-built", {
+            km_bucket: kmBucketClient(state.totalDistMetres),
+            mode: state.mode,
+            profile: state.profile,
+        });
+    }, 3000);
+}
+
+// Cancel a pending route-built. Without this, building a route and then clearing
+// it within the debounce window still reports a route-built — with the CLEARED
+// distance, since the timer reads state at fire time.
+function cancelRouteBuilt() {
+    if (_routeBuiltTimer) { clearTimeout(_routeBuiltTimer); _routeBuiltTimer = null; }
+}
+
 // ── Map init ───────────────────────────────────────────
 function initMap() {
     state.map = L.map("map").setView([0, 0], 2);
@@ -583,6 +652,7 @@ function onMapClick(e) { addWaypointAt(e.latlng.lat, e.latlng.lng); }
 
 async function addWaypointAt(lat, lon, opts) {
     var num = state.waypoints.length + 1;
+    track("pin-drop", { n: num });
 
     // Synchronous fast path: if state.graph already has a usable node within 200m
     // of the tap, create the marker directly in ready state — no red flash.
@@ -810,6 +880,11 @@ function finalizeRoute(allRouteCoords, routeOk) {
     debouncedFetchElevation(elevCoords);
     updateShareHash();
     saveRoute();
+    // Only a route that actually connected counts as built — a red-segment
+    // route is a failed attempt, and counting it would inflate the funnel with
+    // the exact cases the app didn't serve. updateDistance() ran above, so
+    // state.totalDistMetres is current before the debounce timer reads it.
+    if (routeOk) trackRouteBuiltDebounced();
 }
 
 async function updateRoute() {
@@ -827,6 +902,7 @@ async function updateRoute() {
         // updateRoute() can run.
         updateShareHash();
         saveRoute();
+        cancelRouteBuilt();
         // First-run nudge: one marker on the map, no route yet. Only show if no
         // louder banner is up (loading / error), and clear when we dismiss later.
         var bannerEl = document.getElementById("info-banner");
@@ -1483,6 +1559,8 @@ async function exportGPX() {
         showBanner("Add at least 2 waypoints first");
         return;
     }
+    // After the guard, not before: an export that early-returned isn't an export.
+    track("route-export", {});
     var coords = [];
     for (var s = 0; s < state.routeSegments.length; s++) {
         var seg = state.routeSegments[s];
@@ -2239,6 +2317,12 @@ async function confirmSaveRoute() {
         showBanner("Route saved: " + name, "success");
         clearBannerAfter(2500);
         renderSavedRoutes();
+        // Fires HERE, not in saveNamedRoute() — that only opens the name prompt.
+        // Past the re-entry guard, the empty-name bail, and a completed IndexedDB
+        // transaction, so this counts real saves, not abandoned dialogs or failed
+        // writes. (saveRoute() at the autosave site would be wronger still: it
+        // runs on every edit.)
+        track("route-save", {});
     } catch (e) {
         console.error("save route:", e);
         showBanner("Couldn't save route — your browser storage may be full");
@@ -2691,6 +2775,10 @@ async function shortenCurrentRoute() {
             throw new Error("unexpected url shape");
         }
         copyText(data.url, "Short link copied!");
+        // After the url-shape check, so a rejected response isn't counted as a
+        // share — the catch below falls back to copying the full link, which is
+        // a different outcome for the user and shouldn't look identical here.
+        track("route-share", {});
     } catch (e) {
         copyText(window.location.href, "Couldn't shorten — copied the full link");
     }
