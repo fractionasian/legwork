@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import worker from "../src/index.js";
+import { makeD1Mock } from "./_d1mock.mjs";
 
 // Minimal R2 mock: in-memory map. .get returns an object whose .body is the
 // stored string (Response accepts a string body, mirroring R2's stream body).
@@ -123,4 +124,31 @@ test("graph responses carry x-content-type-options: nosniff", async () => {
   const env = mockEnv({ "g:-31.950:115.860:2000": '{"elements":[1]}' });
   const res = await worker.fetch(new Request("https://w.dev/v1/graph?lat=-31.95&lon=115.861&radius=2000"), env, ctx);
   assert.equal(res.headers.get("x-content-type-options"), "nosniff");
+});
+
+// Router-level coverage: the analytics-handler tests all call handleEvent()
+// directly, which bypasses the OPTIONS-preflight branch in fetch() entirely.
+// The app is served from legwork.day but calls the *.workers.dev origin, so a
+// POST with a JSON content-type triggers a REAL cross-origin preflight — it
+// must be answered with POST allowed and content-type allowed, or a real
+// browser blocks the actual request even though every direct-call test passes.
+test("OPTIONS /v1/event answers the preflight with POST and content-type allowed", async () => {
+  const res = await worker.fetch(new Request("https://w.dev/v1/event", { method: "OPTIONS" }), mockEnv(), ctx);
+  assert.equal(res.status, 204);
+  const methods = res.headers.get("access-control-allow-methods") || "";
+  const headers = res.headers.get("access-control-allow-headers") || "";
+  assert.ok(methods.includes("POST"), "access-control-allow-methods must include POST, got: " + methods);
+  assert.ok(headers.includes("content-type"), "access-control-allow-headers must include content-type, got: " + headers);
+});
+
+test("POST /v1/event reaches handleEvent through the router and returns 204", async () => {
+  const DB = makeD1Mock();
+  const req = new Request("https://w.dev/v1/event", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ name: "pin-drop", props: { n: 1 } }),
+  });
+  const res = await worker.fetch(req, { ...mockEnv(), DB }, ctx);
+  assert.equal(res.status, 204);
+  assert.equal(DB._events.length, 1, "the router must have dispatched to handleEvent, which wrote one row");
 });

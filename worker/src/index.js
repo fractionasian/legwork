@@ -241,6 +241,14 @@ export async function handleEvent(request, env, ctx) {
     if (!success) return NO_CONTENT();
   }
 
+  // Best-effort pre-read reject: if the client declared a Content-Length over
+  // the cap, bail out before buffering a single byte of the body. This is the
+  // primary defence against an unbounded body; the post-read length check
+  // below is the backstop for when the header is absent or understates the
+  // truth (chunked transfer, a lying client).
+  const declaredLen = Number(request.headers.get("content-length"));
+  if (Number.isFinite(declaredLen) && declaredLen > MAX_EVENT_BODY) return NO_CONTENT();
+
   let body;
   try {
     const text = await request.text();
@@ -271,7 +279,16 @@ export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     if (url.pathname.startsWith("/api/")) return handleApi(request, env, ctx);
-    if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: cors({ "cache-control": "no-store" }) });
+    if (request.method === "OPTIONS") {
+      // /v1/event needs the same preflight response as /api/* (handleApi
+      // answers its own OPTIONS with apiCors() above): the app is served from
+      // legwork.day but calls the *.workers.dev origin, so a POST with a JSON
+      // content-type triggers a REAL cross-origin preflight. apiCors()
+      // advertises POST and allows the content-type header; cors() doesn't.
+      // Every other /v1/* route is GET-only and keeps the narrower cors().
+      const preflightCors = url.pathname === "/v1/event" ? apiCors : cors;
+      return new Response(null, { status: 204, headers: preflightCors({ "cache-control": "no-store" }) });
+    }
     if (url.pathname === "/v1/health") return new Response("ok", { status: 200, headers: cors({ "cache-control": "no-store" }) });
     if (url.pathname === "/v1/graph" && request.method === "GET") return handleGraph(request, url, env, ctx);
     if (url.pathname === "/v1/event" && request.method === "POST") return handleEvent(request, env, ctx);
@@ -279,8 +296,13 @@ export default {
   },
 
   async scheduled(event, env, ctx) {
+    // Log before swallowing — matching handleApi's precedent (console.error,
+    // then a safe fallback). Without this, a persistently broken retention job
+    // (schema drift, D1 outage) produces zero signal in `wrangler tail`.
     ctx.waitUntil(
-      pruneOld(env.DB, { nowSeconds: Math.floor(Date.now() / 1000) }).catch(() => {}),
+      pruneOld(env.DB, { nowSeconds: Math.floor(Date.now() / 1000) }).catch((e) => {
+        console.error("scheduled prune:", e);
+      }),
     );
   },
 };
