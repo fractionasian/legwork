@@ -40,13 +40,43 @@ binding = "DB"
 database_name = "legwork-links"
 database_id = "38de93c4-53dc-408c-afb0-9c647979f354"
 
-# Per-IP rate limit on analytics ingest (120 requests / 60 s). Higher than the
+# Per-IP rate limit on analytics ingest (30 requests / 60 s). Higher than the
 # links limit because one active session legitimately fires several events per
-# minute; low enough that a single client cannot flood D1's daily write budget.
+# minute (pin drops, plus a 3 s-debounced route-built per edit); 30 leaves that
+# uncut while bounding the flood. It does NOT make a flood harmless — see the
+# write-budget note below.
 [[ratelimits]]
 name = "EVENT_RL"
 namespace_id = "1003"
-simple = { limit = 120, period = 60 }
+simple = { limit = 30, period = 60 }
+
+# Per-IP budget on the /v1/graph demand counter (5 writes / 60 s). NOT a request
+# limit — GRAPH_RL already caps requests at 60/60 s; this caps only the D1 write
+# each request would otherwise make. Rationale + why sampling was rejected: see
+# the WRITE BUDGET comment in src/index.js handleGraph.
+[[ratelimits]]
+name = "DEMAND_RL"
+namespace_id = "1004"
+simple = { limit = 5, period = 60 }
+
+# ── D1 write budget, account-wide ──────────────────────────────────────────
+# D1's free-tier 100k writes/day is per ACCOUNT, not per database, and `events`,
+# `demand`, and `links` all live in legwork-links — so an analytics write flood
+# breaks the live short-link feature. Worst case from a single IP sustained for
+# 24 h, per-colo (Cloudflare rate limits count per-colo, so a distributed client
+# multiplies these):
+#
+#   /v1/graph demand   DEMAND_RL  5/60 s  →   7,200 writes/day
+#   /v1/event          EVENT_RL  30/60 s  →  43,200 writes/day
+#   combined                              →  50,400 ≈ 50% of the daily budget
+#
+# Down from 259,200 (2.6× the whole budget) before these limits, but NOT zero
+# risk: a determined sustained flood can still consume half the account's daily
+# D1 writes. Accepted for now — the Worker's own free-plan ceiling of 100k
+# requests/day binds at roughly the same point, so such a flood is a Worker DoS
+# regardless; these limits stop it also taking short links down. If it ever
+# bites, the escalation is a paid D1 plan (raises the write ceiling) — NOT a
+# separate database, which does not isolate an account-wide quota.
 
 # Weekly retention sweep — prunes events past 180 days and demand past 104 weeks.
 [triggers]

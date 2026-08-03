@@ -91,6 +91,36 @@ test("two pins in the same cell collapse to one demand row with two hits", async
   assert.equal([...DB._demand.values()][0], 2);
 });
 
+test("a graph request over the demand write budget still routes, but records no demand", async () => {
+  const DB = makeD1Mock();
+  const GRAPH = { get: async () => ({ body: '{"elements":[]}' }) };
+  const DEMAND_RL = { limit: async () => ({ success: false }) };
+  const url = new URL("https://w.example/v1/graph?lat=-31.9523&lon=115.8613&radius=2000");
+  const res = await handleGraph(new Request(url), url, { GRAPH, DB, DEMAND_RL }, ctx);
+  assert.equal(res.status, 200, "the write budget must never degrade the routing response");
+  assert.equal(await res.text(), '{"elements":[]}');
+  assert.equal(DB._demand.size, 0);
+});
+
+test("a graph request under the demand write budget records demand as normal", async () => {
+  const DB = makeD1Mock();
+  const GRAPH = { get: async () => ({ body: '{"elements":[]}' }) };
+  const DEMAND_RL = { limit: async () => ({ success: true }) };
+  const url = new URL("https://w.example/v1/graph?lat=-31.9523&lon=115.8613&radius=2000");
+  await handleGraph(new Request(url), url, { GRAPH, DB, DEMAND_RL }, ctx);
+  assert.equal(DB._demand.size, 1);
+});
+
+test("the demand write budget is keyed by client IP, not globally", async () => {
+  const DB = makeD1Mock();
+  const GRAPH = { get: async () => ({ body: '{"elements":[]}' }) };
+  const keys = [];
+  const DEMAND_RL = { limit: async ({ key }) => { keys.push(key); return { success: true }; } };
+  const url = new URL("https://w.example/v1/graph?lat=-31.9523&lon=115.8613&radius=2000");
+  await handleGraph(new Request(url, { headers: { "cf-connecting-ip": "203.0.113.7" } }), url, { GRAPH, DB, DEMAND_RL }, ctx);
+  assert.deepEqual(keys, ["203.0.113.7"]);
+});
+
 test("a bad-parameter graph request records no demand", async () => {
   const DB = makeD1Mock();
   const GRAPH = { get: async () => null };

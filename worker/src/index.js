@@ -64,12 +64,32 @@ export async function handleGraph(request, url, env, ctx) {
   // away, and introduces no new coordinate precision. Placed after parameter
   // validation so a malformed request never counts, and before the cache lookup
   // so a HIT counts as much as a MISS (a hit is still a person routing here).
+  //
+  // WRITE BUDGET. /v1/graph is unauthenticated, so a write on every request
+  // would let one client exhaust D1's ACCOUNT-WIDE 100k writes/day — GRAPH_RL
+  // alone permits 86,400/day from a single IP — and `demand` shares the
+  // legwork-links database, so exhaustion takes the live short-link feature
+  // down with it. The house pattern for this (the hit counter below, ~line 180)
+  // is 1% random sampling. Sampling is wrong HERE: it costs the honest signal
+  // exactly as much as the flood, and at Legwork's real volume a 1% sample
+  // leaves nothing to rank cells by — which is the only thing demand is for.
+  // A per-IP budget is the better-targeted control: an honest session drops far
+  // fewer than DEMAND_RL's 5 pins/minute so its demand is counted in FULL,
+  // while a flooding IP is capped at 7,200 writes/day (8% of the budget, down
+  // from 86%). The check runs inside waitUntil so it adds no response latency.
   if (env.DB) {
     ctx.waitUntil(
-      bumpDemand(env.DB, {
-        cell: demandCell(slat, slon),
-        week: isoWeek(Math.floor(Date.now() / 1000)),
-      }).catch(() => {}),
+      (async () => {
+        if (env.DEMAND_RL) {
+          const ip = request.headers.get("cf-connecting-ip") || "anon";
+          const { success } = await env.DEMAND_RL.limit({ key: ip });
+          if (!success) return;
+        }
+        await bumpDemand(env.DB, {
+          cell: demandCell(slat, slon),
+          week: isoWeek(Math.floor(Date.now() / 1000)),
+        });
+      })().catch(() => {}),
     );
   }
 
