@@ -36,7 +36,7 @@ function cors(extra = {}) {
   };
 }
 
-async function handleGraph(request, url, env, ctx) {
+export async function handleGraph(request, url, env, ctx) {
   // Per-IP rate limit (native Workers binding). Guarded so the handler still
   // works if the binding is absent (e.g. in unit tests without it).
   if (env.GRAPH_RL) {
@@ -58,6 +58,20 @@ async function handleGraph(request, url, env, ctx) {
   const slon = snap(p.lon);
   const sradius = snapRadius(p.radius);
   const key = cacheKey(slat, slon, sradius);
+
+  // Record routing demand. The cell derives from the SAME snapped coords the
+  // cache key uses — this stores a value that was already computed and thrown
+  // away, and introduces no new coordinate precision. Placed after parameter
+  // validation so a malformed request never counts, and before the cache lookup
+  // so a HIT counts as much as a MISS (a hit is still a person routing here).
+  if (env.DB) {
+    ctx.waitUntil(
+      bumpDemand(env.DB, {
+        cell: demandCell(slat, slon),
+        week: isoWeek(Math.floor(Date.now() / 1000)),
+      }).catch(() => {}),
+    );
+  }
 
   const hit = await env.GRAPH.get(key);
   if (hit) {
