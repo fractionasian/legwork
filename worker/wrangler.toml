@@ -39,3 +39,15 @@ simple = { limit = 20, period = 60 }
 binding = "DB"
 database_name = "legwork-links"
 database_id = "38de93c4-53dc-408c-afb0-9c647979f354"
+
+# Per-IP rate limit on analytics ingest (120 requests / 60 s). Higher than the
+# links limit because one active session legitimately fires several events per
+# minute; low enough that a single client cannot flood D1's daily write budget.
+[[ratelimits]]
+name = "EVENT_RL"
+namespace_id = "1003"
+simple = { limit = 120, period = 60 }
+
+# Weekly retention sweep — prunes events past 180 days and demand past 104 weeks.
+[triggers]
+crons = ["0 17 * * 0"]   # Sunday 17:00 UTC = Monday 01:00 AWST

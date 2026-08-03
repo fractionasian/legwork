@@ -1,6 +1,8 @@
 import { OVERPASS_URL, buildOverpassQuery, parseGraphParams, cacheKey, snap, snapRadius } from "./lib.js";
 import { validateRouteHash, validateVanitySlug, apiCors, json } from "./links-lib.js";
 import { createRandomLink, getActive, requestVanity, setStatus, purgeLink, listPending, bumpHits, TakenError } from "./links-db.js";
+import { validateEvent, isoWeek, demandCell } from "./analytics-lib.js";
+import { insertEvent, bumpDemand, pruneOld } from "./analytics-db.js";
 
 // App now lives at legwork.day (github.io/legwork stays as a working alias).
 // APP_BASE builds the short-link URLs returned by POST /api/links.
@@ -217,6 +219,54 @@ async function handleApiInner(request, env, ctx) {
   return json({ error: "not found" }, 404);
 }
 
+// ── Analytics ingest (/v1/event) ────────────────────────────────────────────
+
+// Cap the body before parsing. 8 KB is ~50x the largest legitimate event and
+// stops a client streaming an unbounded body into JSON.parse.
+const MAX_EVENT_BODY = 8192;
+
+// Analytics ingest. ALWAYS 204, never a body, on every path including rejection:
+// this is called from sendBeacon, so a 4xx would surface as a console error on a
+// user action that otherwise succeeded. Rejections are silent by design — the
+// tests assert this, do not "improve" it into returning error codes.
+export async function handleEvent(request, env, ctx) {
+  const NO_CONTENT = () => new Response(null, {
+    status: 204,
+    headers: apiCors({ "cache-control": "no-store" }),
+  });
+
+  if (env.EVENT_RL) {
+    const ip = request.headers.get("cf-connecting-ip") || "anon";
+    const { success } = await env.EVENT_RL.limit({ key: ip });
+    if (!success) return NO_CONTENT();
+  }
+
+  let body;
+  try {
+    const text = await request.text();
+    if (text.length > MAX_EVENT_BODY) return NO_CONTENT();
+    body = JSON.parse(text);
+  } catch {
+    return NO_CONTENT();
+  }
+
+  const v = validateEvent(body);
+  if (!v.ok) return NO_CONTENT();
+
+  // Country comes from Cloudflare, never from the request body — a client-
+  // supplied "country" field is ignored (asserted by test).
+  const country = (request.cf && request.cf.country) || null;
+  const ts = Math.floor(Date.now() / 1000);
+
+  // Fire-and-forget, matching the existing R2 write in handleGraph. A dropped
+  // write loses one count and is never user-visible.
+  ctx.waitUntil(
+    insertEvent(env.DB, { ts, name: v.name, props: v.props, country }).catch(() => {}),
+  );
+
+  return NO_CONTENT();
+}
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
@@ -224,6 +274,13 @@ export default {
     if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: cors({ "cache-control": "no-store" }) });
     if (url.pathname === "/v1/health") return new Response("ok", { status: 200, headers: cors({ "cache-control": "no-store" }) });
     if (url.pathname === "/v1/graph" && request.method === "GET") return handleGraph(request, url, env, ctx);
+    if (url.pathname === "/v1/event" && request.method === "POST") return handleEvent(request, env, ctx);
     return new Response("not found", { status: 404, headers: cors({ "cache-control": "no-store" }) });
+  },
+
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(
+      pruneOld(env.DB, { nowSeconds: Math.floor(Date.now() / 1000) }).catch(() => {}),
+    );
   },
 };
