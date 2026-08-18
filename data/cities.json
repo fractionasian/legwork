@@ -2,7 +2,7 @@
   {
     "id": "perth",
     "name": "Perth",
-    "bounds": [-32.15, 115.65, -31.75, 116.05]
+    "bounds": [-32.35, 115.65, -31.75, 116.05]
   },
   {
     "id": "melbourne",
@@ -48,5 +48,10 @@
     "id": "tokyo",
     "name": "Tokyo",
     "bounds": [35.60, 139.60, 35.80, 139.85]
+  },
+  {
+    "id": "singapore",
+    "name": "Singapore",
+    "bounds": [1.21, 103.60, 1.47, 104.05]
   }
 ]
