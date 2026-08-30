@@ -103,7 +103,10 @@ async function cachePruneStale(currentTileVersion) {
                 if (!cur) return;
                 var key = String(cur.key);
                 var stale = false;
-                if (key.indexOf("tile:") === 0) {
+                // tile: and poiscity: entries carry the manifest version as
+                // their trailing :segment — anything not on the current
+                // version is orphaned.
+                if (key.indexOf("tile:") === 0 || key.indexOf("poiscity:") === 0) {
                     stale = key.slice(key.lastIndexOf(":") + 1) !== String(currentTileVersion);
                 } else {
                     for (var i = 0; i < STALE_KEY_PREFIXES.length; i++) {

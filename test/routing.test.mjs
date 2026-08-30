@@ -226,3 +226,36 @@ test("sampleRoute — keeps first + last, samples by interval", () => {
   assert.deepEqual(pts[0], [0, 0]);
   assert.deepEqual(pts[pts.length - 1], [0, 0.03]);
 });
+
+test("poiFromOsmElement — nodes, centred ways, and rejects map correctly", () => {
+  // Node: direct lat/lon, type-prefixed id, flag coercion.
+  const node = R.poiFromOsmElement({
+    type: "node", id: 42, lat: 1.3, lon: 103.8,
+    tags: { amenity: "toilets", name: "Marina Bay", fee: "yes", male: "yes", wheelchair: "limited" },
+  });
+  assert.equal(node.id, "n42");
+  assert.equal(node.lat, 1.3);
+  assert.equal(node.amenity, "toilets");
+  assert.equal(node.fee, "yes");
+  assert.equal(node.male, true);
+  assert.equal(node.female, false); // absent tag → false, not undefined
+  assert.equal(node.wheelchair, "limited");
+  // Way: uses the `out center` centroid; id prefixed w so it can't collide with node 42.
+  const way = R.poiFromOsmElement({
+    type: "way", id: 42, center: { lat: -31.9, lon: 115.8 },
+    tags: { amenity: "drinking_water", access: "yes" },
+  });
+  assert.equal(way.id, "w42");
+  assert.equal(way.lat, -31.9);
+  assert.equal(way.access, "yes");
+  // toilets:access wins over plain access when both exist.
+  const dual = R.poiFromOsmElement({
+    type: "node", id: 7, lat: 0, lon: 0,
+    tags: { amenity: "toilets", "toilets:access": "customers", access: "yes" },
+  });
+  assert.equal(dual.access, "customers");
+  // Rejects: no tags, no amenity, non-node without a centre.
+  assert.equal(R.poiFromOsmElement({ type: "node", id: 1, lat: 0, lon: 0 }), null);
+  assert.equal(R.poiFromOsmElement({ type: "node", id: 1, lat: 0, lon: 0, tags: { name: "x" } }), null);
+  assert.equal(R.poiFromOsmElement({ type: "relation", id: 1, tags: { amenity: "toilets" } }), null);
+});

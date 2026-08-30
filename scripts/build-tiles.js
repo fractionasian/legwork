@@ -3,6 +3,9 @@
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
+// Shared with the client so the baked pois.json and the live loadPois
+// fallback can never drift in shape.
+const { poiFromOsmElement } = require(path.join(__dirname, "..", "routing.js"));
 
 const TILE_SIZE = 0.05;
 const HIGHWAYS = [
@@ -142,6 +145,39 @@ async function queryOverpass(bounds) {
         } catch (e) {
             lastError = e;
             console.log(`  Endpoint ${endpoint} failed: ${e.message}`);
+        }
+    }
+    throw lastError;
+}
+
+// Fetch toilets + drinking water for a city bbox. Same POI shape the client's
+// live loadPois produces (poiFromOsmElement), so pre-baked and live results
+// are interchangeable. Published as one pois.json per city — small enough
+// (hundreds of KB at most) that per-tile splitting isn't worth it.
+async function queryPois(bounds) {
+    const [south, west, north, east] = bounds;
+    const bbox = `(${south},${west},${north},${east})`;
+    // nwr = node/way/relation; `out center` gives non-node elements a centroid.
+    const query = `[out:json][timeout:120];\n(nwr["amenity"="toilets"]${bbox};nwr["amenity"="drinking_water"]${bbox};);\nout center;`;
+
+    let lastError;
+    for (const endpoint of OVERPASS_ENDPOINTS) {
+        try {
+            const data = await fetchJSON(endpoint, {
+                method: "POST",
+                body: "data=" + encodeURIComponent(query),
+                headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            });
+            const pois = [];
+            for (const el of data.elements || []) {
+                const poi = poiFromOsmElement(el);
+                if (poi) pois.push(poi);
+            }
+            console.log(`  Got ${pois.length} POIs from ${endpoint}`);
+            return pois;
+        } catch (e) {
+            lastError = e;
+            console.log(`  POI endpoint ${endpoint} failed: ${e.message}`);
         }
     }
     throw lastError;
@@ -293,7 +329,20 @@ async function buildCity(city, dataDir, options) {
         });
     }
 
-    return { rows, cols, tiles: tileMeta };
+    // Pre-baked POIs (toilets + drinking water) — soft-fail: path tiles are
+    // the primary product, and a missing pois entry in the manifest just
+    // sends the client down its live Overpass fallback for this city.
+    let pois = null;
+    try {
+        await sleep(5000); // be polite between the path query and the POI query
+        const cityPois = await queryPois(city.bounds);
+        fs.writeFileSync(path.join(tileDir, "pois.json"), JSON.stringify(cityPois));
+        pois = { file: "pois.json", count: cityPois.length };
+    } catch (e) {
+        console.log(`  POI fetch failed for ${city.name} — skipping pre-baked POIs: ${e.message}`);
+    }
+
+    return { rows, cols, tiles: tileMeta, pois };
 }
 
 function parseArgs(argv) {
@@ -374,6 +423,7 @@ async function main() {
             grid: [result.rows, result.cols],
             tiles: result.tiles,
         };
+        if (result.pois) manifest.cities[city.id].pois = result.pois;
         if (i < cities.length - 1) {
             // Spacing Overpass queries — individual endpoints rate-limit per-IP.
             console.log("\n  Waiting 30s before next Overpass query...");
