@@ -34,11 +34,34 @@
 const fs = require("fs");
 const path = require("path");
 
+// `level` is the OSM admin_level that means "suburb" in that country; `iso` is
+// the ISO3166-1 code the query is confined to.
+//
+// The `iso` constraint is not optional bookkeeping. A city bbox does not stop at
+// a border: Singapore's reaches into Johor, and a bbox-only query returned the
+// Malaysian DISTRICTS "Johor Bahru" and "Kota Tinggi" alongside the 55 planning
+// areas — same admin_level, completely different geographic scale, and no
+// failure signal. That is the LGA-scale trap (a "City of Rockingham" swallowing
+// a dozen suburbs), arriving from the other side of a border.
 const ADMIN_LEVEL = {
-    perth: 9,
+    // AU 9 — Dalkeith, Willetton, Rivervale.
+    perth: { level: 9, iso: "AU" },
+    // SG 6 — planning areas: Novena, Orchard, Toa Payoh, Bukit Merah. These are
+    // the names locals use and what Photon returns as `district`. Level 7 is
+    // finer (subzones: Sungei Road, Little India), below what anyone would call
+    // the area they ran in.
+    singapore: { level: 6, iso: "SG" },
+    // KNOWN GAP — Singapore's bbox crosses the Johor Strait, so 7 tiles
+    // (~6,900 ways: Eco Botani, Pasir Gudang, Tanjung Langsat) sit in Malaysia
+    // and now label as "Unknown". That is an improvement on what they showed
+    // before (Malaysian STREET names — "Jalan Keluli 7" — which were never
+    // suburbs), but it is not the answer. Fixing it means letting a city carry
+    // more than one {level, iso} and merging the results; the MY suburb-scale
+    // level was not probed because Overpass was rate-limiting at the time.
+    // Do that before anyone relies on Johor labels.
     // Add a city only after eyeballing its names at the chosen level.
-    // melbourne: 9, adelaide: 9, brisbane: 9, sydney: 9, canberra: 9,
-    // darwin: 9, hobart: 9, singapore: 6, tokyo: 7, london: 8,
+    // melbourne/adelaide/brisbane/sydney/canberra/darwin/hobart: { level: 9, iso: "AU" },
+    // tokyo: { level: 7, iso: "JP" }, london: { level: 8, iso: "GB" },
 };
 
 // ~11 m at Perth's latitude. Suburb boundaries do not need better, and 5 dp
@@ -217,18 +240,21 @@ function findOverlaps(feats, bounds) {
 }
 
 async function buildCity(city, outDir) {
-    const level = ADMIN_LEVEL[city.id];
-    if (!level) {
+    const cfg = ADMIN_LEVEL[city.id];
+    if (!cfg) {
         console.error(`\n${city.name}: no admin_level configured — refusing to guess.`);
         console.error(`  Probe it first, then add to ADMIN_LEVEL. A wrong level yields`);
         console.error(`  plausible names at the wrong scale (LGAs, or city blocks).`);
         return null;
     }
-    console.log(`\n${city.name} (admin_level=${level})...`);
+    const { level, iso } = cfg;
+    console.log(`\n${city.name} (admin_level=${level}, ${iso})...`);
     const [s, w, n, e] = city.bounds;
     const data = await overpass(
         `[out:json][timeout:180];\n` +
-        `relation["boundary"="administrative"]["admin_level"="${level}"](${s},${w},${n},${e});\nout geom;`
+        `area["ISO3166-1"="${iso}"]["admin_level"="2"]->.country;\n` +
+        `relation["boundary"="administrative"]["admin_level"="${level}"](area.country)(${s},${w},${n},${e});\n` +
+        `out geom;`
     );
 
     const feats = [];
