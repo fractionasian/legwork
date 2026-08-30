@@ -917,6 +917,9 @@ function finalizeRoute(allRouteCoords, routeOk) {
         elevCoords = allRouteCoords.concat(allRouteCoords.slice().reverse().slice(1));
     }
     debouncedFetchElevation(elevCoords);
+    // The route changed, so the POI corridor did too. Debounced: a waypoint
+    // drag re-finalises continuously and this collapses to one refresh.
+    if (anyPoisVisible()) debouncedRefreshPois();
     updateShareHash();
     saveRoute();
     // Only a route that actually connected counts as built — a red-segment
@@ -942,6 +945,9 @@ async function updateRoute() {
         updateShareHash();
         saveRoute();
         cancelRouteBuilt();
+        // Route gone (Clear, or deleted down to one pin) — the corridor filter
+        // has nothing to narrow to, so let the area view come back.
+        if (anyPoisVisible()) debouncedRefreshPois();
         // First-run nudge: one marker on the map, no route yet. Only show if no
         // louder banner is up (loading / error), and clear when we dismiss later.
         var bannerEl = document.getElementById("info-banner");
@@ -1067,6 +1073,12 @@ async function refreshPois() {
     var c = state.map.getCenter();
     var pois = await loadPois(c.lat, c.lng);
     if (gen !== _poiGen) return; // a newer refresh owns reconciliation
+    // Once a route exists it already answers "where am I going", so narrow the
+    // pins to what's actually on the way — a toggle-on in central Singapore
+    // otherwise drops ~570 markers on the map when the run passes about 19.
+    // With no route, the area view stays: that's the only thing that can
+    // answer "what's around here" while you're still deciding.
+    if (pois) pois = filterPoisNearRoute(pois, routePolylines(), POI_ROUTE_CORRIDOR_M);
     // User may have toggled everything off during the fetch.
     if (!anyPoisVisible()) {
         for (var j = 0; j < state.poiMarkers.length; j++) state.map.removeLayer(state.poiMarkers[j]);
@@ -1109,6 +1121,27 @@ async function refreshPois() {
         marker.addTo(state.map);
         state.poiMarkers.push(marker);
     }
+}
+
+// How far off the route a toilet or fountain still counts as "on the way".
+// 400 m is a detour of under half a kilometre out and back — far enough to
+// catch a fountain on the next parallel street, tight enough that the map
+// stops being a pincushion.
+var POI_ROUTE_CORRIDOR_M = 400;
+
+// The drawn route as a list of [lat, lon] polylines, for the POI corridor.
+// Out-and-back needs no mirrored geometry: the return leg retraces the same
+// corridor. Empty while there's no route — filterPoisNearRoute reads that as
+// "don't filter".
+function routePolylines() {
+    var lines = [];
+    for (var i = 0; i < state.routeSegments.length; i++) {
+        if (state.routeSegments[i] && state.routeSegments[i].length > 1) lines.push(state.routeSegments[i]);
+    }
+    if (state.mode === "loop" && state.closingCoords && state.closingCoords.length > 1) {
+        lines.push(state.closingCoords);
+    }
+    return lines;
 }
 
 var _poiTimer = null;

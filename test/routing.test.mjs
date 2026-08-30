@@ -259,3 +259,49 @@ test("poiFromOsmElement — nodes, centred ways, and rejects map correctly", () 
   assert.equal(R.poiFromOsmElement({ type: "node", id: 1, lat: 0, lon: 0, tags: { name: "x" } }), null);
   assert.equal(R.poiFromOsmElement({ type: "relation", id: 1, tags: { amenity: "toilets" } }), null);
 });
+
+test("distPointToSegmentMetres — on-line, perpendicular, and past-the-end cases", () => {
+  // A ~111 m north-south segment at the equator (1e-3 deg lat).
+  const d0 = R.distPointToSegmentMetres(0, 0, 0, 0, 0.001, 0);
+  assert.ok(d0 < 0.01, "a point ON the segment start measures ~0, got " + d0);
+  // Perpendicular offset of 0.001 deg lon at the equator ≈ 111.3 m.
+  const dPerp = R.distPointToSegmentMetres(0.0005, 0.001, 0, 0, 0.001, 0);
+  assert.ok(Math.abs(dPerp - 111.32) < 1, "perpendicular ≈111 m, got " + dPerp);
+  // Past the end: clamps to the endpoint, not the infinite line. A point
+  // 0.001 deg NORTH of the northern endpoint is ~111 m from it; the infinite
+  // line would say 0.
+  const dPast = R.distPointToSegmentMetres(0.002, 0, 0, 0, 0.001, 0);
+  assert.ok(Math.abs(dPast - 111.32) < 1, "past-the-end clamps to endpoint, got " + dPast);
+  // Degenerate zero-length segment must not divide by zero.
+  const dDegen = R.distPointToSegmentMetres(0.001, 0, 0, 0, 0, 0);
+  assert.ok(Math.abs(dDegen - 111.32) < 1, "zero-length segment measures to the point, got " + dDegen);
+});
+
+test("filterPoisNearRoute — keeps on-route POIs, drops distant ones, passes through with no route", () => {
+  // Route running east along the equator, ~1.1 km long.
+  const route = [[[0, 0], [0, 0.005], [0, 0.01]]];
+  const pois = [
+    { id: "near-on", lat: 0, lon: 0.004 },          // on the line
+    { id: "near-side", lat: 0.0027, lon: 0.006 },   // ~300 m north of it
+    { id: "far-side", lat: 0.009, lon: 0.005 },     // ~1 km north — outside
+    { id: "far-past", lat: 0, lon: 0.02 },          // ~1.1 km past the end
+  ];
+  const kept = R.filterPoisNearRoute(pois, route, 400).map(p => p.id);
+  assert.deepEqual(kept, ["near-on", "near-side"]);
+  // No route → untouched, so the area view survives (same array contents).
+  assert.equal(R.filterPoisNearRoute(pois, [], 400).length, 4);
+  // A polyline with a single point has no segment and must not filter anything.
+  assert.equal(R.filterPoisNearRoute(pois, [[[0, 0]]], 400).length, 4);
+});
+
+test("filterPoisNearRoute — corridor width holds at Singapore's latitude", () => {
+  // Longitude degrees shrink with latitude; a naive filter that forgets cos(lat)
+  // would over-keep east-west neighbours. Route runs north-south so the test
+  // measures purely across longitude.
+  const lat = 1.30, route = [[[lat, 103.86], [lat + 0.01, 103.86]]];
+  const mPerLonDeg = 111320 * Math.cos(lat * Math.PI / 180);
+  const inside = { id: "in", lat: lat + 0.005, lon: 103.86 + (350 / mPerLonDeg) };
+  const outside = { id: "out", lat: lat + 0.005, lon: 103.86 + (450 / mPerLonDeg) };
+  const kept = R.filterPoisNearRoute([inside, outside], route, 400).map(p => p.id);
+  assert.deepEqual(kept, ["in"]);
+});

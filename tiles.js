@@ -275,6 +275,7 @@ function setupOsmIssueLink() {
 // One Overpass call per ~10km area, cached 7 days in IDB. Keyed by coarse
 // lat/lon so panning within the same area hits the cache.
 var POIS_TTL = 7 * 24 * 3600 * 1000;
+var _poiMemoKey = null, _poiMemoVal = null;
 
 async function loadPois(lat, lon) {
     var radius = 10000;
@@ -289,7 +290,11 @@ async function loadPois(lat, lon) {
     var match = manifest ? findCityForLocation(manifest, lat, lon) : null;
     if (match && match.city.pois) {
         var cityKey = "poiscity:" + match.id + ":" + manifest.version;
-        var all = await cacheGet(cityKey);
+        // Single-entry memo: refreshPois now re-runs on every route change for
+        // the corridor filter, and re-reading a ~230 KB city POI blob out of
+        // IDB each time is pure waste. The key carries city + manifest version,
+        // so a move or a rebuild misses naturally.
+        var all = _poiMemoKey === cityKey ? _poiMemoVal : await cacheGet(cityKey);
         if (!all) {
             try {
                 var poiResp = await fetchWithTimeout(
@@ -301,6 +306,8 @@ async function loadPois(lat, lon) {
             } catch (e) { /* fall through to the live Overpass path */ }
         }
         if (all) {
+            _poiMemoKey = cityKey;
+            _poiMemoVal = all;
             var near = [];
             for (var p = 0; p < all.length; p++) {
                 if (haversine(lat, lon, all[p].lat, all[p].lon) <= radius) near.push(all[p]);
