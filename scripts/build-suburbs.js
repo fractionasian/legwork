@@ -51,14 +51,26 @@ const ADMIN_LEVEL = {
     // finer (subzones: Sungei Road, Little India), below what anyone would call
     // the area they ran in.
     singapore: { level: 6, iso: "SG" },
-    // KNOWN GAP — Singapore's bbox crosses the Johor Strait, so 7 tiles
-    // (~6,900 ways: Eco Botani, Pasir Gudang, Tanjung Langsat) sit in Malaysia
-    // and now label as "Unknown". That is an improvement on what they showed
-    // before (Malaysian STREET names — "Jalan Keluli 7" — which were never
-    // suburbs), but it is not the answer. Fixing it means letting a city carry
-    // more than one {level, iso} and merging the results; the MY suburb-scale
-    // level was not probed because Overpass was rate-limiting at the time.
-    // Do that before anyone relies on Johor labels.
+    // Singapore's bbox crosses the Johor Strait, so some tiles are in Malaysia
+    // and label "Unknown". DELIBERATE — probed 2026-08-31 and rejected, not
+    // pending:
+    //
+    //   MY al=6  Johor Bahru        <- district. The LGA trap: one name over a
+    //                                 whole region, exactly what admin_level=9
+    //                                 exists to avoid on the Australian side.
+    //   MY al=7  Iskandar Puteri    <- municipality, and the FINEST level that
+    //                                 exists there. One entity across the whole
+    //                                 western strip. Nothing at al=8.
+    //
+    // So the only labels on offer are coarser than a suburb, for what is bbox
+    // OVERSPILL rather than anywhere anyone routes: the Malaysian tiles are the
+    // top row at lat 1.46-1.47 — a ~1.1 km sliver along the bbox edge — plus the
+    // 4_0 corner. Every recorded demand cell sits at lat 1.28-1.32, well inside
+    // Singapore. "Unknown" is the honest answer for a sliver we cover only
+    // because a bounding box is a rectangle and a border is not.
+    //
+    // Revisit only if usage actually appears in Johor, and then by adding a
+    // proper Johor Bahru city entry rather than by relabelling the sliver.
     // Add a city only after eyeballing its names at the chosen level.
     // melbourne/adelaide/brisbane/sydney/canberra/darwin/hobart: { level: 9, iso: "AU" },
     // tokyo: { level: 7, iso: "JP" }, london: { level: 8, iso: "GB" },
