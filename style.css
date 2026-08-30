@@ -858,6 +858,19 @@ button.menu-item:disabled {
     filter: grayscale(1) brightness(0.7) contrast(1.1);
 }
 
+/* Street layer only: full grayscale(1) flattens OSM's water fill (#aad3df)
+   into near-identical luminance to residential/urban fill (#e0dfdf) — the two
+   read as the same gray, which made water indistinguishable from land in
+   dense areas (reported: Singapore). Dropping to grayscale(0.4) leaves enough
+   residual blue for water to read as water while urban/park/building fills
+   (already near-neutral in OSM's own palette) look effectively unchanged.
+   Satellite/terrain keep the original full-grayscale filter above — this
+   palette tuning is OSM-carto-specific and doesn't apply to photographic or
+   hillshaded tiles. Scoped via Leaflet's per-layer `className` (app.js). */
+.basemap-street .leaflet-tile {
+    filter: grayscale(0.4) brightness(0.7) contrast(1.1);
+}
+
 /* ── Elevation panel (docked to bottom of map) ───── */
 .elevation-panel {
     position: absolute;

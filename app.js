@@ -160,6 +160,9 @@ function initMap() {
     var osm = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
         attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> · <a href="https://github.com/fractionasian/legwork">Legwork</a>',
         maxZoom: 19,
+        // Scopes the water-visibility filter tweak (style.css) to this layer only —
+        // satellite/terrain keep the original full-grayscale look.
+        className: "basemap-street",
     });
     var satellite = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
         attribution: '&copy; Esri',
