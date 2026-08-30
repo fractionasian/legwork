@@ -7,7 +7,8 @@ export const OVERPASS_URL = "https://overpass-api.de/api/interpreter";
 // bike — profile only changes edge WEIGHTING client-side, not what is fetched —
 // so the Worker cache key omits profile.
 const HIGHWAY_TYPES = [
-  "footway", "cycleway", "path", "residential", "living_street",
+  "footway", "cycleway", "path", "track", "bridleway", "byway",
+  "residential", "living_street",
   "pedestrian", "service", "unclassified", "tertiary", "tertiary_link",
   "secondary", "secondary_link", "primary", "primary_link", "trunk",
   "trunk_link", "crossing", "steps",
@@ -25,7 +26,12 @@ export function buildOverpassQuery(lat, lon, radius) {
 }
 
 export function cacheKey(lat, lon, radius) {
-  return "g:" + lat.toFixed(3) + ":" + lon.toFixed(3) + ":" + radius;
+  // g: → g2: when track/bridleway/byway joined HIGHWAY_TYPES — R2 objects
+  // never expire, so a query change MUST bump the key generation or cells
+  // cached under the old query are served (minus the new classes) forever.
+  // Old g:* objects are orphaned; the deferred R2 lifecycle rule is the
+  // cleanup path.
+  return "g2:" + lat.toFixed(3) + ":" + lon.toFixed(3) + ":" + radius;
 }
 
 export function parseGraphParams(url) {

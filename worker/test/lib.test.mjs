@@ -13,11 +13,13 @@ test("buildOverpassQuery includes runner highway types and the around clause", (
 });
 
 test("cacheKey rounds coords to 3dp and is profile-independent", () => {
-  assert.equal(cacheKey(-31.95012, 115.86098, 2000), "g:-31.950:115.861:2000");
-  // No profile term: key is exactly g:lat:lon:radius (4 colon-separated parts, "g" first).
+  assert.equal(cacheKey(-31.95012, 115.86098, 2000), "g2:-31.950:115.861:2000");
+  // No profile term: key is exactly g2:lat:lon:radius (4 colon-separated parts,
+  // the "g2" generation prefix first — bumped when track/bridleway/byway joined
+  // HIGHWAY_TYPES).
   const parts = cacheKey(-31.95012, 115.86098, 2000).split(":");
   assert.equal(parts.length, 4);
-  assert.equal(parts[0], "g");
+  assert.equal(parts[0], "g2");
   // Different radius → different key (radius is part of the key).
   assert.notEqual(cacheKey(-31.95012, 115.86098, 2000), cacheKey(-31.95012, 115.86098, 5000));
 });

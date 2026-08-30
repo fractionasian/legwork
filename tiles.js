@@ -5,8 +5,8 @@
 // Globals consumed (defined elsewhere):
 //   routing.js — nodeKey, haversine, dijkstra, closestNode, gridInsert,
 //                resetSpatialGrid, routingProfile, compactToGeoJSON, osmToGeoJSON
-//   storage.js — cacheGet, cacheSet, PATHS_TTL
-//   app.js     — state, showBanner, showBannerWithRetry, fetchWithTimeout
+//   storage.js — cacheGet, cacheSet, cachePruneStale, PATHS_TTL
+//   app.js     — state, showBanner, showBannerWithRetry, fetchWithTimeout, escapeText
 //   external   — L (Leaflet), window.umami
 
 // Pre-baked tiles live in the separate legwork-tiles repo (keeps this repo light).
@@ -28,9 +28,20 @@ async function fetchManifest() {
         if (!resp.ok) return _manifest; // keep any stale copy rather than nulling on a transient failure
         _manifest = await resp.json();
         _manifestFetchedAt = Date.now();
+        // Sweep stale cache rows once per manifest version: tile entries are
+        // keyed with the version baked in, and nothing else ever deletes
+        // them — a rebuild orphaned every cached tile (~7 MB per city
+        // visited), forever, until QuotaExceededError. Fire-and-forget.
+        if (_manifest && _manifest.version && _manifest.version !== _lastPrunedVersion) {
+            _lastPrunedVersion = _manifest.version;
+            cachePruneStale(_manifest.version).then(function (n) {
+                if (n > 0) console.log("Pruned " + n + " stale cache entries");
+            }).catch(function () {});
+        }
         return _manifest;
     } catch (e) { return _manifest; }
 }
+var _lastPrunedVersion = null;
 
 function findCityForLocation(manifest, lat, lon) {
     if (!manifest || !manifest.cities) return null;
@@ -151,7 +162,11 @@ async function loadTilesForLocation(lat, lon) {
     showBanner("");
     console.log("Loaded " + result.fetched + "/" + tiles.length + " tiles for " + match.city.name +
         " (" + result.cached + " from cache)");
-    return true;
+    // 0 fetched + 0 cached = every tile fetch failed (offline, tile host down).
+    // Reporting success here suppressed the Overpass fallback and made
+    // downstream routing blame geography ("No path nearby") for a network
+    // failure.
+    return result.fetched + result.cached > 0;
 }
 
 async function loadTilesInViewport() {
@@ -171,6 +186,11 @@ async function loadTilesInViewport() {
     for (var i = 0; i < city.tiles.length; i++) {
         var tb = city.tiles[i].bounds; // [south, west, north, east]
         if (tb[2] < south || tb[0] > north || tb[3] < west || tb[1] > east) continue;
+        // The 40-tile cap budgets NEW work only. Counting already-applied
+        // tiles meant a zoomed-out viewport with >40 intersecting tiles
+        // loaded the same first 40 on every moveend and never reached the
+        // rest.
+        if (_appliedTiles["tile:" + match.id + ":" + city.tiles[i].file + ":" + manifest.version]) continue;
         candidates.push(city.tiles[i]);
         if (candidates.length >= 40) break; // cap per viewport-change event
     }
@@ -257,8 +277,16 @@ var POIS_TTL = 7 * 24 * 3600 * 1000;
 
 async function loadPois(lat, lon) {
     var radius = 10000;
-    // Cache key bumped to v2 when we started including ways + relations.
-    var key = "pois2:" + lat.toFixed(2) + ":" + lon.toFixed(2);
+    // Snap the query centre (and key) to a ~5.5 km grid. The old 0.01° key
+    // meant panning ~1 km minted a new key and refired the full 10 km
+    // Overpass query for a ~90%-overlapping result set; 0.05° buckets always
+    // overlap the fetch disc, so one fetch covers the whole bucket. (Key
+    // generation bumped pois2 → pois3; stale generations are swept by
+    // cachePruneStale.)
+    var cLat = Math.round(lat / 0.05) * 0.05;
+    var cLon = Math.round(lon / 0.05) * 0.05;
+    lat = cLat; lon = cLon;
+    var key = "pois3:" + cLat.toFixed(2) + ":" + cLon.toFixed(2);
     var cached = await cacheGet(key, POIS_TTL);
     if (cached) return cached;
 
@@ -347,9 +375,10 @@ async function loadGraphFromWorker(lat, lon, radius) {
 
 async function loadPaths(lat, lon) {
     var radius = radiusFromZoom();
-    // Bumped from paths: to paths2: when we started carrying node tags through
-    // osmToGeoJSON for the runner-friendly preference weighting.
-    var cacheKey = "paths2:" + lat.toFixed(3) + ":" + lon.toFixed(3) + ":" + radius;
+    // paths: → paths2: added node tags; paths2: → paths3: added
+    // track/bridleway/byway to the query. Stale generations are swept by
+    // cachePruneStale.
+    var cacheKey = "paths3:" + lat.toFixed(3) + ":" + lon.toFixed(3) + ":" + radius;
 
     showBanner("Loading paths", "loading");
 
@@ -364,6 +393,13 @@ async function loadPaths(lat, lon) {
         '  way["highway"="footway"](around:' + radius + ',' + lat + ',' + lon + ');\n' +
         '  way["highway"="cycleway"](around:' + radius + ',' + lat + ',' + lon + ');\n' +
         '  way["highway"="path"](around:' + radius + ',' + lat + ',' + lon + ');\n' +
+        // track/bridleway/byway: baked tiles include them and ROAD_WEIGHT
+        // weights them, but the live fallback query never fetched them — same
+        // map, different network depending on pre-baked vs fallback. Mirrored
+        // in the Worker's HIGHWAY_TYPES (worker/src/lib.js) — keep in sync.
+        '  way["highway"="track"](around:' + radius + ',' + lat + ',' + lon + ');\n' +
+        '  way["highway"="bridleway"](around:' + radius + ',' + lat + ',' + lon + ');\n' +
+        '  way["highway"="byway"](around:' + radius + ',' + lat + ',' + lon + ');\n' +
         '  way["highway"="residential"](around:' + radius + ',' + lat + ',' + lon + ');\n' +
         '  way["highway"="living_street"](around:' + radius + ',' + lat + ',' + lon + ');\n' +
         '  way["highway"="pedestrian"](around:' + radius + ',' + lat + ',' + lon + ');\n' +
@@ -444,7 +480,11 @@ var pathStyles = {
         if (p.name) parts.push(p.name);
         else parts.push(p.highway || "path");
         if (p.surface) parts.push(p.surface);
-        layer.bindTooltip(parts.join(" · "), { sticky: true });
+        // escapeText: bindTooltip renders a string via innerHTML, and
+        // name/surface are world-editable OSM tags. (This path only runs if a
+        // render call ever drops skipRender — currently none does — but an
+        // un-escaped OSM-fed sink must not sit armed.)
+        layer.bindTooltip(escapeText(parts.join(" · ")), { sticky: true });
     },
 };
 

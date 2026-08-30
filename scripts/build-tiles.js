@@ -155,8 +155,11 @@ function splitIntoTiles(geojson, bounds) {
 
     for (const feature of geojson.features) {
         const c = featureCentroid(feature);
-        const row = Math.min(Math.floor((c.lat - south) / TILE_SIZE), rows - 1);
-        const col = Math.min(Math.floor((c.lon - west) / TILE_SIZE), cols - 1);
+        // Clamp BOTH ends: a centroid just south/west of the bbox (Overpass
+        // `around:` bleeds past it) went to row/col -1, emitting sliver tiles
+        // outside the declared city bounds (81 of 464 in the live manifest).
+        const row = Math.max(0, Math.min(Math.floor((c.lat - south) / TILE_SIZE), rows - 1));
+        const col = Math.max(0, Math.min(Math.floor((c.lon - west) / TILE_SIZE), cols - 1));
         const key = `${row}_${col}`;
         if (!tiles[key]) {
             tiles[key] = {
