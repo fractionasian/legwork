@@ -853,9 +853,31 @@ button.menu-item:disabled {
     inset: 0;
 }
 
-/* Greyscale base tiles so coloured route stands out */
+/* Base tiles are knocked back so the coloured route stands out. Each basemap
+   gets its own filter below, because the same filter does very different
+   damage to a flat-fill vector style, a photograph, and a hillshaded topo map.
+   This rule is the fallback for any layer added without a className. */
 .leaflet-tile {
     filter: grayscale(1) brightness(0.7) contrast(1.1);
+}
+
+/* Satellite: photography. grayscale() preserves luminance and removes only
+   chroma, so full grayscale collapses water, vegetation and shadowed roofs —
+   all mid-dark, all different hues — into near-identical greys (measured: two
+   such colours go from 58.6 apart to 2.0 under grayscale(1)). Colour IS the
+   land/water cue in a photo, so keep most of it. Aerial imagery is also
+   already mid-dark, which is what made brightness(0.7) read as mud; the route
+   line is bright mint and separates on brightness rather than saturation. */
+.basemap-satellite .leaflet-tile {
+    filter: grayscale(0.35) brightness(0.85) contrast(1.05);
+}
+
+/* Terrain: OpenTopoMap encodes landcover in colour (green woodland, blue
+   water) over a grey hillshade. Full grayscale puts grey on grey and the
+   contours stop reading; it is a light basemap, so it also needs far less
+   darkening than the 0.7 it was inheriting. */
+.basemap-terrain .leaflet-tile {
+    filter: grayscale(0.35) brightness(0.9) contrast(1.05);
 }
 
 /* Street layer only: full grayscale(1) flattens OSM's water fill (#aad3df)
