@@ -120,18 +120,53 @@ export async function handleGraph(request, url, env, ctx) {
   }
 
   const text = await r.text();
+  // Overpass reports some failures (query timeout, memory exhaustion) as
+  // HTTP 200 with a "remark" field and an empty or partial element set —
+  // r.ok can't see them. R2 objects never expire, so caching one makes that
+  // broken answer permanent for this cell, and the client deliberately never
+  // falls back on an empty cached graph. Detection is size-aware to respect
+  // the 10 ms CPU budget: a small body gets parsed and must have elements
+  // and no remark; a large body has real elements, so just scan for a
+  // "remark" key (a rare false positive in a tag value only costs a skipped
+  // cache write, never a wrong response).
+  let cacheable;
+  if (text.length < 65536) {
+    try {
+      const parsed = JSON.parse(text);
+      cacheable = !parsed.remark && Array.isArray(parsed.elements) && parsed.elements.length > 0;
+    } catch { cacheable = false; }
+  } else {
+    cacheable = !text.includes('"remark"');
+  }
   // Don't block the response on the R2 write — fire it after the response flushes.
-  ctx.waitUntil(env.GRAPH.put(key, text));
+  if (cacheable) ctx.waitUntil(env.GRAPH.put(key, text));
   return new Response(text, {
     status: 200,
-    headers: cors({ "content-type": "application/json", "cache-status": "miss", "cache-control": GRAPH_CACHE_CONTROL }),
+    headers: cors({
+      "content-type": "application/json",
+      "cache-status": cacheable ? "miss" : "miss-uncacheable",
+      // no-store on the uncacheable path — otherwise the edge cache would
+      // serve the soft-error for a day even though R2 never stored it.
+      "cache-control": cacheable ? GRAPH_CACHE_CONTROL : "no-store",
+    }),
   });
 }
 
 // ── Share short-links (/api/*) ──────────────────────────────────────────────
 
+// Bound the /api/* body buffer the same way handleEvent bounds /v1/event:
+// declared-length precheck, then a post-read backstop. The largest legitimate
+// body is a route hash (16 KB cap in validateRouteHash) plus contact/note.
+const MAX_API_BODY = 32 * 1024;
+
 async function readJson(request) {
-  try { return await request.json(); } catch (e) { return null; }
+  const declaredLen = Number(request.headers.get("content-length"));
+  if (Number.isFinite(declaredLen) && declaredLen > MAX_API_BODY) return null;
+  try {
+    const text = await request.text();
+    if (text.length > MAX_API_BODY) return null;
+    return JSON.parse(text);
+  } catch (e) { return null; }
 }
 
 function adminOk(request, env) {

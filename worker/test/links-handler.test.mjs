@@ -208,3 +208,9 @@ test("API responses carry x-content-type-options: nosniff", async () => {
   const res = await handleApi(req("GET", "/api/links/nosuch"), env(), CTX);
   assert.equal(res.headers.get("x-content-type-options"), "nosniff");
 });
+
+test("POST /api/links rejects a body over the 32 KB cap without minting", async () => {
+  const e = env();
+  const res = await handleApi(req("POST", "/api/links", { body: { hash: GOOD_HASH, note: "x".repeat(64 * 1024) } }), e, CTX);
+  assert.equal(res.status, 400);
+});
