@@ -66,15 +66,34 @@ function _inRing(lat, lon, ring) {
 // SYNCHRONOUS by design: this is called from inside the route-built debounce
 // timer, where an await could outlive the page. Returns null when the polygons
 // are not loaded yet, which is honest ("we don't know") rather than wrong.
+// Inside an outer ring AND outside every hole. `h` holds enclaves carved out of
+// a suburb — Kings Park has West Perth inside it. Ignoring holes makes the
+// enclosing suburb claim the enclave, so the point matches TWO suburbs and this
+// function's first-match-wins returns whichever OSM happened to order first.
+// build-suburbs.js asserts no overlaps remain; this is the half that has to
+// agree with it.
+function _contains(f, lat, lon) {
+    var r;
+    var hit = false;
+    for (r = 0; r < f.p.length; r++) {
+        if (_inRing(lat, lon, f.p[r])) { hit = true; break; }
+    }
+    if (!hit) return false;
+    if (f.h) {
+        for (r = 0; r < f.h.length; r++) {
+            if (_inRing(lat, lon, f.h[r])) return false;
+        }
+    }
+    return true;
+}
+
 function suburbForPoint(cityId, lat, lon) {
     var list = _suburbs[cityId];
     if (!list || !list.length) return null;
     for (var i = 0; i < list.length; i++) {
         var b = list[i].bbox;
         if (lat < b[0] || lat > b[2] || lon < b[1] || lon > b[3]) continue;
-        for (var r = 0; r < list[i].p.length; r++) {
-            if (_inRing(lat, lon, list[i].p[r])) return list[i].n;
-        }
+        if (_contains(list[i], lat, lon)) return list[i].n;
     }
     return null;
 }

@@ -309,7 +309,11 @@ function suburbsForTile(bounds, polygons) {
             for (const f of polygons) {
                 const b = f.bbox;
                 if (lat < b[0] || lat > b[2] || lon < b[1] || lon > b[3]) continue;
-                if (f.p.some(r => pointInRing(lat, lon, r))) {
+                // Outer ring AND not in a hole — must match suburbs.js's
+                // _contains and build-suburbs.js's containsPoint exactly, or
+                // the manifest labels and the client's analytics disagree.
+                if (f.p.some(r => pointInRing(lat, lon, r))
+                    && !(f.h && f.h.some(r => pointInRing(lat, lon, r)))) {
                     counts.set(f.n, (counts.get(f.n) || 0) + 1);
                     break;
                 }

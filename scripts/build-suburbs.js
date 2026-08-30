@@ -117,9 +117,12 @@ async function overpass(query) {
 // naive head-to-tail stitch silently emits open rings, and an open ring fails
 // point-in-polygon for most of its own area — which reads as "this point is in
 // no suburb" rather than as a bug. Every ring is asserted closed below.
-function assembleRings(el) {
+function assembleRings(el, role) {
+    const wanted = role === "inner"
+        ? (m) => m.role === "inner"
+        : (m) => m.role === "outer" || m.role === "";
     const segs = (el.members || [])
-        .filter(m => (m.role === "outer" || m.role === "") && m.geometry)
+        .filter(m => wanted(m) && m.geometry)
         .map(m => m.geometry.map(p => [p.lat, p.lon]));
     const same = (a, b) => a[0] === b[0] && a[1] === b[1];
     const rings = [];
@@ -157,6 +160,62 @@ function round(rings) {
     return out;
 }
 
+function pointInRing(lat, lon, ring) {
+    let inside = false;
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+        const lai = ring[i][0], loi = ring[i][1];
+        const laj = ring[j][0], loj = ring[j][1];
+        if ((lai > lat) !== (laj > lat)) {
+            if (lon < (loj - loi) * (lat - lai) / (laj - lai) + loi) inside = !inside;
+        }
+    }
+    return inside;
+}
+
+// Inside an outer ring AND outside every hole. This is the definition both
+// consumers must share; a divergence here is the bug the assertion below exists
+// to catch at build time rather than in the field.
+function containsPoint(f, lat, lon) {
+    if (!f.p.some(r => pointInRing(lat, lon, r))) return false;
+    if (f.h && f.h.some(r => pointInRing(lat, lon, r))) return false;
+    return true;
+}
+
+// 400x400 over a city bbox is ~150 m spacing at Perth's latitude — fine enough
+// to land inside a small enclave (the Kings Park hole is ~248 x 267 m).
+const OVERLAP_SAMPLES = 400;
+
+function findOverlaps(feats, bounds) {
+    const [s, w, n, e] = bounds;
+    for (const f of feats) {
+        let a = Infinity, b = -Infinity, c = Infinity, d = -Infinity;
+        for (const ring of f.p) for (const pt of ring) {
+            if (pt[0] < a) a = pt[0];
+            if (pt[0] > b) b = pt[0];
+            if (pt[1] < c) c = pt[1];
+            if (pt[1] > d) d = pt[1];
+        }
+        f._bbox = [a, c, b, d];
+    }
+    const hits = [];
+    for (let i = 0; i < OVERLAP_SAMPLES && hits.length < 20; i++) {
+        const lat = s + (n - s) * (i + 0.5) / OVERLAP_SAMPLES;
+        for (let j = 0; j < OVERLAP_SAMPLES; j++) {
+            const lon = w + (e - w) * (j + 0.5) / OVERLAP_SAMPLES;
+            const names = [];
+            for (const f of feats) {
+                const bb = f._bbox;
+                if (lat < bb[0] || lat > bb[2] || lon < bb[1] || lon > bb[3]) continue;
+                if (containsPoint(f, lat, lon)) names.push(f.n);
+                if (names.length > 1) break;
+            }
+            if (names.length > 1) hits.push({ lat, lon, names });
+        }
+    }
+    for (const f of feats) delete f._bbox;
+    return hits;
+}
+
 async function buildCity(city, outDir) {
     const level = ADMIN_LEVEL[city.id];
     if (!level) {
@@ -177,18 +236,40 @@ async function buildCity(city, outDir) {
     for (const el of data.elements || []) {
         const name = (el.tags || {}).name;
         if (!name) continue;
-        const rings = assembleRings(el);
-        for (const r of rings) {
+        const rings = assembleRings(el, "outer");
+        const holes = assembleRings(el, "inner");
+        for (const r of rings.concat(holes)) {
             const closed = r[0][0] === r[r.length - 1][0] && r[0][1] === r[r.length - 1][1];
             if (!closed) openRings++;
         }
         const p = round(rings);
-        if (p.length) feats.push({ n: name, p });
+        const h = round(holes);
+        // Holes are enclaves: Kings Park has West Perth carved out of it. Drop
+        // them and the enclosing suburb claims the enclave, so a point there
+        // matches TWO suburbs and the answer depends on array order — which
+        // nothing in the consumers enforces, since both take the first match.
+        if (p.length) feats.push(h.length ? { n: name, p, h } : { n: name, p });
     }
 
     // Fail loudly rather than shipping a file that silently answers "nowhere".
     if (!feats.length) throw new Error(`${city.name}: no suburbs found at admin_level=${level}`);
     if (openRings) throw new Error(`${city.name}: ${openRings} unclosed ring(s) — ring assembly is wrong`);
+
+    // A point may belong to exactly ONE suburb. Both consumers (suburbs.js in
+    // the client, suburbsForTile here) take the FIRST match and stop, so any
+    // overlap makes the answer depend on OSM's relation ordering — silently,
+    // and differently between the two. Perth satisfies this only because its
+    // one enclave (West Perth inside Kings Park) is now subtracted as a hole.
+    // A new city with genuine overlaps must fail here, not ship.
+    const overlaps = findOverlaps(feats, city.bounds);
+    if (overlaps.length) {
+        console.error(`\n${city.name}: ${overlaps.length} sample point(s) match more than one suburb.`);
+        for (const o of overlaps.slice(0, 5)) {
+            console.error(`  ${o.lat.toFixed(5)}, ${o.lon.toFixed(5)} -> ${o.names.join(" + ")}`);
+        }
+        throw new Error(`${city.name}: overlapping suburb polygons — first-match resolution would be order-dependent`);
+    }
+    console.log(`  overlap check: clean (${OVERLAP_SAMPLES}x${OVERLAP_SAMPLES} grid)`);
 
     fs.mkdirSync(outDir, { recursive: true });
     const file = path.join(outDir, `${city.id}.json`);
@@ -213,4 +294,10 @@ async function main() {
     }
 }
 
-main().catch(e => { console.error(e); process.exit(1); });
+// Guarded so the geometry helpers can be imported and tested without the script
+// running an Overpass build on require.
+module.exports = { containsPoint, pointInRing, findOverlaps, assembleRings };
+
+if (require.main === module) {
+    main().catch(e => { console.error(e); process.exit(1); });
+}
