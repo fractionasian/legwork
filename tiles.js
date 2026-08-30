@@ -4,7 +4,8 @@
 // wipes them when the user teleports to a different city.
 // Globals consumed (defined elsewhere):
 //   routing.js — nodeKey, haversine, dijkstra, closestNode, gridInsert,
-//                resetSpatialGrid, routingProfile, compactToGeoJSON, osmToGeoJSON
+//                resetSpatialGrid, routingProfile, compactToGeoJSON, osmToGeoJSON,
+//                poiFromOsmElement
 //   storage.js — cacheGet, cacheSet, cachePruneStale, PATHS_TTL
 //   app.js     — state, showBanner, showBannerWithRetry, fetchWithTimeout, escapeText
 //   external   — L (Leaflet), window.umami
@@ -277,12 +278,44 @@ var POIS_TTL = 7 * 24 * 3600 * 1000;
 
 async function loadPois(lat, lon) {
     var radius = 10000;
-    // Snap the query centre (and key) to a ~5.5 km grid. The old 0.01° key
-    // meant panning ~1 km minted a new key and refired the full 10 km
-    // Overpass query for a ~90%-overlapping result set; 0.05° buckets always
-    // overlap the fetch disc, so one fetch covers the whole bucket. (Key
-    // generation bumped pois2 → pois3; stale generations are swept by
-    // cachePruneStale.)
+
+    // Pre-baked city POIs first (true offline): build-tiles publishes one
+    // pois.json per covered city and flags it in the manifest. The whole
+    // city's set is cached in IDB keyed by manifest version (stale versions
+    // swept by cachePruneStale), so once fetched it works with no signal —
+    // same offline story as the path tiles. Distance-filtered here so the
+    // marker count matches what the live 10 km query would return.
+    var manifest = await fetchManifest();
+    var match = manifest ? findCityForLocation(manifest, lat, lon) : null;
+    if (match && match.city.pois) {
+        var cityKey = "poiscity:" + match.id + ":" + manifest.version;
+        var all = await cacheGet(cityKey);
+        if (!all) {
+            try {
+                var poiResp = await fetchWithTimeout(
+                    TILES_BASE + "tiles/" + match.id + "/" + match.city.pois.file, null, 15000);
+                if (poiResp.ok) {
+                    all = await poiResp.json();
+                    cacheSet(cityKey, all);
+                }
+            } catch (e) { /* fall through to the live Overpass path */ }
+        }
+        if (all) {
+            var near = [];
+            for (var p = 0; p < all.length; p++) {
+                if (haversine(lat, lon, all[p].lat, all[p].lon) <= radius) near.push(all[p]);
+            }
+            return near;
+        }
+    }
+
+    // Live Overpass fallback (untiled areas, or the baked file unreachable
+    // and not yet cached). Snap the query centre (and key) to a ~5.5 km
+    // grid: the old 0.01° key meant panning ~1 km minted a new key and
+    // refired the full 10 km Overpass query for a ~90%-overlapping result
+    // set; 0.05° buckets always overlap the fetch disc, so one fetch covers
+    // the whole bucket. (Key generation bumped pois2 → pois3; stale
+    // generations are swept by cachePruneStale.)
     var cLat = Math.round(lat / 0.05) * 0.05;
     var cLon = Math.round(lon / 0.05) * 0.05;
     lat = cLat; lon = cLon;
@@ -308,29 +341,8 @@ async function loadPois(lat, lon) {
         var raw = await resp.json();
         var pois = [];
         for (var i = 0; i < (raw.elements || []).length; i++) {
-            var el = raw.elements[i];
-            if (!el.tags || !el.tags.amenity) continue;
-            // Nodes carry lat/lon directly; ways + relations get a computed
-            // centroid in el.center thanks to `out center`.
-            var plat, plon;
-            if (el.type === "node") { plat = el.lat; plon = el.lon; }
-            else if (el.center) { plat = el.center.lat; plon = el.center.lon; }
-            else continue;
-            pois.push({
-                id: el.type[0] + el.id, // prefix with type so node/way IDs don't collide
-                lat: plat,
-                lon: plon,
-                amenity: el.tags.amenity,
-                name: el.tags.name || "",
-                access: el.tags["toilets:access"] || el.tags.access || "",
-                fee: el.tags.fee || "",
-                wheelchair: el.tags.wheelchair || "",
-                opening_hours: el.tags.opening_hours || "",
-                male: el.tags.male === "yes",
-                female: el.tags.female === "yes",
-                unisex: el.tags.unisex === "yes",
-                changing_table: el.tags.changing_table === "yes",
-            });
+            var poi = poiFromOsmElement(raw.elements[i]);
+            if (poi) pois.push(poi);
         }
         cacheSet(key, pois);
         return pois;

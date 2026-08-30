@@ -397,6 +397,36 @@ function compactToGeoJSON(data) {
     return fc;
 }
 
+// Map one Overpass element (node/way/relation from an amenity query with
+// `out center`) to Legwork's POI shape. Returns null for elements with no
+// usable position or amenity tag. Shared by the live loadPois path (tiles.js)
+// and the tile builder's pre-baked pois.json (scripts/build-tiles.js) so the
+// two sources can never drift.
+function poiFromOsmElement(el) {
+    if (!el || !el.tags || !el.tags.amenity) return null;
+    // Nodes carry lat/lon directly; ways + relations get a computed centroid
+    // in el.center thanks to `out center`.
+    var plat, plon;
+    if (el.type === "node") { plat = el.lat; plon = el.lon; }
+    else if (el.center) { plat = el.center.lat; plon = el.center.lon; }
+    else return null;
+    return {
+        id: el.type[0] + el.id, // prefix with type so node/way IDs don't collide
+        lat: plat,
+        lon: plon,
+        amenity: el.tags.amenity,
+        name: el.tags.name || "",
+        access: el.tags["toilets:access"] || el.tags.access || "",
+        fee: el.tags.fee || "",
+        wheelchair: el.tags.wheelchair || "",
+        opening_hours: el.tags.opening_hours || "",
+        male: el.tags.male === "yes",
+        female: el.tags.female === "yes",
+        unisex: el.tags.unisex === "yes",
+        changing_table: el.tags.changing_table === "yes",
+    };
+}
+
 // ── Terrarium tile math ────────────────────────────────
 // Convert (lat, lon, zoom) to slippy-map tile XYZ + pixel-space (px, py)
 // within that tile's 256×256 raster. Used to look up elevation in
@@ -520,6 +550,7 @@ if (typeof module !== "undefined" && module.exports) {
         sampleRoute: sampleRoute,
         waypointHash: waypointHash,
         nodeAttrsFromTags: nodeAttrsFromTags,
+        poiFromOsmElement: poiFromOsmElement,
         compactToGeoJSON: compactToGeoJSON,
         osmToGeoJSON: osmToGeoJSON,
     };
