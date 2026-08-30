@@ -8,10 +8,10 @@
          for Leaflet's injected pane styles + inline style attributes. -->
     <meta http-equiv="Content-Security-Policy" content="
         default-src 'self';
-        script-src 'self' https://unpkg.com/leaflet@1.9.4/dist/leaflet.js https://cdn.jsdelivr.net/npm/leaflet-hotline@0.4.0/dist/leaflet.hotline.min.js https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js https://cloud.umami.is/script.js;
+        script-src 'self' https://unpkg.com/leaflet@1.9.4/dist/leaflet.js https://cdn.jsdelivr.net/npm/leaflet-hotline@0.4.0/dist/leaflet.hotline.min.js https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js;
         style-src 'self' 'unsafe-inline' https://unpkg.com/leaflet@1.9.4/dist/leaflet.css;
         img-src 'self' data: https://tile.openstreetmap.org https://*.tile.openstreetmap.org https://server.arcgisonline.com https://tile.opentopomap.org https://*.tile.opentopomap.org https://fractionasian.github.io https://unpkg.com;
-        connect-src 'self' https://unpkg.com https://cdn.jsdelivr.net https://photon.komoot.io https://api.open-meteo.com https://overpass-api.de https://*.overpass-api.de https://legwork-tiles.peterbnguyen.workers.dev https://s3.amazonaws.com/elevation-tiles-prod/ https://fractionasian.github.io https://cloud.umami.is https://gateway.umami.is https://*.umami.dev;
+        connect-src 'self' https://unpkg.com https://cdn.jsdelivr.net https://photon.komoot.io https://api.open-meteo.com https://overpass-api.de https://*.overpass-api.de https://legwork-tiles.peterbnguyen.workers.dev https://s3.amazonaws.com/elevation-tiles-prod/ https://fractionasian.github.io;
         font-src 'self';
         manifest-src 'self';
         worker-src 'self';
@@ -40,7 +40,6 @@
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="anonymous"
           integrity="sha384-sHL9NAb7lN7rfvG5lfHpm643Xkcjzp4jFvuavGOndn6pjVqS6ny56CAt3nsEVT4H" />
     <link rel="stylesheet" href="style.css" />
-    <script defer src="https://cloud.umami.is/script.js" data-website-id="53493402-d1cf-4a9a-afe2-87a21fc5fbb4"></script>
 </head>
 <body>
     <nav class="controls" aria-label="Route controls">

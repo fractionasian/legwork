@@ -7,8 +7,9 @@
 //                resetSpatialGrid, routingProfile, compactToGeoJSON, osmToGeoJSON,
 //                poiFromOsmElement
 //   storage.js — cacheGet, cacheSet, cachePruneStale, PATHS_TTL
-//   app.js     — state, showBanner, showBannerWithRetry, fetchWithTimeout, escapeText
-//   external   — L (Leaflet), window.umami
+//   app.js     — state, showBanner, showBannerWithRetry, fetchWithTimeout, escapeText,
+//                track
+//   external   — L (Leaflet)
 
 // Pre-baked tiles live in the separate legwork-tiles repo (keeps this repo light).
 // Same origin (fractionasian.github.io), so no CORS. Source: github.com/fractionasian/legwork-tiles
@@ -232,14 +233,13 @@ async function resetGraphIfCityChanged(lat, lon) {
     // buckets become candidates for the next pre-cache build. Coarse 0.5°
     // bucketing on unknowns keeps it privacy-preserving.
     try {
-        if (window.umami && typeof window.umami.track === "function") {
-            if (newId) {
-                window.umami.track("city-resolved", { city: newId });
-            } else {
-                var bLat = (Math.round(lat * 2) / 2).toFixed(1);
-                var bLon = (Math.round(lon * 2) / 2).toFixed(1);
-                window.umami.track("city-unknown", { bucket: bLat + "," + bLon });
-            }
+        if (match) {
+            track("city-resolved", { city: newId });
+        } else {
+            // newId already carries the 0.5-degree bucket for an unknown
+            // location; strip the "unknown:" prefix rather than recomputing it,
+            // so the two can never drift apart.
+            track("city-unknown", { bucket: newId.slice("unknown:".length) });
         }
     } catch (e) { /* never let telemetry break the app */ }
     state.graph = null;

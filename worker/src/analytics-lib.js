@@ -9,7 +9,17 @@ import { snap } from "./lib.js";
 
 export const EVENT_NAMES = new Set([
   "pin-drop", "route-built", "route-export", "route-save", "route-share",
+  // Moved off Umami Cloud, which was the last third-party script in the app.
+  // These two answer "which city do we pre-bake next": city-resolved when the
+  // user lands inside a catalogued city, city-unknown with a coarse 0.5-degree
+  // bucket when they do not.
+  "city-resolved", "city-unknown",
 ]);
+
+// Coarse 0.5-degree bucket, e.g. "-32.0,116.0" — deliberately imprecise: this
+// says "somebody routes around here", never where. Validated by shape for the
+// same reason as `city` below, and bounded in length so cardinality is capped.
+const BUCKET_RE = /^-?\d{1,3}\.\d,-?\d{1,3}\.\d$/;
 
 const KM_BUCKETS = ["0-5", "5-10", "10-20", "20+"];
 const MODES = new Set(["loop", "outback", "oneway"]);
@@ -42,6 +52,11 @@ function isCitySlug(v) { return typeof v === "string" && CITY_RE.test(v); }
 // this file changes, so a bad value there is a real bug and must still reject.
 const PROP_SCHEMA = {
   "pin-drop": { n: { test: (v) => Number.isInteger(v) && v >= 0 && v <= 1000 } },
+  // `soft` for the same reason route-built's city is soft: the catalogue lives
+  // in the legwork-tiles repo and gains cities with no Worker deploy, so a bad
+  // value must drop the PROP, never the EVENT.
+  "city-resolved": { city: { test: isCitySlug, soft: true } },
+  "city-unknown": { bucket: { test: (v) => typeof v === "string" && BUCKET_RE.test(v), soft: true } },
   "route-built": {
     km_bucket: { test: (v) => KM_BUCKETS.includes(v) },
     mode: { test: (v) => MODES.has(v) },

@@ -37,7 +37,9 @@ test("demandCell reuses the 0.005 grid and formats to 3dp", () => {
 test("EVENT_NAMES is the closed allowlist", () => {
   assert.deepEqual(
     [...EVENT_NAMES].sort(),
-    ["pin-drop", "route-built", "route-export", "route-save", "route-share"],
+    // city-resolved / city-unknown joined when those two moved off Umami Cloud.
+    ["city-resolved", "city-unknown", "pin-drop", "route-built", "route-export",
+     "route-save", "route-share"],
   );
 });
 
@@ -131,5 +133,36 @@ test("validateEvent accepts events that carry no props", () => {
     const r = validateEvent({ name });
     assert.equal(r.ok, true, name);
     assert.deepEqual(r.props, {});
+  }
+});
+
+test("city-resolved / city-unknown are accepted with their props", () => {
+  assert.equal(EVENT_NAMES.has("city-resolved"), true);
+  assert.equal(EVENT_NAMES.has("city-unknown"), true);
+
+  const r = validateEvent({ name: "city-resolved", props: { city: "singapore" } });
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.props, { city: "singapore" });
+
+  // The client emits one-decimal 0.5-degree buckets, negatives included.
+  for (const bucket of ["-32.0,116.0", "1.5,104.0", "51.5,0.0", "0.0,0.0", "-12.5,131.0"]) {
+    const u = validateEvent({ name: "city-unknown", props: { bucket } });
+    assert.equal(u.ok, true, bucket);
+    assert.deepEqual(u.props, { bucket }, bucket);
+  }
+});
+
+test("city event props are soft — a bad value drops the prop, never the event", () => {
+  // The catalogue lives in another repo and gains cities with no Worker
+  // deploy, so an unrecognised value must not cost us the event itself.
+  const r = validateEvent({ name: "city-resolved", props: { city: "Not A Slug!" } });
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.props, {});
+
+  // Full coordinates would defeat the point of bucketing, so they must not pass.
+  for (const bad of ["-31.9505,115.8605", "-32,116", "abc", "-32.0", "1e3.0,2.0"]) {
+    const u = validateEvent({ name: "city-unknown", props: { bucket: bad } });
+    assert.equal(u.ok, true, bad);
+    assert.deepEqual(u.props, {}, "should have dropped: " + bad);
   }
 });
