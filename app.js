@@ -12,6 +12,11 @@ var state = {
     pathLayer: null,
     waypoints: [],
     routeSegments: [],
+    // Closing-leg geometry for loop mode. Lives in state (not just on the
+    // closingLine layer): colourRouteByGradient removes that layer when it
+    // repaints the hotline, and every later distance/export/midpoint read
+    // needs the coords to survive that.
+    closingCoords: null,
     routeLines: [],
     closingLine: null,
     mode: "loop",
@@ -985,10 +990,19 @@ async function updateRoute() {
         var closeResult = closeSeg.result;
         if (closeResult && closeResult.path.length > 1) {
             var closeCoords = pathToCoords(closeResult.path);
+            state.closingCoords = closeCoords;
             state.closingLine = L.polyline(closeCoords, { color: "#6ee7b7", weight: 4, opacity: 0.6, dashArray: "10 6" }).addTo(state.map);
             pushAll(allRouteCoords, closeCoords, 1);
         } else {
-            state.closingLine = L.polyline([[lastWp.lat,lastWp.lon],[firstWp.lat,firstWp.lon]], { color: "#ef4444", weight: 3, opacity: 0.5, dashArray: "8 8" }).addTo(state.map);
+            // Same treatment as a failed intermediate leg: the straight-line
+            // fallback counts toward the route coords (so the elevation x-axis
+            // matches the distance pill) and fails routeOk (so the red-segment
+            // warning shows instead of a clean success).
+            var closeFallback = [[lastWp.lat, lastWp.lon], [firstWp.lat, firstWp.lon]];
+            state.closingCoords = closeFallback;
+            state.closingLine = L.polyline(closeFallback, { color: "#ef4444", weight: 3, opacity: 0.5, dashArray: "8 8" }).addTo(state.map);
+            pushAll(allRouteCoords, closeFallback, 1);
+            routeOk = false;
         }
     }
 
@@ -1125,9 +1139,8 @@ function addMidpointMarkers() {
 
             // Find midpoint along the actual routed segment
             var segCoords;
-            if (pair.closing && state.closingLine) {
-                var cls = state.closingLine.getLatLngs();
-                segCoords = cls.map(function (ll) { return [ll.lat, ll.lng]; });
+            if (pair.closing && state.closingCoords) {
+                segCoords = state.closingCoords;
             } else if (!pair.closing && state.routeSegments[fromIdx]) {
                 segCoords = state.routeSegments[fromIdx];
             }
@@ -1192,25 +1205,36 @@ function addMidpointMarkers() {
                 zIndexOffset: -50,
             }).addTo(state.map);
 
-            mid.on("dragend", function () {
+            mid.on("dragend", async function () {
                 var pos = mid.getLatLng();
                 // Insert a new waypoint after fromIdx
                 var insertIdx = pair.closing ? state.waypoints.length : fromIdx + 1;
 
-                // Snap to graph
-                var nk = state.graph ? closestNode(state.graph, pos.lat, pos.lng) : null;
-                var snapLat = pos.lat, snapLon = pos.lng;
-                if (nk) {
-                    var _nk = parseNodeKey(nk);
-                    snapLat = _nk.lat;
-                    snapLon = _nk.lon;
+                // Snap to graph under the same 200 m rule every other snap
+                // site enforces — the old unconditional closestNode could bind
+                // the new waypoint up to ~3.5 km away, or (on a null) mint a
+                // synthetic nodeKey that isn't in the graph, so every leg
+                // through it failed to route. Same recovery as the pin drag:
+                // one tile/path load at the target before giving up.
+                var nk = state.graph ? nodeKeyWithinSnap({ lat: pos.lat, lon: pos.lng }) : null;
+                if (!nk) {
+                    showBanner("Loading paths for this area", "loading");
+                    await loadTilesOrPaths(pos.lat, pos.lng);
+                    nk = nodeKeyWithinSnap({ lat: pos.lat, lon: pos.lng });
                 }
+                if (!nk) {
+                    showBanner("No path near there — drop the point on a road or footpath", "hint");
+                    addMidpointMarkers(); // snap the dragged handle back onto the route
+                    return;
+                }
+                var _nk = parseNodeKey(nk);
+                var snapLat = _nk.lat, snapLon = _nk.lon;
 
                 var num = insertIdx + 1;
                 var marker = createNumberedMarker(snapLat, snapLon, num);
                 wireMarkerEvents(marker);
 
-                var wp = { lat: snapLat, lon: snapLon, marker: marker, nodeKey: nk || nodeKey(snapLat, snapLon) };
+                var wp = { lat: snapLat, lon: snapLon, marker: marker, nodeKey: nk };
                 state.waypoints.splice(insertIdx, 0, wp);
 
                 // Renumber all markers
@@ -1233,9 +1257,9 @@ function updateDistance() {
         var seg = state.routeSegments[s];
         for (var i = 1; i < seg.length; i++) total += haversine(seg[i-1][0], seg[i-1][1], seg[i][0], seg[i][1]);
     }
-    if (state.mode === "loop" && state.closingLine) {
-        var cl = state.closingLine.getLatLngs();
-        for (var i = 1; i < cl.length; i++) total += haversine(cl[i-1].lat, cl[i-1].lng, cl[i].lat, cl[i].lng);
+    if (state.mode === "loop" && state.closingCoords) {
+        var cl = state.closingCoords;
+        for (var i = 1; i < cl.length; i++) total += haversine(cl[i-1][0], cl[i-1][1], cl[i][0], cl[i][1]);
     } else if (state.mode === "outback") { total *= 2; }
     // oneway: use raw total as-is
 
@@ -1284,9 +1308,15 @@ function updateDistanceMarkers() {
         var start = coords.length === 0 ? 0 : 1;
         for (var ci = start; ci < seg.length; ci++) coords.push(seg[ci]);
     }
-    if (state.mode === "loop" && state.closingLine) {
-        var cl = state.closingLine.getLatLngs();
-        for (var ci = 1; ci < cl.length; ci++) coords.push([cl[ci].lat, cl[ci].lng]);
+    if (state.mode === "loop" && state.closingCoords) {
+        var cl = state.closingCoords;
+        for (var ci = 1; ci < cl.length; ci++) coords.push(cl[ci]);
+    }
+    // Out-and-back: mirror the coords (same construction as exportGPX) so the
+    // pills continue past the turnaround — updateDistance doubles the total,
+    // and without the return geometry markers stopped at the halfway point.
+    if (state.mode === "outback" && coords.length > 1) {
+        coords = coords.concat(coords.slice().reverse().slice(1));
     }
     if (coords.length < 2) return;
 
@@ -1619,9 +1649,9 @@ async function exportGPX() {
         var seg = state.routeSegments[s];
         pushAll(coords, seg, coords.length === 0 ? 0 : 1);
     }
-    if (state.mode === "loop" && state.closingLine) {
-        var cl = state.closingLine.getLatLngs();
-        for (var i = 1; i < cl.length; i++) coords.push([cl[i].lat, cl[i].lng]);
+    if (state.mode === "loop" && state.closingCoords) {
+        var cl = state.closingCoords;
+        for (var i = 1; i < cl.length; i++) coords.push(cl[i]);
     }
     if (state.mode === "outback" && coords.length > 1) {
         coords = coords.concat(coords.slice().reverse().slice(1));
@@ -1748,6 +1778,7 @@ function clearRouteLayers(keepWaypoints) {
     clearLayerSingle("closingLine");
     clearLayerSingle("routeOutline");
     state.routeSegments = [];
+    state.closingCoords = null;
     if (!keepWaypoints) {
         for (var i = 0; i < state.waypoints.length; i++) state.map.removeLayer(state.waypoints[i].marker);
         state.waypoints = [];
@@ -2621,10 +2652,11 @@ async function renderSavedRoutes() {
             // Mode chip — short label without the leading unicode symbol.
             var modeShort = (MODE_META[route.mode] || {}).word || route.mode;
             if (modeShort) parts.push(modeShort);
-            // Ascent from stored elevation samples, if any. Same shared accumulator
-            // + dead-band as the elevation panel, so the list and panel agree.
+            // Ascent from stored elevation samples, if any. Same smoothing +
+            // accumulator + dead-band as the elevation panel, so the list and
+            // panel agree — raw samples here read ~12% high on noisy data.
             if (route.elevationData && route.elevationData.length > 1) {
-                var ascent = computeAscent(route.elevationData, 5).ascent;
+                var ascent = computeAscent(smoothElevations(route.elevationData), 5).ascent;
                 if (ascent > 0) parts.push("\u2191" + Math.round(ascent) + "m");
             }
             parts.push(new Date(route.ts).toLocaleDateString());

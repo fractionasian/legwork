@@ -85,6 +85,41 @@ async function cacheSet(key, value) {
     } catch (e) { return false; }
 }
 
+// Sweep stale pathCache rows: pre-baked tile entries whose trailing
+// ":<version>" doesn't match the current manifest version, plus retired key
+// generations. Nothing else ever deletes pathCache rows, so without this a
+// manifest rebuild orphaned every cached tile until QuotaExceededError.
+// Called fire-and-forget from fetchManifest (tiles.js) on a version change.
+var STALE_KEY_PREFIXES = ["paths:", "paths2:", "pois:", "pois2:"];
+async function cachePruneStale(currentTileVersion) {
+    try {
+        var db = await openDB();
+        return await new Promise(function (resolve) {
+            var tx = db.transaction("pathCache", "readwrite");
+            var req = tx.objectStore("pathCache").openCursor();
+            var removed = 0;
+            req.onsuccess = function () {
+                var cur = req.result;
+                if (!cur) return;
+                var key = String(cur.key);
+                var stale = false;
+                if (key.indexOf("tile:") === 0) {
+                    stale = key.slice(key.lastIndexOf(":") + 1) !== String(currentTileVersion);
+                } else {
+                    for (var i = 0; i < STALE_KEY_PREFIXES.length; i++) {
+                        if (key.indexOf(STALE_KEY_PREFIXES[i]) === 0) { stale = true; break; }
+                    }
+                }
+                if (stale) { cur.delete(); removed++; }
+                cur.continue();
+            };
+            req.onerror = function () { resolve(removed); };
+            tx.oncomplete = function () { resolve(removed); };
+            tx.onerror = tx.onabort = function () { resolve(removed); };
+        });
+    } catch (e) { return 0; }
+}
+
 // Batched variants of cacheGet/cacheSet: one transaction per store instead of
 // one per key. A 10 km route samples ~200 elevation points; per-key
 // transactions serialised hundreds of IDB round-trips on the warm-cache path,
