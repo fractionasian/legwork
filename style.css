@@ -880,6 +880,81 @@ button.menu-item:disabled {
     filter: grayscale(0.35) brightness(0.9) contrast(1.05);
 }
 
+/* ── Leaflet's own controls ──────────────────────────
+   Leaflet ships light-themed chrome — the zoom buttons are hard-coded #fff,
+   attribution text is #333 — which read as unstyled white boxes on this
+   near-black app. They sit permanently in both top corners, so they are the
+   most visible thing left untouched. Restyled to the app palette. */
+.leaflet-bar,
+.leaflet-control-layers {
+    background: #1a1d28;
+    border: 1px solid #3a3d4a;
+    border-radius: 6px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+
+.leaflet-bar a,
+.leaflet-bar a:hover,
+.leaflet-bar a:focus {
+    background-color: #1a1d28;
+    color: #d0d0d0;
+    border-bottom-color: #3a3d4a;
+}
+
+.leaflet-bar a:hover,
+.leaflet-bar a:focus {
+    background-color: #2f3344;
+    color: #f0f0f0;
+}
+
+.leaflet-bar a.leaflet-disabled {
+    background-color: #1a1d28;
+    color: #4a4d5a;
+}
+
+/* The layers icon is a dark PNG drawn for a white panel (images/layers.png),
+   so on the dark panel above it disappears. The toggle has no background
+   colour of its own — the panel behind supplies it — so inverting the element
+   recolours the icon and leaves the transparent area transparent. */
+.leaflet-control-layers-toggle {
+    filter: invert(1);
+}
+
+.leaflet-control-layers-expanded {
+    padding: 8px 10px 6px;
+    color: #d0d0d0;
+    font-size: 13px;
+}
+
+.leaflet-control-layers-selector {
+    accent-color: #6ee7b7;
+    margin-right: 4px;
+}
+
+.leaflet-control-layers-separator {
+    border-top-color: #3a3d4a;
+}
+
+/* Attribution stays legible but recedes: it is a licence requirement, not
+   something the user came for. Keeping OSM and Esri credited is the point,
+   so it is toned rather than hidden. */
+.leaflet-control-attribution {
+    background: rgba(26, 29, 40, 0.85) !important;
+    color: #808390;
+    font-size: 10px;
+}
+
+.leaflet-control-attribution a {
+    color: #9aa0b0;
+}
+
+/* Match the app-wide keyboard focus ring (see .controls button:focus-visible). */
+.leaflet-bar a:focus-visible,
+.leaflet-control-layers-toggle:focus-visible {
+    outline: 2px solid #6ee7b7;
+    outline-offset: 1px;
+}
+
 /* Street layer only: full grayscale(1) flattens OSM's water fill (#aad3df)
    into near-identical luminance to residential/urban fill (#e0dfdf) — the two
    read as the same gray, which made water indistinguishable from land in
