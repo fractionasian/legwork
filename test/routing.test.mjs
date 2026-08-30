@@ -46,6 +46,112 @@ test("dijkstra — shortest path + edge cases", () => {
   assert.equal(R.dijkstra({ A: [] }, "Z", "A"), null); // unknown start
 });
 
+// ── A* parity + admissibility ─────────────────────────
+// dijkstra() is A* with a haversine heuristic scaled by MIN_EDGE_MULTIPLIER.
+// Two things must hold or it silently returns suboptimal routes:
+//   1. the scale is a true lower bound on every edge's cost/metre (admissible);
+//   2. with the heuristic on, the cost equals plain Dijkstra's.
+// Reference Dijkstra, kept here so the parity assertion has something
+// heuristic-free to compare against.
+function refDijkstra(graph, startKey, endKey) {
+  if (!graph[startKey] || !graph[endKey]) return null;
+  if (startKey === endKey) return { dist: 0, path: [startKey] };
+  const dist = Object.create(null), prev = Object.create(null), visited = Object.create(null);
+  const heap = new R.MinHeap();
+  dist[startKey] = 0;
+  heap.push({ key: startKey, d: 0 });
+  while (heap.size() > 0) {
+    const cur = heap.pop();
+    if (visited[cur.key]) continue;
+    visited[cur.key] = true;
+    if (cur.key === endKey) break;
+    for (const nb of graph[cur.key] || []) {
+      if (visited[nb.key]) continue;
+      const nd = dist[cur.key] + nb.dist;
+      if (dist[nb.key] === undefined || nd < dist[nb.key]) {
+        dist[nb.key] = nd; prev[nb.key] = cur.key;
+        heap.push({ key: nb.key, d: nd });
+      }
+    }
+  }
+  return dist[endKey] === undefined ? null : { dist: dist[endKey] };
+}
+
+test("A* heuristic scale is admissible against the live weight tables", () => {
+  // Re-derive the smallest combined edge multiplier by enumerating the actual
+  // tables. If someone lowers a road weight or adds a bonus below the current
+  // floor, MIN_EDGE_MULTIPLIER stops being a lower bound and A* goes wrong —
+  // this test is the tripwire for that edit.
+  const attrCases = [
+    undefined, null, {}, { barrier: true }, { trafficSignal: true },
+    { crossingMarked: true }, { crossingUnmarked: true },
+    { trafficSignal: true, crossingMarked: true },
+  ];
+  const surfaces = ["", "asphalt", "paved", "ground", "dirt", "grass", "compacted",
+    "gravel", "unpaved", "fine_gravel", "earth"];
+  let worst = Infinity;
+  for (const name of ["run", "bike"]) {
+    const p = R.routingProfile(name);
+    const highways = Object.keys(p.roadWeight).concat(["__unknown__"]);
+    let minWay = Infinity, minNode = Infinity;
+    for (const hw of highways) {
+      const rw = p.roadWeight[hw] || p.defaultWeight;
+      for (const s of surfaces) {
+        for (const nm of ["", "Named Trail"]) minWay = Math.min(minWay, rw * p.wayPref(hw, s, nm));
+      }
+    }
+    for (const a of attrCases) minNode = Math.min(minNode, p.nodePref(a));
+    worst = Math.min(worst, minWay * minNode * minNode);
+  }
+  // 0.648 = bike cycleway 0.8 × marked-crossing 0.9 at both endpoints.
+  assert.ok(near(worst, 0.648, 1e-9), `derived floor ${worst}, expected 0.648`);
+  assert.ok(
+    R.MIN_EDGE_MULTIPLIER <= worst + 1e-12,
+    `MIN_EDGE_MULTIPLIER ${R.MIN_EDGE_MULTIPLIER} exceeds the true floor ${worst} — heuristic is inadmissible`,
+  );
+});
+
+test("A* (dijkstra with heuristic) matches plain Dijkstra cost on a coordinate grid", () => {
+  // 8×8 grid of real nodeKey()s around Perth, edges weighted haversine × a
+  // spread of multipliers from 0.648 (the floor) up to 2.5 (trunk).
+  const graph = {};
+  const mults = [0.648, 0.81, 1.0, 1.1, 1.3, 1.6, 2.0, 2.5];
+  const at = (i, j) => [-31.95 + i * 0.002, 115.86 + j * 0.002];
+  const link = (a, b, m) => {
+    const ka = R.nodeKey(a[0], a[1]), kb = R.nodeKey(b[0], b[1]);
+    const d = R.haversine(a[0], a[1], b[0], b[1]) * m;
+    if (!graph[ka]) graph[ka] = [];
+    if (!graph[kb]) graph[kb] = [];
+    graph[ka].push({ key: kb, lat: b[0], lon: b[1], dist: d });
+    graph[kb].push({ key: ka, lat: a[0], lon: a[1], dist: d });
+  };
+  let t = 0;
+  for (let i = 0; i < 8; i++) {
+    for (let j = 0; j < 8; j++) {
+      if (i + 1 < 8) link(at(i, j), at(i + 1, j), mults[t++ % mults.length]);
+      if (j + 1 < 8) link(at(i, j), at(i, j + 1), mults[t++ % mults.length]);
+    }
+  }
+  const keys = Object.keys(graph);
+  let checked = 0;
+  for (let a = 0; a < keys.length; a += 7) {
+    for (let b = 0; b < keys.length; b += 5) {
+      const got = R.dijkstra(graph, keys[a], keys[b]);
+      const want = refDijkstra(graph, keys[a], keys[b]);
+      assert.ok(near(got.dist, want.dist), `${keys[a]}→${keys[b]}: A* ${got.dist} vs Dijkstra ${want.dist}`);
+      assert.equal(got.path[0], keys[a]);
+      assert.equal(got.path[got.path.length - 1], keys[b]);
+      checked++;
+    }
+  }
+  assert.ok(checked > 50, `expected a decent pair count, got ${checked}`);
+  // Unreachable across components still returns null with the heuristic on.
+  const island = ["-31.700000,115.700000", "-31.701000,115.701000"];
+  graph[island[0]] = [{ key: island[1], lat: -31.701, lon: 115.701, dist: 100 }];
+  graph[island[1]] = [{ key: island[0], lat: -31.7, lon: 115.7, dist: 100 }];
+  assert.equal(R.dijkstra(graph, keys[0], island[0]), null);
+});
+
 test("pathGeomLength — sums haversine over consecutive nodes, independent of weights", () => {
   // Two legs of ~111 km each (1° latitude steps). dijkstra's weighted dist
   // would differ under road weighting; the geometric length must not.
