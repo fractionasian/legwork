@@ -35,9 +35,18 @@ var TILE_PATTERNS = [
 ];
 
 self.addEventListener("install", function (e) {
+    // Local shell files are the must-have — addAll is atomic, so keep it for
+    // those. CDN libs are best-effort: one blipped unpkg/jsdelivr request must
+    // not reject the whole install and strand users on the previous shell
+    // (they're also fetched at runtime through the shell branch below, so a
+    // miss here only costs first-offline-load coverage of that one file).
     e.waitUntil(
         caches.open(CACHE_NAME).then(function (cache) {
-            return cache.addAll(SHELL_URLS);
+            return cache.addAll(SHELL_FILES).then(function () {
+                return Promise.all(CDN_LIBS.map(function (u) {
+                    return cache.add(u).catch(function () {});
+                }));
+            });
         }).then(function () { return self.skipWaiting(); })
     );
 });
@@ -81,7 +90,12 @@ self.addEventListener("fetch", function (e) {
                 var fetchPromise = fetch(e.request).then(function (resp) {
                     if (resp && resp.ok) {
                         var clone = resp.clone();
-                        caches.open(CACHE_NAME).then(function (c) { c.put(e.request, clone); });
+                        // Navigations store under the bare shell URL — putting
+                        // e.request verbatim would add one cache entry per
+                        // distinct "/?s=slug" short-link URL, unbounded until
+                        // the next CACHE_NAME bump (lookups ignoreSearch anyway).
+                        var putKey = e.request.mode === "navigate" ? SHELL_URLS[0] : e.request;
+                        caches.open(CACHE_NAME).then(function (c) { c.put(putKey, clone); });
                     }
                     return resp;
                 }).catch(function () { return cached; });

@@ -152,3 +152,24 @@ test("POST /v1/event reaches handleEvent through the router and returns 204", as
   assert.equal(res.status, 204);
   assert.equal(DB._events.length, 1, "the router must have dispatched to handleEvent, which wrote one row");
 });
+
+test("an Overpass soft-error (HTTP 200 + remark, empty elements) is served but never cached", async () => {
+  const env = mockEnv();
+  const softError = '{"elements":[],"remark":"runtime error: Query timed out in \\"query\\" at line 1."}';
+  const res = await withFetch(async () => new Response(softError, { status: 200 }), () =>
+    worker.fetch(new Request("https://w.dev/v1/graph?lat=-31.95&lon=115.861&radius=2000"), env, ctx));
+  assert.equal(res.status, 200);
+  assert.equal(await res.text(), softError, "the body is still served to the caller");
+  assert.equal(res.headers.get("cache-status"), "miss-uncacheable");
+  assert.equal(res.headers.get("cache-control"), "no-store", "the edge cache must not hold the soft-error either");
+  assert.equal(env.store.size, 0, "R2 must not persist the soft-error");
+});
+
+test("an empty-but-clean Overpass result is served and not cached (indistinguishable from a swallowed error)", async () => {
+  const env = mockEnv();
+  const res = await withFetch(async () => new Response('{"elements":[]}', { status: 200 }), () =>
+    worker.fetch(new Request("https://w.dev/v1/graph?lat=-31.95&lon=115.861&radius=2000"), env, ctx));
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get("cache-status"), "miss-uncacheable");
+  assert.equal(env.store.size, 0);
+});
