@@ -220,10 +220,15 @@ async function reverseGeocode(lat, lon) {
         const data = await fetchJSON(
             `https://photon.komoot.io/reverse?lat=${lat}&lon=${lon}&limit=3`
         );
+        // `district` is Photon's suburb/locality layer; `city` is the level up.
+        // `name` is the nearest named FEATURE (road, park, golf club) and must
+        // stay last: it is almost always populated, so preferring it made the
+        // other two dead code and filled the manifest — and the "Loading ..."
+        // banner users see — with street names instead of suburbs.
         const suburbs = [];
         for (const feat of data.features || []) {
             const p = feat.properties;
-            const name = p.name || p.district || p.city;
+            const name = p.district || p.city || p.name;
             if (name && !suburbs.includes(name)) suburbs.push(name);
         }
         return suburbs.length > 0 ? suburbs : ["Unknown"];
@@ -346,7 +351,7 @@ async function buildCity(city, dataDir, options) {
 }
 
 function parseArgs(argv) {
-    const args = { cities: null, skipGeocode: false };
+    const args = { cities: null, skipGeocode: false, regeocode: false };
     for (let i = 0; i < argv.length; i++) {
         const a = argv[i];
         if (a === "--city" || a === "--cities") {
@@ -357,9 +362,16 @@ function parseArgs(argv) {
             args.cities = a.slice(a.indexOf("=") + 1).split(",").map(s => s.trim()).filter(Boolean);
         } else if (a === "--skip-geocode") {
             args.skipGeocode = true;
+        } else if (a === "--regeocode") {
+            args.regeocode = true;
         } else if (a === "--help" || a === "-h") {
-            console.log("Usage: build-tiles.js [--city|--cities <id>[,<id>...]] [--skip-geocode]");
-            console.log("       build-tiles.js [--city=<id>[,<id>...]] [--skip-geocode]");
+            console.log("Usage: build-tiles.js [--city|--cities <id>[,<id>...]] [--skip-geocode] [--regeocode]");
+            console.log("       build-tiles.js [--city=<id>[,<id>...]] [--skip-geocode] [--regeocode]");
+            console.log("");
+            console.log("  --regeocode  ignore the previous manifest's suburb labels and re-fetch");
+            console.log("               them. Needed after changing reverseGeocode(), because the");
+            console.log("               cache reuses any label that isn't \"Unknown\" — including");
+            console.log("               wrong ones — so a plain rebuild would keep them.");
             process.exit(0);
         } else {
             console.error(`Unknown argument: ${a}`);
@@ -409,7 +421,11 @@ async function main() {
         const city = cities[i];
         const prevCity = previousManifest && previousManifest.cities && previousManifest.cities[city.id];
         const prevBoundsMatch = prevCity && JSON.stringify(prevCity.bounds) === JSON.stringify(city.bounds);
-        const suburbCache = prevBoundsMatch ? buildSuburbCache(prevCity) : new Map();
+        // A label the cache holds is reused verbatim, so a change to how labels
+        // are DERIVED cannot take effect through it — every stale label survives
+        // as "(cached)" and the rebuild silently no-ops. --regeocode is the way
+        // to actually re-derive them.
+        const suburbCache = (prevBoundsMatch && !args.regeocode) ? buildSuburbCache(prevCity) : new Map();
         if (suburbCache.size) console.log(`  Suburb cache: ${suburbCache.size} tiles`);
 
         const result = await buildCity(city, dataDir, {

@@ -18,9 +18,10 @@
 // pooled into a single "(below threshold)" line rather than named.
 //
 // Suburb names come from Photon reverse geocoding, preferring `district`/`city`
-// over `name`. build-tiles.js prefers `name`, which is why the manifest's
-// "suburbs" are often a road or a golf club rather than a suburb — do not reuse
-// those labels here.
+// over `name`. build-tiles.js used to prefer `name`, which filled the manifest's
+// "suburbs" with roads and golf clubs; it now uses the same order as here. Tiles
+// built before that fix still carry the old labels until the city is rebuilt, so
+// this script keeps geocoding rather than reading the manifest.
 
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
