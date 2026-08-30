@@ -427,6 +427,88 @@ function poiFromOsmElement(el) {
     };
 }
 
+// ── POI ↔ route corridor ───────────────────────────────
+// Metres per degree of latitude. Longitude uses the same figure scaled by
+// cos(lat), which is why every projection below multiplies the lon delta.
+var METRES_PER_DEGREE = 111320;
+
+// Shortest distance from a point to a line segment, in metres. Uses an
+// equirectangular projection centred on the point rather than haversine per
+// segment: sub-metre accurate at the sub-kilometre distances this is asked
+// about, and cheap enough to run over a whole route's geometry.
+function distPointToSegmentMetres(plat, plon, alat, alon, blat, blon) {
+    var k = Math.cos(plat * Math.PI / 180);
+    // Segment endpoints relative to the point, so the point sits at the origin.
+    var ax = (alon - plon) * k, ay = alat - plat;
+    var bx = (blon - plon) * k, by = blat - plat;
+    var dx = bx - ax, dy = by - ay;
+    var len2 = dx * dx + dy * dy;
+    // t is the projection of the origin onto AB, clamped so a point "past" an
+    // endpoint measures to that endpoint rather than to the infinite line.
+    var t = len2 === 0 ? 0 : -(ax * dx + ay * dy) / len2;
+    if (t < 0) t = 0; else if (t > 1) t = 1;
+    var cx = ax + t * dx, cy = ay + t * dy;
+    return Math.sqrt(cx * cx + cy * cy) * METRES_PER_DEGREE;
+}
+
+// Keep only the POIs within `maxMetres` of any of `polylines` (arrays of
+// [lat, lon]). An empty polyline list returns the input untouched — that's the
+// "no route yet" case, where the area view is the only thing that can answer
+// "what's around here".
+//
+// Two-stage on purpose: a dense city holds ~1000 POIs and a 10 km route ~3000
+// segments, so testing every pair is 3M projections. The whole-route bounding
+// box rejects the ~95% that are nowhere near it on four comparisons each,
+// leaving only the plausible ones for the per-segment pass.
+function filterPoisNearRoute(pois, polylines, maxMetres) {
+    if (!pois || !polylines || polylines.length === 0) return pois;
+    var lines = [];
+    var south = Infinity, west = Infinity, north = -Infinity, east = -Infinity;
+    for (var i = 0; i < polylines.length; i++) {
+        var line = polylines[i];
+        if (!line || line.length < 2) continue; // a single point has no segment
+        lines.push(line);
+        for (var j = 0; j < line.length; j++) {
+            if (line[j][0] < south) south = line[j][0];
+            if (line[j][0] > north) north = line[j][0];
+            if (line[j][1] < west) west = line[j][1];
+            if (line[j][1] > east) east = line[j][1];
+        }
+    }
+    if (lines.length === 0) return pois;
+
+    var padLat = maxMetres / METRES_PER_DEGREE;
+    // Widen the lon pad using the bbox edge nearest the pole, where a degree of
+    // longitude is shortest — so the pad is never narrower than maxMetres.
+    var cosLat = Math.cos(Math.max(Math.abs(south), Math.abs(north)) * Math.PI / 180);
+    var padLon = padLat / Math.max(cosLat, 1e-6);
+
+    var out = [];
+    for (var p = 0; p < pois.length; p++) {
+        var poi = pois[p];
+        if (poi.lat < south - padLat || poi.lat > north + padLat) continue;
+        if (poi.lon < west - padLon || poi.lon > east + padLon) continue;
+        if (isNearPolylines(poi.lat, poi.lon, lines, maxMetres)) out.push(poi);
+    }
+    return out;
+}
+
+function isNearPolylines(lat, lon, lines, maxMetres) {
+    var padLat = maxMetres / METRES_PER_DEGREE;
+    var padLon = padLat / Math.max(Math.cos(lat * Math.PI / 180), 1e-6);
+    for (var i = 0; i < lines.length; i++) {
+        var line = lines[i];
+        for (var j = 1; j < line.length; j++) {
+            var a = line[j - 1], b = line[j];
+            // Per-segment bbox reject before the projection maths.
+            if (lat < Math.min(a[0], b[0]) - padLat || lat > Math.max(a[0], b[0]) + padLat) continue;
+            if (lon < Math.min(a[1], b[1]) - padLon || lon > Math.max(a[1], b[1]) + padLon) continue;
+            if (distPointToSegmentMetres(lat, lon, a[0], a[1], b[0], b[1]) <= maxMetres) return true;
+        }
+    }
+    return false;
+}
+
 // ── Terrarium tile math ────────────────────────────────
 // Convert (lat, lon, zoom) to slippy-map tile XYZ + pixel-space (px, py)
 // within that tile's 256×256 raster. Used to look up elevation in
@@ -551,6 +633,8 @@ if (typeof module !== "undefined" && module.exports) {
         waypointHash: waypointHash,
         nodeAttrsFromTags: nodeAttrsFromTags,
         poiFromOsmElement: poiFromOsmElement,
+        distPointToSegmentMetres: distPointToSegmentMetres,
+        filterPoisNearRoute: filterPoisNearRoute,
         compactToGeoJSON: compactToGeoJSON,
         osmToGeoJSON: osmToGeoJSON,
     };
