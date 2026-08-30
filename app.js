@@ -1745,11 +1745,54 @@ async function exportGPX() {
         }
     }
     gpx.push('    </trkseg>','  </trk>','</gpx>');
-    var blob = new Blob([gpx.join("\n")], { type: "application/gpx+xml" });
+    var text = gpx.join("\n");
+    var filename = name + ".gpx";
+
+    // Share sheet first: it hands the file straight to Strava, Garmin Connect,
+    // Files or Mail, which is where a GPX is actually going. The blob-anchor
+    // download below is historically flaky in display-mode: standalone on iOS
+    // — exactly how this app is installed on a phone — and that is the open
+    // item this replaces (docs/2026-06-10-review-deferred.md).
+    var outcome = await shareGpxFile(text, filename);
+    if (outcome === "cancelled") return;                       // user declined
+    if (outcome === "shared") { maybeShowTipNudge(); return; }
+
+    // outcome === "unavailable": desktop, or a browser that won't take files.
+    var blob = new Blob([text], { type: "application/gpx+xml" });
     var url = URL.createObjectURL(blob);
-    var a = document.createElement("a"); a.href = url; a.download = name + ".gpx"; a.click();
+    var a = document.createElement("a"); a.href = url; a.download = filename; a.click();
     URL.revokeObjectURL(url);
     maybeShowTipNudge();
+}
+
+// Hand the GPX to the OS share sheet. Returns:
+//   "shared"      — the sheet accepted it
+//   "cancelled"   — the user dismissed the sheet; falling through to a download
+//                   would silently do the very thing they just declined
+//   "unavailable" — no file-sharing support, so the caller should download
+//
+// canShare({ files }) is the real capability check, not navigator.share:
+// browsers exist that expose share() but reject file payloads, and testing
+// share alone would commit us to a path that always throws.
+async function shareGpxFile(text, filename) {
+    if (typeof File !== "function" || !navigator.canShare || !navigator.share) return "unavailable";
+    var file;
+    try {
+        file = new File([text], filename, { type: "application/gpx+xml" });
+    } catch (e) {
+        return "unavailable";
+    }
+    if (!navigator.canShare({ files: [file] })) return "unavailable";
+    try {
+        // files only — adding title/text makes some share targets drop the
+        // attachment, and the filename already carries the date and distance.
+        await navigator.share({ files: [file] });
+        return "shared";
+    } catch (e) {
+        if (e && e.name === "AbortError") return "cancelled";
+        console.warn("Share failed, falling back to download:", e && e.message);
+        return "unavailable";
+    }
 }
 
 // ── Tip nudge (post-export delight moment) ─────────────

@@ -89,4 +89,12 @@ and what would trigger picking it up.
 - **Deploy steps for the worker changes:** `wrangler d1 migrations apply
   legwork-links --remote` (new hash index), then deploy — the `g2:` key
   bump means a cold graph cache (first fetch per cell re-hits Overpass).
-- iOS standalone GPX export (carried forward from June, still untested).
+- **iOS standalone GPX export — now shares instead of downloading.** The
+  blob-anchor download this deferral was about is no longer the mobile path:
+  `exportGPX` hands the file to the OS share sheet when
+  `navigator.canShare({files})` allows it, which is the fix the June doc
+  itself recommended, and falls back to the download on desktop. Still needs
+  one real check on an installed iPhone: tap Export, confirm Strava and
+  Garmin Connect appear as targets and the file lands intact. If the sheet
+  never opens, suspect the awaited IndexedDB elevation probe just before it
+  costing the user-activation window Safari requires.
