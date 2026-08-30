@@ -97,3 +97,14 @@ function suburbForPoint(cityId, lat, lon) {
     }
     return null;
 }
+
+// Node-only export for test/suburbs.test.mjs. Same idiom as routing.js:610 —
+// the browser never sees `module`, so this is inert there.
+if (typeof module !== "undefined" && module.exports) {
+    module.exports = {
+        _inRing: _inRing,
+        _contains: _contains,
+        suburbForPoint: suburbForPoint,
+        _suburbs: _suburbs,
+    };
+}
