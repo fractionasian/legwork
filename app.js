@@ -966,6 +966,10 @@ async function updateRoute() {
     if (hintBanner.dataset.type === "hint") showBanner("");
 
     var allRouteCoords = [];
+    // Geometry for the route casing — successful legs only. A solid casing
+    // under the red dashed "no connection" fallback would fill its gaps and
+    // read as a solid line, hiding the very thing the dashes signal.
+    var outlineCoords = [];
     var routeOk = true;
 
     // Draw each leg between consecutive waypoints.
@@ -979,6 +983,7 @@ async function updateRoute() {
             state.routeSegments.push(segCoords);
             var line = L.polyline(segCoords, { color: "#6ee7b7", weight: 4, opacity: 0.9 }).addTo(state.map);
             state.routeLines.push(line);
+            outlineCoords.push(segCoords);
             pushAll(allRouteCoords, segCoords, allRouteCoords.length === 0 ? 0 : 1);
         } else {
             var fallback = [[fromWp.lat, fromWp.lon], [toWp.lat, toWp.lon]];
@@ -1001,6 +1006,7 @@ async function updateRoute() {
             state.closingCoords = closeCoords;
             state.closingLine = L.polyline(closeCoords, { color: "#6ee7b7", weight: 4, opacity: 0.6, dashArray: "10 6" }).addTo(state.map);
             pushAll(allRouteCoords, closeCoords, 1);
+            outlineCoords.push(closeCoords);
         } else {
             // Same treatment as a failed intermediate leg: the straight-line
             // fallback counts toward the route coords (so the elevation x-axis
@@ -1012,6 +1018,23 @@ async function updateRoute() {
             pushAll(allRouteCoords, closeFallback, 1);
             routeOk = false;
         }
+    }
+
+    // Casing: a dark line under the route so it separates from whatever the
+    // basemap puts beneath it — satellite photography and OpenTopoMap's orange
+    // roads both compete with a bare 4 px line. state.routeOutline has been
+    // declared and cleaned up since before this change and was never actually
+    // created; this fills it in. bringToBack keeps it under the coloured line
+    // (same pane, so paint order is insertion order) while staying above the
+    // tile pane, which Leaflet keeps separate.
+    //
+    // The gradient version of the route does not use this: leaflet-hotline
+    // draws its own outline, widened to match below.
+    if (outlineCoords.length > 0) {
+        state.routeOutline = L.polyline(outlineCoords, {
+            color: "#000", weight: ROUTE_CASING_WEIGHT, opacity: 0.5, lineCap: "round", lineJoin: "round",
+        }).addTo(state.map);
+        state.routeOutline.bringToBack();
     }
 
     finalizeRoute(allRouteCoords, routeOk);
@@ -1128,6 +1151,11 @@ async function refreshPois() {
         state.poiMarkers.push(marker);
     }
 }
+
+// Route casing width. The coloured route line is weight 4, so 8 leaves 2 px of
+// dark either side — the same margin leaflet-hotline draws around the gradient
+// version, so the route reads identically before and after elevation loads.
+var ROUTE_CASING_WEIGHT = 8;
 
 // How far off the route — or off a lone dropped pin, before a route exists —
 // a toilet or fountain still counts as "on the way".
@@ -1467,7 +1495,10 @@ function colourRouteByGradient(elevData) {
             1.0:  GRADE_BANDS[6].color,  // very steep uphill
         },
         weight: 5,
-        outlineWidth: 1,
+        // 1 px was invisible against satellite photography and OpenTopoMap's
+        // orange road fills. 2 px each side matches the plain-route casing
+        // above (weight 4 + 2 px per side = 8).
+        outlineWidth: 2,
         outlineColor: '#000',
     }).addTo(state.map);
     // Fade in the hotline canvas to mask the flicker when the plain green route
