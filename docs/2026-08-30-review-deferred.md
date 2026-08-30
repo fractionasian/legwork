@@ -22,16 +22,39 @@ and what would trigger picking it up.
   (`/v1/event` is no-store). Until then treat demand as directionally useful,
   biased low on hot cells. The in-code comment claiming "a HIT counts as much
   as a MISS" holds for R2 hits only.
-- **R2 graph cache + D1 `links` still grow with no ceiling** (carried forward
-  from June, still open; the new `g2:` generation also orphans all `g:*`
-  objects). Dashboard-side lifecycle rule for R2 and a TTL/cleanup decision
-  for `links` remain config work. Trigger: dashboard shows R2 trending toward
-  10 GB or D1 row counts growing meaningfully.
+- **R2 graph cache + D1 `links` grow with no ceiling** — MEASURED 2026-08-30,
+  and the D1 half is effectively closed. Live D1: 1 link row, 283 events, 25
+  demand, **90.1 kB total**, 503 rows written in 24 h. Against the free tier
+  (500 MB per database, 100k row-writes/day) that is 0.02% of storage and 0.5%
+  of the daily write budget — and the retention cron already prunes events at
+  180 days and demand at 104 weeks, so those two reach a steady state rather
+  than growing. `links` is the only genuinely unbounded table and it holds ONE
+  row, so a TTL for it would be solving nothing. Revisit only if links grows to
+  thousands.
+  **R2 remains unmeasured** and is the half that could actually be large: it
+  caches whole Overpass graph responses (multi-MB each), never expires, and the
+  `g2:` generation orphaned every `g:*` object. That, not D1, is where the
+  lifecycle rule is worth setting. Check bucket size on the Cloudflare
+  dashboard before deciding.
 - **`navigator.storage.persist()` is never requested.** On iPhone the offline
   cache survives only for the installed-PWA (Home Screen) case; a plain
   Safari tab loses everything after 7 days of disuse. Calling persist() on
   first route-save would harden the tab case. One line + a UX decision about
   when to ask.
+
+- **Pages and the Worker deploy on different triggers, client-first.** Found
+  during the 2026-08-30 deploy. GitHub Pages auto-publishes the client on every
+  push to main; the Worker only moves when someone runs `wrangler deploy` by
+  hand. So each push opens a window where live clients beacon at a Worker that
+  may not know the route yet — the inverse of the migrations -> Worker ->
+  client order `.claude/plans/legwork-analytics.md` prescribes. It cost nothing
+  this time because the `analytics-lib.js` change was purely additive (unknown
+  event names are dropped, not 400'd), but a breaking event-shape change would
+  silently lose writes for however long the gap lasts. Real fix: deploy the
+  Worker from CI on pushes that touch `worker/**`, which needs a Cloudflare API
+  token in GitHub secrets. Cheaper mitigation: keep every `/v1/event` change
+  additive, and deploy the Worker before merging a client change that depends
+  on it.
 
 ## Cheap speedups measured but not taken (A* shipped instead)
 
