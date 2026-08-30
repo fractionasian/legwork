@@ -1064,8 +1064,12 @@ async function refreshPois() {
     // and unremovable by the toggle-off loop.
     var gen = ++_poiGen;
     if (!state.map) return;
-    // If neither type is visible, clear immediately and stop.
-    if (!anyPoisVisible()) {
+    // Clear and stop when either type is off, OR when there is no pin yet.
+    // Without the waypoint check, a first load with the toggles remembered
+    // from last session painted every toilet in the city — hundreds of pins
+    // over an empty map, anchored to nothing. POIs appear once there is a pin
+    // to relate them to, and the anchor tightens to the route once one exists.
+    if (!anyPoisVisible() || state.waypoints.length === 0) {
         for (var i = 0; i < state.poiMarkers.length; i++) state.map.removeLayer(state.poiMarkers[i]);
         state.poiMarkers = [];
         return;
@@ -1078,7 +1082,7 @@ async function refreshPois() {
     // otherwise drops ~570 markers on the map when the run passes about 19.
     // With no route, the area view stays: that's the only thing that can
     // answer "what's around here" while you're still deciding.
-    if (pois) pois = filterPoisNearRoute(pois, routePolylines(), POI_ROUTE_CORRIDOR_M);
+    if (pois) pois = filterPoisNearRoute(pois, poiAnchorLines(), POI_ROUTE_CORRIDOR_M);
     // User may have toggled everything off during the fetch.
     if (!anyPoisVisible()) {
         for (var j = 0; j < state.poiMarkers.length; j++) state.map.removeLayer(state.poiMarkers[j]);
@@ -1123,23 +1127,36 @@ async function refreshPois() {
     }
 }
 
-// How far off the route a toilet or fountain still counts as "on the way".
+// How far off the route — or off a lone dropped pin, before a route exists —
+// a toilet or fountain still counts as "on the way".
 // 400 m is a detour of under half a kilometre out and back — far enough to
 // catch a fountain on the next parallel street, tight enough that the map
 // stops being a pincushion.
 var POI_ROUTE_CORRIDOR_M = 400;
 
-// The drawn route as a list of [lat, lon] polylines, for the POI corridor.
-// Out-and-back needs no mirrored geometry: the return leg retraces the same
-// corridor. Empty while there's no route — filterPoisNearRoute reads that as
-// "don't filter".
-function routePolylines() {
+// What the POI corridor measures against, as [lat, lon] polylines.
+//
+// Prefers the drawn route (out-and-back needs no mirrored geometry: the return
+// leg retraces the same corridor). Falls back to the waypoints themselves as
+// zero-length segments, so a single dropped pin still anchors the corridor —
+// otherwise one pin means no route, no lines, and filterPoisNearRoute reading
+// that as "don't filter" would put the whole city back on the map.
+// distPointToSegmentMetres measures to the point when a segment has no length.
+//
+// Returns empty only when there are no waypoints at all, which refreshPois
+// short-circuits before ever calling this.
+function poiAnchorLines() {
     var lines = [];
     for (var i = 0; i < state.routeSegments.length; i++) {
         if (state.routeSegments[i] && state.routeSegments[i].length > 1) lines.push(state.routeSegments[i]);
     }
     if (state.mode === "loop" && state.closingCoords && state.closingCoords.length > 1) {
         lines.push(state.closingCoords);
+    }
+    if (lines.length > 0) return lines;
+    for (var w = 0; w < state.waypoints.length; w++) {
+        lines.push([[state.waypoints[w].lat, state.waypoints[w].lon],
+                    [state.waypoints[w].lat, state.waypoints[w].lon]]);
     }
     return lines;
 }
@@ -2178,17 +2195,26 @@ function syncPoiLabels() {
     if (w) w.textContent = state.showWater ? "On" : "Off";
 }
 syncPoiLabels();
+// Turning a POI type on before any pin exists is a legitimate no-op now, and a
+// toggle that visibly does nothing reads as broken. Say why, once.
+function poiToggleHint() {
+    if (anyPoisVisible() && state.waypoints.length === 0) {
+        showBanner("Drop a pin to see toilets and water nearby", "hint");
+    }
+}
 document.getElementById("toilets-toggle").addEventListener("click", function () {
     state.showToilets = !state.showToilets;
     try { localStorage.setItem("lw:showToilets", state.showToilets ? "1" : "0"); } catch (e) {}
     syncPoiLabels();
     refreshPois();
+    poiToggleHint();
 });
 document.getElementById("water-toggle").addEventListener("click", function () {
     state.showWater = !state.showWater;
     try { localStorage.setItem("lw:showWater", state.showWater ? "1" : "0"); } catch (e) {}
     syncPoiLabels();
     refreshPois();
+    poiToggleHint();
 });
 // If either was on in a previous session, paint once the map is ready.
 if (anyPoisVisible()) setTimeout(refreshPois, 1200);
