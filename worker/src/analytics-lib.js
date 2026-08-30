@@ -40,6 +40,20 @@ const PROFILES = new Set(["run", "bike"]);
 const CITY_RE = /^[a-z][a-z0-9-]{1,30}$/;
 function isCitySlug(v) { return typeof v === "string" && CITY_RE.test(v); }
 
+// Suburb name for `route-built`, e.g. "Dalkeith" — the OSM boundary name the
+// client resolved the route's start point to, by point-in-polygon against a
+// per-city suburb file. Soft, and by shape, for exactly the same reasons as
+// `city`: the polygons ship in the legwork-tiles repo and change without a
+// Worker deploy.
+//
+// Looser charset than a slug because these are real place names, not slugs:
+// they carry spaces, hyphens, apostrophes ("O'Connor"), periods ("St. Kilda")
+// and non-Latin scripts. Unicode letter/number classes rather than [a-z] so a
+// Tokyo or Singapore rollout doesn't silently drop every name. Cardinality is
+// bounded by the 60-char cap and by the polygon file being a fixed list.
+const SUBURB_RE = /^[\p{L}\p{N}][\p{L}\p{N} '\u2019\-.()\/]{0,59}$/u;
+function isSuburbName(v) { return typeof v === "string" && SUBURB_RE.test(v); }
+
 // Per-event prop schema. A prop absent from its event's schema is DROPPED, not
 // rejected — a newer client can add a field without 400ing against an older
 // Worker. A prop that IS in the schema but carries a bad value is rejected, so
@@ -62,6 +76,7 @@ const PROP_SCHEMA = {
     mode: { test: (v) => MODES.has(v) },
     profile: { test: (v) => PROFILES.has(v) },
     city: { test: isCitySlug, soft: true },
+    suburb: { test: isSuburbName, soft: true },
   },
   "route-export": {},
   "route-save": {},

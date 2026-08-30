@@ -228,6 +228,11 @@ async function resetGraphIfCityChanged(lat, lon) {
         : "unknown:" + (Math.round(lat * 2) / 2).toFixed(1) + "," + (Math.round(lon * 2) / 2).toFixed(1);
     if (newId === _currentCityId) return;
     _currentCityId = newId;
+    // Warm the suburb polygons for the city the user just entered, so the
+    // synchronous lookup in route-built has them by the time a route settles
+    // (3 s debounce, and this fires on arrival). Fire-and-forget: a failure
+    // costs the suburb dimension and nothing else.
+    if (match) primeSuburbs(newId);
     // Fire a custom Umami event at the semantic moment "user resolved into a
     // (new) city bucket". Drives the curated cities.json list — hot unknown
     // buckets become candidates for the next pre-cache build. Coarse 0.5°

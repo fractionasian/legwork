@@ -101,6 +101,32 @@ test("an unrecognised city DROPS THE PROP and KEEPS THE EVENT", () => {
   }
 });
 
+test("validateEvent accepts real suburb names, including non-Latin", () => {
+  // Real names carry spaces, hyphens, apostrophes, periods and non-Latin
+  // scripts. A slug-shaped rule would drop most of them silently.
+  const good = ["Dalkeith", "South Perth", "O'Connor", "Mount Lawley",
+                "St. Kilda", "Hampstead Garden Suburb", "Toa Payoh",
+                "\u6E0B\u8C37", "Bassendean"];
+  for (const suburb of good) {
+    const r = validateEvent({ name: "route-built", props: { km_bucket: "5-10", mode: "loop", profile: "run", city: "perth", suburb } });
+    assert.equal(r.ok, true, suburb);
+    assert.equal(r.props.suburb, suburb);
+  }
+});
+
+test("a malformed suburb DROPS THE PROP and KEEPS THE EVENT", () => {
+  // Same soft-fail contract as `city`: the polygon files live in the tiles repo
+  // and change with no Worker deploy, so a name this Worker cannot parse must
+  // cost the dimension, never the event.
+  const bad = ["", " leading space", "x".repeat(61), "<script>", 42, null, {}];
+  for (const suburb of bad) {
+    const r = validateEvent({ name: "route-built", props: { km_bucket: "5-10", mode: "loop", profile: "run", city: "perth", suburb } });
+    assert.equal(r.ok, true, "event must survive suburb=" + JSON.stringify(suburb));
+    assert.equal("suburb" in r.props, false, "bad suburb must not be stored: " + JSON.stringify(suburb));
+    assert.equal(r.props.city, "perth", "the other props must be intact");
+  }
+});
+
 test("soft-fail does NOT leak to the hard props", () => {
   // A bad `mode` must still reject the whole event even when `city` is valid —
   // otherwise adding one soft prop quietly weakens every other guarantee.

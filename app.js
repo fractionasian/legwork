@@ -127,6 +127,27 @@ function cityForRoute() {
     }
 }
 
+// Resolve the true suburb of the route's origin, for analytics only.
+//
+// Deliberately NOT derived from the tile manifest's `suburbs` field: that names
+// a whole 0.05-degree tile (~5.5 x 4.7 km) after whatever sits at its centre,
+// so it would report one suburb for a dozen. This point-in-polygons the actual
+// start point against the city's OSM boundaries.
+//
+// Same contract as cityForRoute(): synchronous, never fetches, returns null
+// when it doesn't know. Only covered cities have a polygon file, so an
+// "uncovered" route has no suburb by construction.
+function suburbForRoute(cityId) {
+    try {
+        if (!cityId || cityId === "uncovered") return null;
+        var wp = state.waypoints[0];
+        if (!wp) return null;
+        return suburbForPoint(cityId, wp.lat, wp.lon);
+    } catch (e) {
+        return null;   // analytics must never break the app
+    }
+}
+
 // route-built fires on a DEBOUNCE, not on every finalizeRoute(). updateRoute()
 // runs on every waypoint edit and every drag settle, so an undebounced event
 // would outnumber pin-drop and invert the funnel. 3 s after the last redraw
@@ -147,6 +168,12 @@ function trackRouteBuiltDebounced() {
         // "uncovered" mean different things and must stay distinguishable.
         var c = cityForRoute();
         if (c) props.city = c;
+        // True suburb, by point-in-polygon on the same first waypoint the city
+        // is attributed to. Synchronous and best-effort: null when the polygon
+        // file for this city hasn't loaded (or doesn't exist yet), and the prop
+        // is then omitted rather than guessed. `city` never depends on this.
+        var sub = suburbForRoute(c);
+        if (sub) props.suburb = sub;
         track("route-built", props);
     }, 3000);
 }

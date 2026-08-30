@@ -11,7 +11,7 @@ var TILE_CACHE_LIMIT = 1000;
 
 var SHELL_FILES = [
     "./", "./index.html", "./app.js", "./routing.js", "./storage.js",
-    "./tiles.js", "./style.css", "./welcome-init.js",
+    "./tiles.js", "./suburbs.js", "./style.css", "./welcome-init.js",
 ];
 var CDN_LIBS = [
     "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css",
