@@ -20,7 +20,7 @@ function readonly(names) {
 const browser = readonly([
   "window", "document", "navigator", "console", "fetch", "setTimeout",
   "clearTimeout", "setInterval", "clearInterval", "localStorage", "indexedDB",
-  "location", "history", "URL", "URLSearchParams", "Blob", "FileReader",
+  "location", "history", "URL", "URLSearchParams", "Blob", "File", "FileReader",
   "requestAnimationFrame", "cancelAnimationFrame", "performance", "screen",
   "matchMedia", "btoa", "atob", "alert", "confirm", "prompt", "Headers",
   "Response", "Request", "XMLHttpRequest", "CustomEvent", "Event", "MouseEvent",
