@@ -410,6 +410,24 @@ async function main() {
         try { previousManifest = JSON.parse(fs.readFileSync(manifestPath, "utf-8")); } catch {}
     }
 
+    // Building a SUBSET rewrites the whole manifest, carrying the untouched
+    // cities across from the previous one. If that previous manifest is missing
+    // the carry-over silently produces a manifest containing ONLY the built
+    // cities — every other city vanishes from the catalogue, and the client
+    // reads that as "not covered" and starts routing them via /v1/graph.
+    //
+    // data/manifest.json is gitignored (it is published from the legwork-tiles
+    // repo), so a fresh clone has no local copy and this is the DEFAULT state,
+    // not an edge case. Refuse rather than shrink.
+    if (args.cities && !previousManifest) {
+        console.error(`\nRefusing to build a subset with no previous manifest at:`);
+        console.error(`  ${manifestPath}`);
+        console.error(`Without it the other cities would be dropped from the catalogue.`);
+        console.error(`Seed it first:`);
+        console.error(`  curl -sL https://fractionasian.github.io/legwork-tiles/manifest.json -o ${manifestPath}`);
+        process.exit(1);
+    }
+
     const manifest = { built: new Date().toISOString(), version: "", cities: {} };
     if (args.cities && previousManifest && previousManifest.cities) {
         for (const [id, entry] of Object.entries(previousManifest.cities)) {
