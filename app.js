@@ -172,10 +172,12 @@ function initMap() {
     var satellite = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
         attribution: '&copy; Esri',
         maxZoom: 19,
+        className: "basemap-satellite",
     });
     var terrain = L.tileLayer("https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png", {
         attribution: '&copy; OpenTopoMap',
         maxZoom: 17,
+        className: "basemap-terrain",
     });
 
     osm.addTo(state.map);
