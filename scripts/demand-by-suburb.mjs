@@ -67,13 +67,17 @@ function usage() {
 function fetchRows(weeks) {
     const cutoff = isoWeek(Math.floor(Date.now() / 1000) - weeks * 7 * 24 * 3600);
     const sql = `SELECT cell, SUM(hits) AS hits FROM demand WHERE week >= '${cutoff}' GROUP BY cell ORDER BY hits DESC`;
-    const r = spawnSync("wrangler", ["d1", "execute", DB_NAME, "--remote", "--json", "--command", sql], {
+    // Via `npx`, not a bare "wrangler": this repo installs wrangler as a local
+    // devDependency of worker/, and PATH lookup ignores `cwd`, so spawning the
+    // bare name fails with ENOENT on the very machine that owns the repo. npx
+    // resolves worker/node_modules/.bin first, then a global install.
+    const r = spawnSync("npx", ["wrangler", "d1", "execute", DB_NAME, "--remote", "--json", "--command", sql], {
         cwd: resolve(__dirname, "..", "worker"),
         encoding: "utf-8",
         maxBuffer: 64 * 1024 * 1024,
     });
     if (r.error && r.error.code === "ENOENT") {
-        console.error("wrangler not found — run this from a machine with the Cloudflare CLI installed and authenticated.");
+        console.error("npx not found — install Node.js, or run with --input to read rows from a file.");
         process.exit(1);
     }
     if (r.status !== 0) {
