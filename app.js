@@ -1157,6 +1157,11 @@ async function refreshPois() {
 // version, so the route reads identically before and after elevation loads.
 var ROUTE_CASING_WEIGHT = 8;
 
+// Shortest segment allowed to set the headline "max gradient". Elevation
+// samples sit ~50 m apart, so this only ever excludes the short final segment
+// sampleRoute appends at the route's end.
+var MIN_GRADIENT_SEGMENT_M = 10;
+
 // How far off the route — or off a lone dropped pin, before a route exists —
 // a toilet or fountain still counts as "on the way".
 // 400 m is a detour of under half a kilometre out and back — far enough to
@@ -1549,7 +1554,24 @@ function updateElevation(elevData) {
         var diff = elevations[i] - elevations[i-1];
         var segDist = distances[i] - distances[i-1];
         var gradePct = 0;
-        if (segDist > 0) { gradePct = (diff / segDist) * 100; var g = Math.abs(gradePct); if (g > maxGradient) maxGradient = g; }
+        if (segDist > 0) {
+            gradePct = (diff / segDist) * 100;
+            // Only segments of a real length may set the headline maximum.
+            // Elevation is sampled every ~50 m (sampleRoute(coords, 50)), so
+            // interior segments are safely long — but sampleRoute always
+            // appends the FINAL route point regardless of how close it is to
+            // the previous sample, so the last segment can be a metre or less.
+            // A 0.2 m wobble across 0.5 m reads as 40%, and because being short
+            // inflates the value, that one unguarded segment is precisely the
+            // one most likely to win a max(). Ascent already has a 5 m
+            // dead-band; this is the equivalent guard for gradient.
+            // segGradients (the per-point chart colouring) is unaffected: a
+            // short segment there tints one hairline, it doesn't become a stat.
+            if (segDist >= MIN_GRADIENT_SEGMENT_M) {
+                var g = Math.abs(gradePct);
+                if (g > maxGradient) maxGradient = g;
+            }
+        }
         segGradients.push(gradePct);
     }
     document.getElementById("stat-ascent").textContent = Math.round(totalAscent) + " m";
