@@ -1030,6 +1030,16 @@ button.menu-item:disabled {
     border-bottom-color: #2a3a34;
 }
 
+/* Undoable actions ("Route cleared", "Route deleted"). Neutral rather than
+   success-green: nothing good happened, something was removed and can be put
+   back. Base .info-banner sets no background, so without this rule the whole
+   banner rendered transparent over the map and only the text and the Undo
+   outline were visible. */
+.info-banner.action {
+    background: #1a1d28;
+    color: #e8e9ef;
+}
+
 .banner-retry {
     display: inline-block;
     margin-left: 6px;
