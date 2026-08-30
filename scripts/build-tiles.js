@@ -252,9 +252,83 @@ function buildSuburbCache(previousCity) {
     return cache;
 }
 
+// Label a tile by SAMPLING it against the city's suburb polygons, when
+// data/suburbs/<city>.json exists (built by scripts/build-suburbs.js).
+//
+// This supersedes reverse-geocoding the tile centre, which asked "what is the
+// nearest named thing to this one point" — a question whose answer is a street,
+// a golf club, or a postcode, and which names ONE suburb for a 5.5 x 4.7 km tile
+// that genuinely spans several. Sampling a grid and counting hits measures
+// coverage directly, so the labels come out ordered by how much of the tile each
+// suburb actually occupies. It is also exact, offline, free, and deterministic —
+// no Photon, no 1 req/s gate, no rate limit.
+//
+// 7x7 = 49 points is ~780 m spacing on a 0.05-degree tile: fine enough that a
+// suburb worth naming is hit, coarse enough that the whole city labels instantly.
+const SUBURB_SAMPLES = 7;
+
+function pointInRing(lat, lon, ring) {
+    let inside = false;
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+        const lai = ring[i][0], loi = ring[i][1];
+        const laj = ring[j][0], loj = ring[j][1];
+        if ((lai > lat) !== (laj > lat)) {
+            if (lon < (loj - loi) * (lat - lai) / (laj - lai) + loi) inside = !inside;
+        }
+    }
+    return inside;
+}
+
+function loadSuburbPolygons(dataDir, cityId) {
+    const file = path.join(dataDir, "suburbs", `${cityId}.json`);
+    if (!fs.existsSync(file)) return null;
+    const list = JSON.parse(fs.readFileSync(file, "utf-8"));
+    for (const f of list) {
+        let a = Infinity, b = -Infinity, c = Infinity, d = -Infinity;
+        for (const ring of f.p) for (const pt of ring) {
+            if (pt[0] < a) a = pt[0];
+            if (pt[0] > b) b = pt[0];
+            if (pt[1] < c) c = pt[1];
+            if (pt[1] > d) d = pt[1];
+        }
+        f.bbox = [a, c, b, d];
+    }
+    return list;
+}
+
+function suburbsForTile(bounds, polygons) {
+    const [s, w, n, e] = bounds;
+    const counts = new Map();
+    for (let i = 0; i < SUBURB_SAMPLES; i++) {
+        // Sample at cell CENTRES, not edges: a point exactly on a shared
+        // boundary is ambiguous and lands in whichever polygon the ray test
+        // happens to favour.
+        const lat = s + (n - s) * (i + 0.5) / SUBURB_SAMPLES;
+        for (let j = 0; j < SUBURB_SAMPLES; j++) {
+            const lon = w + (e - w) * (j + 0.5) / SUBURB_SAMPLES;
+            for (const f of polygons) {
+                const b = f.bbox;
+                if (lat < b[0] || lat > b[2] || lon < b[1] || lon > b[3]) continue;
+                if (f.p.some(r => pointInRing(lat, lon, r))) {
+                    counts.set(f.n, (counts.get(f.n) || 0) + 1);
+                    break;
+                }
+            }
+        }
+    }
+    if (!counts.size) return null;   // all water, or outside every boundary
+    return [...counts.entries()]
+        .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+        .slice(0, 6)
+        .map(([name]) => name);
+}
+
 async function buildCity(city, dataDir, options) {
     const { skipGeocode, suburbCache } = options;
     console.log(`\nBuilding ${city.name}...`);
+
+    const polygons = loadSuburbPolygons(dataDir, city.id);
+    if (polygons) console.log(`  Suburb polygons: ${polygons.length} — labelling offline, no geocoding`);
 
     const { featureCollection, nodeAttrs } = await queryOverpass(city.bounds);
     console.log(`  ${featureCollection.features.length} features, ${Object.keys(nodeAttrs).length} tagged nodes`);
@@ -308,7 +382,12 @@ async function buildCity(city, dataDir, options) {
 
         const cached = suburbCache.get(boundsKey(tile.bounds));
         let suburbs;
-        if (cached) {
+        if (polygons) {
+            // Polygons win over both the cache and the geocoder: they are exact
+            // and free, so there is nothing to cache and nothing to rate-limit.
+            suburbs = suburbsForTile(tile.bounds, polygons) || ["Unknown"];
+            console.log(`  Tile ${key}: ${tile.features.length} ways — ${suburbs.join(", ")}`);
+        } else if (cached) {
             suburbs = cached;
             console.log(`  Tile ${key}: ${tile.features.length} ways — ${suburbs.join(", ")} (cached)`);
         } else if (skipGeocode) {
@@ -477,5 +556,11 @@ async function main() {
     console.log(`Version: ${manifest.version}`);
     console.log("Done.");
 }
+
+// Guarded so the labelling helpers can be imported and tested without the
+// script running a full Overpass build on require.
+module.exports = { suburbsForTile, loadSuburbPolygons, pointInRing, reverseGeocode };
+
+if (require.main !== module) return;
 
 main().catch(e => { console.error(e); process.exit(1); });
