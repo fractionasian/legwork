@@ -80,6 +80,32 @@ test("handleGraph records one demand hit per request, including on a cache hit",
   assert.equal([...DB._demand.keys()][0].split("|")[0], "-31.950:115.860");
 });
 
+test("covered=1 still routes, but records NO demand", async () => {
+  // The client sets this when it resolved the point inside a catalogue city and
+  // still fell through to the graph — coverage exists, it just could not load
+  // the tiles. Counting that as demand makes a network failure look like a
+  // request for new coverage, which is what `demand` is read to mean.
+  const DB = makeD1Mock();
+  const GRAPH = { get: async () => ({ body: '{"elements":[]}' }) };
+  const url = new URL("https://w.example/v1/graph?lat=-31.9523&lon=115.8613&radius=2000&covered=1");
+  const res = await handleGraph(new Request(url), url, { GRAPH, DB }, ctx);
+  assert.equal(res.status, 200, "the graph must still be served");
+  assert.equal(DB._demand.size, 0, "covered=1 must not write a demand row");
+});
+
+test("only the exact string \"1\" suppresses demand", async () => {
+  // Fail CLOSED: anything else counts. A truthy-ish value must not silently
+  // switch the metric off, and an absent param is the overwhelmingly common
+  // case (every older client).
+  for (const q of ["", "&covered=0", "&covered=true", "&covered=yes", "&covered="]) {
+    const DB = makeD1Mock();
+    const GRAPH = { get: async () => ({ body: '{"elements":[]}' }) };
+    const url = new URL(`https://w.example/v1/graph?lat=-31.9523&lon=115.8613&radius=2000${q}`);
+    await handleGraph(new Request(url), url, { GRAPH, DB }, ctx);
+    assert.equal(DB._demand.size, 1, `demand must still be recorded for "${q}"`);
+  }
+});
+
 test("two pins in the same cell collapse to one demand row with two hits", async () => {
   const DB = makeD1Mock();
   const GRAPH = { get: async () => ({ body: '{"elements":[]}' }) };

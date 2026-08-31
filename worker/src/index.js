@@ -77,7 +77,25 @@ export async function handleGraph(request, url, env, ctx) {
   // fewer than DEMAND_RL's 5 pins/minute so its demand is counted in FULL,
   // while a flooding IP is capped at 7,200 writes/day (8% of the budget, down
   // from 86%). The check runs inside waitUntil so it adds no response latency.
-  if (env.DB) {
+  // `covered=1` means the CLIENT resolved this point inside a catalogue city and
+  // still ended up here — i.e. the pre-baked tiles exist but it could not load
+  // them (manifest fetch failed, tile fetch failed or timed out). Serve the
+  // graph as normal, but do NOT count it as demand.
+  //
+  // Why this matters: `demand` answers "where should we pre-bake next", and the
+  // nomination pipeline reads it that way — Singapore was built off it. Without
+  // this flag a network failure inside a covered city is indistinguishable from
+  // a genuine request for new coverage, and both write the same row. Measured
+  // 2026-08-31: 3 of 38 hits (8%) were covered-city failures — two in Perth CBD,
+  // one in central London, all resolving to a city with tiles that fetch fine.
+  //
+  // The endpoint is unauthenticated, so a hostile client can send covered=1 and
+  // SUPPRESS its own demand. That is the harmless direction: it hides a signal
+  // rather than inventing one, and the cell it would hide is a cell nobody is
+  // asking us to cover.
+  const clientCovered = url.searchParams.get("covered") === "1";
+
+  if (env.DB && !clientCovered) {
     ctx.waitUntil(
       (async () => {
         if (env.DEMAND_RL) {

@@ -384,10 +384,28 @@ function radiusFromZoom() {
 // Fetch raw Overpass JSON from the Layer-2 Worker cache. Returns the parsed
 // object on success, or null to signal "fall back to direct Overpass". Never
 // throws — a null return is the only failure signal the caller needs.
+// True when the ALREADY-FETCHED manifest puts this point inside a catalogue
+// city. Reaching the graph from such a point means the pre-baked tiles exist and
+// we could not load them — a network failure, not a request for new coverage.
+//
+// Reads `_manifest` synchronously and never triggers a fetch. When the manifest
+// is missing we genuinely do not know, so this returns false and the request is
+// counted as demand: over-counting is the honest direction, since a manifest we
+// could not load is also coverage we could not deliver.
+function graphPointIsCovered(lat, lon) {
+    try {
+        if (!_manifest) return false;
+        return !!findCityForLocation(_manifest, lat, lon);
+    } catch (e) {
+        return false;
+    }
+}
+
 async function loadGraphFromWorker(lat, lon, radius) {
     try {
         var url = WORKER_BASE + "/v1/graph?lat=" + lat.toFixed(3) +
-            "&lon=" + lon.toFixed(3) + "&radius=" + radius;
+            "&lon=" + lon.toFixed(3) + "&radius=" + radius +
+            (graphPointIsCovered(lat, lon) ? "&covered=1" : "");
         var resp = await fetchWithTimeout(url, null, 60000);
         if (!resp.ok) return null; // 400/502/etc → fall back
         return await resp.json();
