@@ -89,10 +89,24 @@ export async function handleGraph(request, url, env, ctx) {
   // 2026-08-31: 3 of 38 hits (8%) were covered-city failures — two in Perth CBD,
   // one in central London, all resolving to a city with tiles that fetch fine.
   //
-  // The endpoint is unauthenticated, so a hostile client can send covered=1 and
-  // SUPPRESS its own demand. That is the harmless direction: it hides a signal
-  // rather than inventing one, and the cell it would hide is a cell nobody is
-  // asking us to cover.
+  // TRUST. This is a client assertion on an unauthenticated endpoint, and the
+  // Worker cannot check it — it has no manifest, and hardcoding city bounds here
+  // would drift the moment the tiles repo ships a city (the same reason `city`
+  // is validated by shape and not an allowlist). So the flag can suppress a
+  // demand row for a cell that is NOT covered.
+  //
+  // A lone bad actor doing that is uninteresting: it only hides their own
+  // signal. The failure that matters is a systematic one — if
+  // graphPointIsCovered() ever returns true for uncovered points, demand is
+  // hollowed out quietly and the nomination pipeline stops seeing new cities.
+  // That is partly self-limiting (the same findCityForLocation decides whether
+  // to load tiles at all, so a false positive also breaks routing, loudly), but
+  // it is the thing to check first if demand ever goes unexpectedly quiet.
+  //
+  // If that risk ever needs closing properly, the fix is for the Worker to fetch
+  // and cache the manifest's city bounds and decide coverage itself, dropping
+  // the client flag entirely. Not built: at present this corrects an 8%
+  // contamination on a 38-row table.
   const clientCovered = url.searchParams.get("covered") === "1";
 
   if (env.DB && !clientCovered) {
