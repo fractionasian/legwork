@@ -183,10 +183,24 @@ async function queryPois(bounds) {
     throw lastError;
 }
 
+// How many TILE_SIZE steps a span needs. The epsilon is load-bearing: a span
+// that is an exact multiple of TILE_SIZE does not divide to an integer in
+// binary floating point. 37.70 - 37.40 is 0.30000000000000426, so
+// `Math.ceil(span / 0.05)` returns 7 where 6 is correct — a phantom final row
+// that no in-bounds feature can reach, which the clamp below then fills with
+// whatever Overpass bled past the bbox. The result is a zero-area tile carrying
+// ways from outside the city, under a label for somewhere the city isn't: 61 of
+// them across the 12 cities in the 2026-09-11 manifest, all at a phantom index.
+// 1e-9 of a tile is 5e-11 degrees, about 6 micrometres — far below any bounds
+// anyone would write, and far above the error being corrected for.
+function gridSteps(span) {
+    return Math.max(1, Math.ceil(span / TILE_SIZE - 1e-9));
+}
+
 function splitIntoTiles(geojson, bounds) {
     const [south, west, north, east] = bounds;
-    const rows = Math.ceil((north - south) / TILE_SIZE);
-    const cols = Math.ceil((east - west) / TILE_SIZE);
+    const rows = gridSteps(north - south);
+    const cols = gridSteps(east - west);
     const tiles = {};
 
     for (const feature of geojson.features) {
@@ -563,7 +577,7 @@ async function main() {
 
 // Guarded so the labelling helpers can be imported and tested without the
 // script running a full Overpass build on require.
-module.exports = { suburbsForTile, loadSuburbPolygons, pointInRing, reverseGeocode };
+module.exports = { suburbsForTile, loadSuburbPolygons, pointInRing, reverseGeocode, gridSteps, splitIntoTiles };
 
 if (require.main !== module) return;
 
