@@ -53,5 +53,10 @@
     "id": "singapore",
     "name": "Singapore",
     "bounds": [1.21, 103.60, 1.47, 104.05]
+  },
+  {
+    "id": "seoul",
+    "name": "Seoul",
+    "bounds": [37.40, 126.75, 37.70, 127.20]
   }
 ]
