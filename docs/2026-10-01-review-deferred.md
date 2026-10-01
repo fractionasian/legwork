@@ -31,26 +31,22 @@ hosts, so none of these headers were observed live.
 
 ## Product decisions
 
-- **The bike profile ignores one-way streets.** Researched 2026-10-01.
-  - Every edge is added in both directions, and `oneway`, `oneway:bicycle`
-    and `cycleway=opposite*` are neither fetched nor kept.
-  - OSRM's bicycle profile (`profiles/bicycle.lua`) does NOT forbid riding
-    against a one-way. It turns that direction into "pushing bike" at walking
-    speed (4 km/h, roughly 4× the cost). The exceptions are implied one-ways
-    (roundabouts, motorways), which stay closed.
-  - OSRM's override order: `oneway:bicycle=no` (or a `cycleway=opposite*`
-    lane) first, then `oneway:bicycle=yes`, then plain `oneway`.
-  - Matching that in Legwork:
-    - Multiply the reverse edge's weight by about 4 for the bike profile.
-      A multiplier ≥ 1 keeps A* admissible.
-    - Drop the reverse edge entirely for roundabouts.
-    - No change for the run profile: one-ways don't bind pedestrians.
-  - Cost:
-    - The tile compact format needs a field for the one-way tags, plus a
-      rebuild of every city's tiles.
-    - The rebuild needs Overpass access, which the review container doesn't
-      have.
-    - About 2–3 hours of Claude time plus the rebuild run.
+- **Bike one-way handling: shipped 2026-10-01.** Implemented the way OSRM's
+  bicycle profile does it:
+  - Riding against a one-way costs 4× (pushing at walking speed).
+  - Roundabouts are closed in the wrong direction.
+  - `oneway:bicycle` and contraflow lanes (`cycleway*=opposite*`) take
+    precedence.
+  - The run profile is unchanged.
+  - Rules live in `bikeOnewayFromTags` / `onewayEdgeCosts` (routing.js),
+    shared by the app and the tile builder.
+  - Pre-baked tiles only gain the field at the next legwork-tiles build
+    (weekly, Sundays 02:00 UTC, or a manual dispatch of `build-tiles.yml`).
+    Until then, only on-demand Overpass areas honour one-ways.
+  - Known wart: a bike detour around a long one-way can exceed the 3×
+    gap-fill threshold, so that leg shows "Expanding route coverage" on
+    each recompute. The loads hit cache and the route comes out right.
+    Revisit if it's noticeable in use.
 - **Short links still never expire.** The new global cap (500 new rows per
   rolling 24 h, `DAILY_LINK_CAP` in links-db.js, agreed 2026-10-01) bounds
   abuse growth to about 8 MB/day. Adding a TTL would break links people have

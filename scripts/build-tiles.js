@@ -5,7 +5,7 @@ const path = require("path");
 const crypto = require("crypto");
 // Shared with the client so the baked pois.json and the live loadPois
 // fallback can never drift in shape.
-const { poiFromOsmElement } = require(path.join(__dirname, "..", "routing.js"));
+const { poiFromOsmElement, bikeOnewayFromTags } = require(path.join(__dirname, "..", "routing.js"));
 
 const TILE_SIZE = 0.05;
 const HIGHWAYS = [
@@ -108,9 +108,10 @@ function osmToGeoJSON(data) {
         const coords = (el.nodes || []).map(n => nodes[n]).filter(Boolean);
         if (coords.length < 2) continue;
         const tags = el.tags || {};
+        const ow = bikeOnewayFromTags(tags);
         features.push({
             type: "Feature",
-            properties: { id: el.id, highway: tags.highway || "", surface: tags.surface || "", name: tags.name || "" },
+            properties: { id: el.id, highway: tags.highway || "", surface: tags.surface || "", name: tags.name || "", ow },
             geometry: { type: "LineString", coordinates: coords },
         });
     }
@@ -341,6 +342,27 @@ function suburbsForTile(bounds, polygons) {
         .map(([name]) => name);
 }
 
+// v2 compact format per feature: [id, highway, name, coords, surface?, ow?]
+// (surface omitted when empty to save bytes, unless ow follows it; ow is
+// bikeOnewayFromTags and omitted when the way is two-way for bikes). Decoded by
+// compactToGeoJSON in routing.js — test/tiles-grid.test.mjs round-trips the two.
+function compactFeature(f) {
+    const base = [
+        f.properties.id,
+        f.properties.highway,
+        f.properties.name || "",
+        f.geometry.coordinates.map(c => [
+            parseFloat(c[0].toFixed(5)),
+            parseFloat(c[1].toFixed(5))
+        ]),
+    ];
+    const surface = f.properties.surface || "";
+    const ow = f.properties.ow || 0;
+    if (surface || ow) base.push(surface);
+    if (ow) base.push(ow);
+    return base;
+}
+
 async function buildCity(city, dataDir, options) {
     const { skipGeocode, suburbCache } = options;
     console.log(`\nBuilding ${city.name}...`);
@@ -368,22 +390,7 @@ async function buildCity(city, dataDir, options) {
     const contentHash = crypto.createHash("md5");
     let geocodeGate = Promise.resolve();
     for (const [key, tile] of Object.entries(tiles)) {
-        // v2 compact format per feature: [id, highway, name, coords, surface?]
-        // (surface omitted when empty to save bytes)
-        const features = tile.features.map(f => {
-            const base = [
-                f.properties.id,
-                f.properties.highway,
-                f.properties.name || "",
-                f.geometry.coordinates.map(c => [
-                    parseFloat(c[0].toFixed(5)),
-                    parseFloat(c[1].toFixed(5))
-                ]),
-            ];
-            const surface = f.properties.surface || "";
-            if (surface) base.push(surface);
-            return base;
-        });
+        const features = tile.features.map(compactFeature);
 
         // Per-tile nodeAttrs: filter to nodes whose coords fall within this
         // tile's bounds. Keys are already nodeKey5dp strings from osmToGeoJSON.
@@ -588,7 +595,7 @@ async function main() {
 
 // Guarded so the labelling helpers can be imported and tested without the
 // script running a full Overpass build on require.
-module.exports = { suburbsForTile, loadSuburbPolygons, pointInRing, reverseGeocode, gridSteps, splitIntoTiles };
+module.exports = { suburbsForTile, loadSuburbPolygons, pointInRing, reverseGeocode, gridSteps, splitIntoTiles, compactFeature };
 
 if (require.main !== module) return;
 

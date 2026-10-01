@@ -325,3 +325,85 @@ test("osmToGeoJSON keys a live Overpass node identically to the same node in a p
   // Node attrs are keyed the same way build-tiles.js keys them (nodeKey5dp).
   assert.ok(g.nodeAttrs[R.nodeKey(tileLat, tileLon)], "gate attr keyed at tile precision");
 });
+
+// ── One-way streets (bike profile) ────────────────────
+test("bikeOnewayFromTags follows OSRM's precedence", () => {
+  const f = R.bikeOnewayFromTags;
+  assert.equal(f({}), 0);
+  assert.equal(f({ oneway: "yes" }), 1);
+  assert.equal(f({ oneway: "1" }), 1);
+  assert.equal(f({ oneway: "-1" }), -1);
+  assert.equal(f({ oneway: "no" }), 0);
+  assert.equal(f({ oneway: "reversible" }), 0); // unknown values stay two-way
+  // oneway:bicycle beats oneway either way
+  assert.equal(f({ oneway: "yes", "oneway:bicycle": "no" }), 0);
+  assert.equal(f({ oneway: "no", "oneway:bicycle": "yes" }), 1);
+  // a contraflow cycle lane opens the street to bikes both ways
+  assert.equal(f({ oneway: "yes", cycleway: "opposite" }), 0);
+  assert.equal(f({ oneway: "yes", "cycleway:left": "opposite_lane" }), 0);
+  // ...but an explicit oneway:bicycle=yes still wins over it
+  assert.equal(f({ oneway: "yes", "oneway:bicycle": "yes", cycleway: "opposite" }), 1);
+  // roundabouts: reverse closed, not just penalised
+  assert.equal(f({ junction: "roundabout" }), 2);
+  assert.equal(f({ junction: "roundabout", oneway: "yes" }), 2);
+  assert.equal(f({ junction: "circular" }), 2);
+  assert.equal(f({ junction: "roundabout", "oneway:bicycle": "no" }), 0);
+});
+
+test("onewayEdgeCosts: push penalty against a one-way, closed round a roundabout", () => {
+  const k = R.ONEWAY_PUSH_MULTIPLIER;
+  assert.deepEqual(R.onewayEdgeCosts(0, 10), { fwd: 10, rev: 10 });
+  assert.deepEqual(R.onewayEdgeCosts(1, 10), { fwd: 10, rev: 10 * k });
+  assert.deepEqual(R.onewayEdgeCosts(-1, 10), { fwd: 10 * k, rev: 10 });
+  assert.deepEqual(R.onewayEdgeCosts(2, 10), { fwd: 10, rev: null });
+  assert.deepEqual(R.onewayEdgeCosts(undefined, 10), { fwd: 10, rev: 10 });
+  // Admissibility: no direction may ever cost LESS than the undirected edge.
+  assert.ok(k >= 1);
+});
+
+test("osmToGeoJSON and compactToGeoJSON both carry the one-way rule", () => {
+  const live = R.osmToGeoJSON({ elements: [
+    { type: "node", id: 1, lat: -31.95, lon: 115.86 },
+    { type: "node", id: 2, lat: -31.951, lon: 115.861 },
+    { type: "way", id: 9, nodes: [1, 2], tags: { highway: "residential", oneway: "yes" } },
+    { type: "way", id: 8, nodes: [2, 1], tags: { highway: "residential" } },
+  ] });
+  assert.equal(live.features[0].properties.ow, 1);
+  assert.equal(live.features[1].properties.ow, undefined); // two-way: no key at all
+  const tile = R.compactToGeoJSON({ v: 2, features: [
+    [9, "residential", "", [[115.86, -31.95], [115.861, -31.951]], "", -1],
+    [8, "residential", "", [[115.86, -31.95], [115.861, -31.951]], "asphalt"],
+  ] });
+  assert.equal(tile.features[0].properties.ow, -1);
+  assert.equal(tile.features[0].properties.surface, "");
+  assert.equal(tile.features[1].properties.ow, undefined); // pre-one-way tiles still parse
+  assert.equal(tile.features[1].properties.surface, "asphalt");
+});
+
+test("a bike route detours rather than ride the wrong way up a one-way; a run doesn't", () => {
+  // A ──(one-way A→B, ~111 m)──► B, plus a two-way detour B → C → A (~2 × 111 m).
+  // Going B → A: riding against the one-way costs 4 × 111 m (pushing), the
+  // detour ~222 m, so the bike takes the detour; on foot the direct leg wins.
+  const A = [-31.950, 115.860], B = [-31.951, 115.860], C = [-31.9505, 115.8612];
+  const key = (p) => R.nodeKey(p[0], p[1]);
+  function build(ow) {
+    const g = {};
+    const add = (p, q, owv) => {
+      const d = R.haversine(p[0], p[1], q[0], q[1]);
+      const c = R.onewayEdgeCosts(owv, d);
+      (g[key(p)] ||= []).push({ key: key(q), lat: q[0], lon: q[1], dist: c.fwd });
+      g[key(q)] ||= [];
+      if (c.rev !== null) g[key(q)].push({ key: key(p), lat: p[0], lon: p[1], dist: c.rev });
+    };
+    add(A, B, ow);   // the one-way street, drawn in its legal direction
+    add(B, C, 0);
+    add(C, A, 0);
+    return g;
+  }
+  const bike = R.dijkstra(build(1), key(B), key(A));
+  assert.deepEqual(bike.path, [key(B), key(C), key(A)]);
+  const run = R.dijkstra(build(0), key(B), key(A));
+  assert.deepEqual(run.path, [key(B), key(A)]);
+  // With the legal direction, the bike rides straight through.
+  assert.deepEqual(R.dijkstra(build(1), key(A), key(B)).path, [key(A), key(B)]);
+});

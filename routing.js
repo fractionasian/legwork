@@ -96,6 +96,7 @@ function routingProfile(name) {
             wayPref: bikeWayPrefMultiplier,
             nodePref: bikeNodePrefMultiplier,
             defaultWeight: 1.15,
+            oneway: true, // honour bikeOnewayFromTags (pedestrians aren't bound by one-ways)
         };
     }
     return {
@@ -104,6 +105,49 @@ function routingProfile(name) {
         nodePref: nodePrefMultiplier,
         defaultWeight: 1.2,
     };
+}
+
+// ── One-way streets (bike profile) ─────────────────────
+// Modelled on OSRM's bicycle profile (profiles/bicycle.lua): riding against a
+// one-way is not forbidden, it becomes "pushing the bike" at walking speed —
+// 4 km/h against ~15 km/h riding, so roughly 4× the cost. That keeps short
+// legitimate wrong-way pushes (to reach a pin on a one-way street) routable
+// while steering real routes onto the right direction. Roundabouts are the
+// exception: no one pushes round a roundabout the wrong way, so that direction
+// is closed outright (OSRM's "implied oneway").
+var ONEWAY_PUSH_MULTIPLIER = 4;
+
+// Bike direction rule for a way, from its OSM tags:
+//   0  two-way for bikes        1  forward only (push backward)
+//  -1  reverse only (push fwd)  2  forward only, reverse closed (roundabout)
+// Precedence follows OSRM: oneway:bicycle first, then a contraflow cycle lane
+// (cycleway*=opposite*), then roundabout, then plain oneway.
+function bikeOnewayFromTags(tags) {
+    if (!tags) return 0;
+    function yes(v) { return v === "yes" || v === "1" || v === "true"; }
+    function no(v) { return v === "no" || v === "0" || v === "false"; }
+    var roundabout = tags.junction === "roundabout" || tags.junction === "circular";
+    var ob = tags["oneway:bicycle"];
+    if (no(ob)) return 0;
+    if (yes(ob)) return roundabout ? 2 : 1;
+    if (ob === "-1") return -1;
+    var contraflow = /^opposite/;
+    if (contraflow.test(tags.cycleway || "") || contraflow.test(tags["cycleway:left"] || "") ||
+        contraflow.test(tags["cycleway:right"] || "")) return 0;
+    if (roundabout) return 2;
+    if (yes(tags.oneway)) return 1;
+    if (tags.oneway === "-1") return -1;
+    return 0;
+}
+
+// Directed costs for one segment of a way whose undirected cost is `d`.
+// `rev` is null when that direction is closed. Every multiplier is >= 1, so
+// MIN_EDGE_MULTIPLIER (the A* heuristic's floor) stays a valid lower bound.
+function onewayEdgeCosts(ow, d) {
+    if (ow === 1) return { fwd: d, rev: d * ONEWAY_PUSH_MULTIPLIER };
+    if (ow === -1) return { fwd: d * ONEWAY_PUSH_MULTIPLIER, rev: d };
+    if (ow === 2) return { fwd: d, rev: null };
+    return { fwd: d, rev: d };
 }
 
 function nodeKey(lat, lon) {
@@ -340,9 +384,12 @@ function osmToGeoJSON(data) {
         }
         if (coords.length < 2) continue;
         var tags = el.tags || {};
+        var props = { id: el.id, highway: tags.highway || "", surface: tags.surface || "", name: tags.name || "" };
+        var ow = bikeOnewayFromTags(tags);
+        if (ow) props.ow = ow;
         features.push({
             type: "Feature",
-            properties: { id: el.id, highway: tags.highway || "", surface: tags.surface || "", name: tags.name || "" },
+            properties: props,
             geometry: { type: "LineString", coordinates: coords },
         });
     }
@@ -373,7 +420,8 @@ function nodeAttrsFromTags(tags) {
 function compactToGeoJSON(data) {
     // Accepts either format emitted by build-tiles.js:
     //   v1 (legacy): bare Array of [id, highway, name, coords]
-    //   v2:          { v:2, features: [[id, highway, name, coords, surface?], ...], nodeAttrs: {...} }
+    //   v2:          { v:2, features: [[id, highway, name, coords, surface?, ow?], ...], nodeAttrs: {...} }
+    //                (ow = bikeOnewayFromTags; when present, surface is "" if unset)
     // Returns a FeatureCollection plus an optional `nodeAttrs` sidecar (same
     // shape as osmToGeoJSON) so applyPaths can merge it into state.nodeAttrs.
     var compact, nodeAttrs;
@@ -387,14 +435,16 @@ function compactToGeoJSON(data) {
     var features = [];
     for (var i = 0; i < compact.length; i++) {
         var c = compact[i];
+        var props = {
+            id: c[0],
+            highway: c[1],
+            name: c[2] || "",
+            surface: c[4] || "", // v2 adds surface as optional 5th element; v1 leaves it empty
+        };
+        if (c[5]) props.ow = c[5]; // tiles built before one-way support have no 6th element
         features.push({
             type: "Feature",
-            properties: {
-                id: c[0],
-                highway: c[1],
-                name: c[2] || "",
-                surface: c[4] || "", // v2 adds surface as optional 5th element; v1 leaves it empty
-            },
+            properties: props,
             geometry: { type: "LineString", coordinates: c[3] },
         });
     }
@@ -642,6 +692,9 @@ if (typeof module !== "undefined" && module.exports) {
         distPointToSegmentMetres: distPointToSegmentMetres,
         filterPoisNearRoute: filterPoisNearRoute,
         compactToGeoJSON: compactToGeoJSON,
+        bikeOnewayFromTags: bikeOnewayFromTags,
+        onewayEdgeCosts: onewayEdgeCosts,
+        ONEWAY_PUSH_MULTIPLIER: ONEWAY_PUSH_MULTIPLIER,
         osmToGeoJSON: osmToGeoJSON,
     };
 }

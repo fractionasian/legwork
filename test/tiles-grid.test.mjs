@@ -20,7 +20,8 @@ import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
-const { gridSteps, splitIntoTiles } = require("../scripts/build-tiles.js");
+const { gridSteps, splitIntoTiles, compactFeature } = require("../scripts/build-tiles.js");
+const R = require("../routing.js");
 const cities = require("../data/cities.json");
 
 const TILE_SIZE = 0.05;
@@ -85,4 +86,25 @@ test("no tile is emitted with zero area, including from out-of-bbox overspill", 
     // what the clamp is for; it must not create a cell of its own.
     const all = Object.values(tiles).reduce((n, t) => n + t.features.length, 0);
     assert.equal(all, features.length);
+});
+
+test("compactFeature round-trips through the app's compactToGeoJSON, one-way included", () => {
+  const mk = (props) => ({
+    type: "Feature",
+    properties: { id: 7, highway: "residential", name: "Hay St", surface: "", ...props },
+    geometry: { type: "LineString", coordinates: [[115.8571234, -31.9512345], [115.8581234, -31.9522345]] },
+  });
+  const cases = [
+    {},                                  // two-way, no surface → 4 fields
+    { surface: "asphalt" },              // two-way with surface → 5 fields
+    { ow: 1 },                           // one-way, no surface → "" placeholder + ow
+    { surface: "paving_stones", ow: 2 }, // roundabout with surface
+  ];
+  for (const props of cases) {
+    const packed = compactFeature(mk(props));
+    const back = R.compactToGeoJSON({ v: 2, features: [packed] }).features[0].properties;
+    assert.equal(back.surface, props.surface || "", JSON.stringify(props));
+    assert.equal(back.ow, props.ow, JSON.stringify(props));
+  }
+  assert.equal(compactFeature(mk({})).length, 4);
 });
