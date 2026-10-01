@@ -132,3 +132,11 @@ test("bumpHits increments the hit counter", async () => {
   await bumpHits(db, slug);
   assert.equal(db._rows.get(slug).hits, 2);
 });
+
+test("listPending is bounded", async () => {
+  // The SQL itself carries the LIMIT; the mock ignores it, so assert the text.
+  let seen = "";
+  const db = { prepare(sql) { seen = sql; return { all: async () => ({ results: [] }) }; } };
+  await listPending(db);
+  assert.match(seen, /LIMIT\s+\d+/);
+});

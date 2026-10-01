@@ -16,9 +16,37 @@ export class TakenError extends Error {
   }
 }
 
+// Global ceiling on NEW link rows per rolling 24 h, random + vanity combined.
+// The per-IP limiter alone allowed one IP ~28,800 rows/day at up to 16 KB each
+// (~470 MB/day against D1's 500 MB free-tier database), and a full database
+// takes /v1/event and demand down with it. Live volume is a handful of links a
+// month, so 500/day is far above real use; under a flood, creation pauses for
+// everyone until the window rolls, which is the accepted trade (re-shares of an
+// existing route still dedup to their slug and are unaffected).
+export const DAILY_LINK_CAP = 500;
+
+export class CapError extends Error {
+  constructor() {
+    super("daily link cap reached");
+    this.name = "CapError";
+  }
+}
+
+export async function countCreatedSince(db, sinceMs) {
+  const row = await db
+    .prepare("SELECT COUNT(*) AS n FROM links WHERE created_at > ?")
+    .bind(sinceMs)
+    .first();
+  return row ? row.n : 0;
+}
+
+async function assertUnderCap(db, now, cap) {
+  if ((await countCreatedSince(db, now - 24 * 3600 * 1000)) >= cap) throw new CapError();
+}
+
 // Mint a random active link. Retries on the (astronomically rare) slug collision
 // up to `tries` times; throws if it somehow can't find a free code.
-export async function createRandomLink(db, { hash, now, genSlug = defaultGenSlug, tries = 5 }) {
+export async function createRandomLink(db, { hash, now, genSlug = defaultGenSlug, tries = 5, cap = DAILY_LINK_CAP }) {
   // Idempotent re-share: the same route shared twice gets the SAME slug instead
   // of minting a fresh row each time (re-sharing is common — same user, or two
   // people sharing one route). Only active random rows dedup; vanity slugs are
@@ -28,6 +56,7 @@ export async function createRandomLink(db, { hash, now, genSlug = defaultGenSlug
     .bind(hash)
     .first();
   if (existing) return existing.slug;
+  await assertUnderCap(db, now, cap);
 
   for (let i = 0; i < tries; i++) {
     const slug = genSlug();
@@ -58,7 +87,8 @@ export async function getActive(db, slug) {
 
 // Park a custom vanity request as 'pending' (reserves the slug without making it
 // live). Throws TakenError if the slug already exists in any status.
-export async function requestVanity(db, { slug, hash, contact = null, note = null, now }) {
+export async function requestVanity(db, { slug, hash, contact = null, note = null, now, cap = DAILY_LINK_CAP }) {
+  await assertUnderCap(db, now, cap);
   try {
     await db
       .prepare("INSERT INTO links (slug, hash, type, status, created_at, hits, contact, note) VALUES (?, ?, 'vanity', 'pending', ?, 0, ?, ?)")
@@ -74,9 +104,15 @@ export async function requestVanity(db, { slug, hash, contact = null, note = nul
 // only pending vanity rows can transition, so a typo'd slug in the admin call
 // can never flip an active random link (or re-judge an already-decided one).
 // Returns the matched-row count so the handler can 404 a no-op.
+// A rejection also drops the requester's contact + note: nothing needs them
+// once the request is decided, and the row (kept so the slug stays reserved)
+// otherwise held free-text personal details indefinitely.
 export async function setStatus(db, slug, status) {
+  const sql = status === "rejected"
+    ? "UPDATE links SET status = ?, contact = NULL, note = NULL WHERE slug = ? AND type = 'vanity' AND status = 'pending'"
+    : "UPDATE links SET status = ? WHERE slug = ? AND type = 'vanity' AND status = 'pending'";
   const { meta } = await db
-    .prepare("UPDATE links SET status = ? WHERE slug = ? AND type = 'vanity' AND status = 'pending'")
+    .prepare(sql)
     .bind(status, String(slug).toLowerCase())
     .run();
   return meta.changes;
@@ -102,7 +138,8 @@ export async function purgeLink(db, slug) {
   const row = await db.prepare("SELECT type FROM links WHERE slug = ?").bind(s).first();
   if (!row) return null;
   if (row.type === "vanity") {
-    await db.prepare("UPDATE links SET status = ? WHERE slug = ?").bind("purged", s).run();
+    // Tombstone keeps only what reserving the slug needs; contact/note go.
+    await db.prepare("UPDATE links SET status = ?, contact = NULL, note = NULL WHERE slug = ?").bind("purged", s).run();
     return "tombstoned";
   }
   await deleteLink(db, s);
@@ -111,7 +148,9 @@ export async function purgeLink(db, slug) {
 
 export async function listPending(db) {
   const { results } = await db
-    .prepare("SELECT slug, hash, contact, note, created_at FROM links WHERE status = 'pending' ORDER BY created_at")
+    // Bounded: a flood of pending requests must not make the admin queue
+    // itself too large to load. Oldest first, so the backlog drains in order.
+    .prepare("SELECT slug, hash, contact, note, created_at FROM links WHERE status = 'pending' ORDER BY created_at LIMIT 200")
     .all();
   return results || [];
 }

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildOverpassQuery, parseGraphParams, cacheKey, OVERPASS_URL, snap, GRID_DEG, snapRadius, RADIUS_BUCKETS } from "../src/lib.js";
+import { buildOverpassQuery, parseGraphParams, cacheKey, OVERPASS_URL, snap, GRID_DEG, snapRadius, RADIUS_BUCKETS, MAX_RADIUS } from "../src/lib.js";
 
 test("buildOverpassQuery includes runner highway types and the around clause", () => {
   const q = buildOverpassQuery(-31.95, 115.86, 2000);
@@ -45,12 +45,12 @@ test("parseGraphParams rejects out-of-range and NaN", () => {
 
 test("parseGraphParams boundary values", () => {
   // Endpoints accepted (radius floor is 1000 m — see parseGraphParams)
-  for (const [lat, lon, radius] of [[90, 180, 1000], [-90, -180, 30000]]) {
+  for (const [lat, lon, radius] of [[90, 180, 1000], [-90, -180, 20000]]) {
     const u = new URL(`https://w.dev/v1/graph?lat=${lat}&lon=${lon}&radius=${radius}`);
     assert.equal(parseGraphParams(u).ok, true, `should accept ${lat},${lon},${radius}`);
   }
   // Just outside / wrong type rejected (999 is one below the 1000 m floor)
-  for (const qs of ["?lat=-31.95&lon=115.86&radius=999", "?lat=-31.95&lon=115.86&radius=30001", "?lat=-31.95&lon=115.86&radius=2000.5"]) {
+  for (const qs of ["?lat=-31.95&lon=115.86&radius=999", "?lat=-31.95&lon=115.86&radius=20001", "?lat=-31.95&lon=115.86&radius=30000", "?lat=-31.95&lon=115.86&radius=2000.5"]) {
     assert.equal(parseGraphParams(new URL("https://w.dev/v1/graph" + qs)).ok, false, "should reject: " + qs);
   }
 });
@@ -84,10 +84,26 @@ test("snapRadius is identity for the radii the client sends", () => {
 test("snapRadius rounds arbitrary radii UP to the next bucket", () => {
   assert.equal(snapRadius(1001), 1500);   // never shrink coverage
   assert.equal(snapRadius(3000), 4000);
-  assert.equal(snapRadius(20001), 30000);
-  assert.equal(snapRadius(30000), 30000);
+  assert.equal(snapRadius(19999), 20000);
   // Cardinality cap: every accepted radius maps into the bucket set.
-  for (let r = 1000; r <= 30000; r += 97) {
+  for (let r = 1000; r <= MAX_RADIUS; r += 97) {
     assert.ok(RADIUS_BUCKETS.includes(snapRadius(r)), "unbucketed: " + r);
   }
+});
+
+test("parseGraphParams rejects missing, empty and non-decimal spellings", () => {
+  // Number() read each of these as a valid coordinate: missing/empty → 0,
+  // hex and exponent forms → a real value under a fresh edge-cache key.
+  for (const qs of [
+    "?lon=1&radius=1000",
+    "?lat=&lon=&radius=1000",
+    "?lat=0x1E&lon=100&radius=1000",
+    "?lat=30&lon=1e2&radius=1000",
+    "?lat=30&lon=100&radius=1e3",
+    "?lat=%2030&lon=100&radius=1000",
+  ]) {
+    assert.equal(parseGraphParams(new URL("https://w.dev/v1/graph" + qs)).ok, false, "should reject: " + qs);
+  }
+  // The client's own shape (toFixed(3)) still passes.
+  assert.equal(parseGraphParams(new URL("https://w.dev/v1/graph?lat=-31.950&lon=115.860&radius=2000")).ok, true);
 });

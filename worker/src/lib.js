@@ -34,10 +34,28 @@ export function cacheKey(lat, lon, radius) {
   return "g2:" + lat.toFixed(3) + ":" + lon.toFixed(3) + ":" + radius;
 }
 
+// Strict shapes, same idea as links-lib's COORD_RE. Number() alone accepted a
+// missing or empty param as 0 (serving a "valid" graph at 0,0 and writing a
+// demand row there) and hex/exponent spellings, each of which minted its own
+// edge-cache key for the same cell.
+const GRAPH_COORD_RE = /^-?\d{1,3}(\.\d{1,7})?$/;
+const GRAPH_RADIUS_RE = /^\d{4,5}$/;
+
+// Largest radius the client sends (radiusFromZoom in tiles.js, bike profile at
+// low zoom). Accepting more only let a caller push bigger Overpass queries out
+// under Legwork's User-Agent than the app itself ever makes.
+export const MAX_RADIUS = 20000;
+
 export function parseGraphParams(url) {
-  const lat = Number(url.searchParams.get("lat"));
-  const lon = Number(url.searchParams.get("lon"));
-  const radius = Number(url.searchParams.get("radius"));
+  const rawLat = url.searchParams.get("lat") || "";
+  const rawLon = url.searchParams.get("lon") || "";
+  const rawRadius = url.searchParams.get("radius") || "";
+  if (!GRAPH_COORD_RE.test(rawLat)) return { ok: false, error: "bad lat" };
+  if (!GRAPH_COORD_RE.test(rawLon)) return { ok: false, error: "bad lon" };
+  if (!GRAPH_RADIUS_RE.test(rawRadius)) return { ok: false, error: "bad radius" };
+  const lat = Number(rawLat);
+  const lon = Number(rawLon);
+  const radius = Number(rawRadius);
   if (!Number.isFinite(lat) || lat < -90 || lat > 90) return { ok: false, error: "bad lat" };
   if (!Number.isFinite(lon) || lon < -180 || lon > 180) return { ok: false, error: "bad lon" };
   // Floor is 1000 m, not an arbitrary small value: snap() can shift the fetch
@@ -45,7 +63,7 @@ export function parseGraphParams(url) {
   // radius smaller than that could return a graph that misses the pin entirely.
   // 1000 m keeps the snapped circle comfortably over the pin and matches the
   // smallest radius the client ever sends (radiusFromZoom in tiles.js).
-  if (!Number.isInteger(radius) || radius < 1000 || radius > 30000) return { ok: false, error: "bad radius" };
+  if (!Number.isInteger(radius) || radius < 1000 || radius > MAX_RADIUS) return { ok: false, error: "bad radius" };
   return { ok: true, lat, lon, radius };
 }
 
@@ -71,14 +89,14 @@ export function snap(coord) {
 
 // Radius buckets. snap() collapses coordinates to ~550 m cells, but the cache
 // key also embeds the radius — and parseGraphParams accepts ANY integer
-// 1000–30000, so one grid cell could mint up to 29,000 distinct R2 objects
+// 1000–20000, so one grid cell could mint up to 29,000 distinct R2 objects
 // (each a guaranteed cache miss → an Overpass fetch + an R2 write that never
 // expires). Bucketing the radius server-side caps that at |RADIUS_BUCKETS|
-// per cell. The set is the exact values radiusFromZoom (tiles.js) sends, plus
-// the 30 km ceiling; any other value rounds UP to the next bucket so coverage
+// per cell. The set is the exact values radiusFromZoom (tiles.js) sends, the
+// largest being MAX_RADIUS; any other value rounds UP to the next bucket so coverage
 // is never smaller than requested, and a future client tweak can't be broken
 // by a server-side allowlist.
-export const RADIUS_BUCKETS = [1000, 1500, 2000, 4000, 5000, 10000, 20000, 30000];
+export const RADIUS_BUCKETS = [1000, 1500, 2000, 4000, 5000, 10000, 20000];
 
 export function snapRadius(radius) {
   for (const b of RADIUS_BUCKETS) {

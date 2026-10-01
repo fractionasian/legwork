@@ -1,6 +1,6 @@
 import { OVERPASS_URL, buildOverpassQuery, parseGraphParams, cacheKey, snap, snapRadius } from "./lib.js";
 import { validateRouteHash, validateVanitySlug, apiCors, json } from "./links-lib.js";
-import { createRandomLink, getActive, requestVanity, setStatus, purgeLink, listPending, bumpHits, TakenError } from "./links-db.js";
+import { createRandomLink, getActive, requestVanity, setStatus, purgeLink, listPending, bumpHits, TakenError, CapError } from "./links-db.js";
 import { validateEvent, isoWeek, demandCell } from "./analytics-lib.js";
 import { insertEvent, bumpDemand, pruneOld } from "./analytics-db.js";
 
@@ -36,7 +36,21 @@ function cors(extra = {}) {
   };
 }
 
+// Same reasoning as handleApi's wrapper: an uncaught throw (R2 outage, a
+// rate-limiter error, an Overpass stream dropped mid-read) became a Workers
+// 1101 with no CORS headers, i.e. an opaque network failure in the browser.
+// The client falls back to direct Overpass either way; this keeps the failure
+// diagnosable and the response no-store.
 export async function handleGraph(request, url, env, ctx) {
+  try {
+    return await handleGraphInner(request, url, env, ctx);
+  } catch (e) {
+    console.error("handleGraph:", e);
+    return new Response("server error", { status: 500, headers: cors({ "cache-control": "no-store" }) });
+  }
+}
+
+async function handleGraphInner(request, url, env, ctx) {
   // Per-IP rate limit (native Workers binding). Guarded so the handler still
   // works if the binding is absent (e.g. in unit tests without it).
   if (env.GRAPH_RL) {
@@ -186,17 +200,43 @@ export async function handleGraph(request, url, env, ctx) {
 
 // ── Share short-links (/api/*) ──────────────────────────────────────────────
 
-// Bound the /api/* body buffer the same way handleEvent bounds /v1/event:
-// declared-length precheck, then a post-read backstop. The largest legitimate
-// body is a route hash (16 KB cap in validateRouteHash) plus contact/note.
+// Bound the /api/* body buffer the same way handleEvent bounds /v1/event.
+// The largest legitimate body is a route hash (16 KB cap in validateRouteHash)
+// plus contact/note.
 const MAX_API_BODY = 32 * 1024;
 
-async function readJson(request) {
+// Read a request body as text, giving up once it passes maxBytes. A declared
+// Content-Length over the cap is refused before reading a byte; otherwise the
+// stream is counted as it arrives, so a chunked body with no Content-Length
+// (or one that lies) can't be buffered whole before the size check. Returns
+// null when over the cap.
+export async function readCapped(request, maxBytes) {
   const declaredLen = Number(request.headers.get("content-length"));
-  if (Number.isFinite(declaredLen) && declaredLen > MAX_API_BODY) return null;
+  if (Number.isFinite(declaredLen) && declaredLen > maxBytes) return null;
+  if (!request.body) return "";
+  const reader = request.body.getReader();
+  const chunks = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > maxBytes) {
+      reader.cancel().catch(() => {});
+      return null;
+    }
+    chunks.push(value);
+  }
+  const buf = new Uint8Array(total);
+  let off = 0;
+  for (const c of chunks) { buf.set(c, off); off += c.byteLength; }
+  return new TextDecoder().decode(buf);
+}
+
+async function readJson(request) {
   try {
-    const text = await request.text();
-    if (text.length > MAX_API_BODY) return null;
+    const text = await readCapped(request, MAX_API_BODY);
+    if (text === null) return null;
     return JSON.parse(text);
   } catch (e) { return null; }
 }
@@ -242,7 +282,13 @@ async function handleApiInner(request, env, ctx) {
     if (!body) return json({ error: "bad json" }, 400);
     const v = validateRouteHash(body.hash);
     if (!v.ok) return json({ error: "not a valid route: " + v.reason }, 400);
-    const slug = await createRandomLink(env.DB, { hash: v.hash, now: Date.now() });
+    let slug;
+    try {
+      slug = await createRandomLink(env.DB, { hash: v.hash, now: Date.now() });
+    } catch (e) {
+      if (e instanceof CapError) return json({ error: "link creation paused, try later" }, 503);
+      throw e;
+    }
     // Pretty bare path (legwork.day/<slug>); 404.html routes it to the ?s= resolver.
     return json({ slug, url: APP_BASE + "/" + slug }, 200);
   }
@@ -284,6 +330,7 @@ async function handleApiInner(request, env, ctx) {
       });
     } catch (e) {
       if (e instanceof TakenError) return json({ error: "slug taken" }, 409);
+      if (e instanceof CapError) return json({ error: "link creation paused, try later" }, 503);
       throw e;
     }
     return json({ status: "pending" }, 200);
@@ -291,6 +338,9 @@ async function handleApiInner(request, env, ctx) {
 
   // Admin (Bearer ADMIN_SECRET): approve/reject vanity, purge, list pending
   if (seg[1] === "admin") {
+    // Rate-limit BEFORE the secret check so guesses at ADMIN_SECRET are
+    // throttled like any other /api call (they were unlimited).
+    if (await rateLimited(request, env)) return json({ error: "rate limited" }, 429);
     if (!adminOk(request, env)) return json({ error: "unauthorized" }, 401);
     if (method === "GET" && seg.length === 3 && seg[2] === "pending") {
       return json({ pending: await listPending(env.DB) }, 200);
@@ -342,18 +392,12 @@ export async function handleEvent(request, env, ctx) {
     if (!success) return NO_CONTENT();
   }
 
-  // Best-effort pre-read reject: if the client declared a Content-Length over
-  // the cap, bail out before buffering a single byte of the body. This is the
-  // primary defence against an unbounded body; the post-read length check
-  // below is the backstop for when the header is absent or understates the
-  // truth (chunked transfer, a lying client).
-  const declaredLen = Number(request.headers.get("content-length"));
-  if (Number.isFinite(declaredLen) && declaredLen > MAX_EVENT_BODY) return NO_CONTENT();
-
+  // readCapped refuses an over-cap declared Content-Length before reading, and
+  // otherwise stops reading the stream once it passes the cap.
   let body;
   try {
-    const text = await request.text();
-    if (text.length > MAX_EVENT_BODY) return NO_CONTENT();
+    const text = await readCapped(request, MAX_EVENT_BODY);
+    if (text === null) return NO_CONTENT();
     body = JSON.parse(text);
   } catch {
     return NO_CONTENT();
