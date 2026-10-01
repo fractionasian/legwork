@@ -5,7 +5,7 @@
 // Globals consumed (defined elsewhere):
 //   routing.js — nodeKey, haversine, dijkstra, closestNode, gridInsert,
 //                resetSpatialGrid, routingProfile, compactToGeoJSON, osmToGeoJSON,
-//                poiFromOsmElement
+//                poiFromOsmElement, onewayEdgeCosts
 //   storage.js — cacheGet, cacheSet, cachePruneStale, PATHS_TTL
 //   app.js     — state, showBanner, showBannerWithRetry, fetchWithTimeout, escapeText,
 //                track
@@ -602,8 +602,11 @@ function applyPaths(geojson, opts) {
             var d = haversine(lat1, lon1, lat2, lon2) * baseWeight * nodeMult;
             if (!adj[k1]) { adj[k1] = []; gridInsert(k1, lat1, lon1); }
             if (!adj[k2]) { adj[k2] = []; gridInsert(k2, lat2, lon2); }
-            adj[k1].push({ key: k2, lat: lat2, lon: lon2, dist: d });
-            adj[k2].push({ key: k1, lat: lat1, lon: lon1, dist: d });
+            // OSM way order is the "forward" direction (k1 → k2). Only the
+            // bike profile honours one-ways; see onewayEdgeCosts (routing.js).
+            var cost = onewayEdgeCosts(profile.oneway ? props.ow : 0, d);
+            adj[k1].push({ key: k2, lat: lat2, lon: lon2, dist: cost.fwd });
+            if (cost.rev !== null) adj[k2].push({ key: k1, lat: lat1, lon: lon1, dist: cost.rev });
         }
     }
 
