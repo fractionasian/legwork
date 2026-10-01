@@ -42,7 +42,12 @@ self.addEventListener("install", function (e) {
     // miss here only costs first-offline-load coverage of that one file).
     e.waitUntil(
         caches.open(CACHE_NAME).then(function (cache) {
-            return cache.addAll(SHELL_FILES).then(function () {
+            // cache: "reload" bypasses the browser HTTP cache (GitHub Pages sends
+            // max-age=600), so a user who loaded the site just before a deploy
+            // doesn't seed the NEW shell cache with the OLD app.js/tiles.js.
+            return cache.addAll(SHELL_FILES.map(function (u) {
+                return new Request(u, { cache: "reload" });
+            })).then(function () {
                 return Promise.all(CDN_LIBS.map(function (u) {
                     return cache.add(u).catch(function () {});
                 }));
@@ -84,29 +89,47 @@ self.addEventListener("fetch", function (e) {
     // match with ignoreSearch — an offline navigate to "/?s=slug" (short-link
     // resolve) must still hit the cached shell, not respondWith(undefined).
     if (e.request.mode === "navigate" || SHELL_URLS.indexOf(url) !== -1) {
-        var matchOpts = e.request.mode === "navigate" ? { ignoreSearch: true } : undefined;
+        var isNav = e.request.mode === "navigate";
+        // Only a navigation to the app itself ("/" or "/index.html", any query)
+        // may refresh the cached shell. Before this guard ANY 200 navigation —
+        // /test.html, /manifest.json — was stored under "/", and the next
+        // cache-first launch served that page instead of the app.
+        var navPath = isNav ? new URL(url).pathname : "";
+        var isShellNav = isNav && (navPath === "/" || navPath === "/index.html");
+        var matchOpts = isNav ? { ignoreSearch: true } : undefined;
         e.respondWith(
             caches.match(e.request, matchOpts).then(function (cached) {
                 var fetchPromise = fetch(e.request).then(function (resp) {
-                    if (resp && resp.ok) {
+                    if (resp && resp.ok && (!isNav || isShellNav)) {
                         var clone = resp.clone();
                         // Navigations store under the bare shell URL — putting
                         // e.request verbatim would add one cache entry per
                         // distinct "/?s=slug" short-link URL, unbounded until
                         // the next CACHE_NAME bump (lookups ignoreSearch anyway).
-                        var putKey = e.request.mode === "navigate" ? SHELL_URLS[0] : e.request;
+                        var putKey = isNav ? SHELL_URLS[0] : e.request;
                         caches.open(CACHE_NAME).then(function (c) { c.put(putKey, clone); });
                     }
                     return resp;
-                }).catch(function () { return cached; });
+                }).catch(function () {
+                    // Offline navigation with no exact entry (a pretty short
+                    // link like /Melbourne2027 normally arrives via 404.html):
+                    // serve the cached app rather than the browser error page.
+                    return cached || (isNav ? caches.match(SHELL_URLS[0]) : undefined);
+                });
                 return cached || fetchPromise;
             })
         );
         return;
     }
 
+    // The tile manifest is the one legwork-tiles file that must be fresh: it
+    // names the current tile version. Stale-first meant a rebuild (or a new
+    // city) was invisible until the SECOND fetch. Network-first instead; the
+    // tile files themselves carry ?v=<version> and stay stale-first below.
+    var isManifest = url.indexOf("fractionasian.github.io/legwork-tiles/manifest.json") !== -1;
+
     // Map/path tiles: stale-while-revalidate from the stable, capped tile cache.
-    var isTile = TILE_PATTERNS.some(function (p) { return url.indexOf(p) !== -1; });
+    var isTile = !isManifest && TILE_PATTERNS.some(function (p) { return url.indexOf(p) !== -1; });
     if (isTile) {
         e.respondWith(
             caches.open(TILE_CACHE).then(function (cache) {

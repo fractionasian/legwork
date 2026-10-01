@@ -315,10 +315,16 @@ function osmToGeoJSON(data) {
     for (var i = 0; i < elements.length; i++) {
         var el = elements[i];
         if (el.type === "node") {
-            nodes[el.id] = [el.lon, el.lat];
+            // Round to 5 dp, the precision the pre-baked tiles are built at
+            // (build-tiles.js). Overpass returns 7 dp, and nodeKey() keys at
+            // 6 dp, so the SAME OSM node got a different key from a tile than
+            // from a live fetch — a route leaving a covered city ran onto a
+            // separate, unconnected graph and failed or detoured.
+            var la = +el.lat.toFixed(5), lo = +el.lon.toFixed(5);
+            nodes[el.id] = [lo, la];
             if (el.tags) {
                 var a = nodeAttrsFromTags(el.tags);
-                if (a) nodeAttrs[nodeKey(el.lat, el.lon)] = a;
+                if (a) nodeAttrs[nodeKey(la, lo)] = a;
             }
         } else if (el.type === "way") {
             ways.push(el);

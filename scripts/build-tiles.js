@@ -360,6 +360,12 @@ async function buildCity(city, dataDir, options) {
     fs.mkdirSync(tileDir, { recursive: true });
 
     const tileMeta = [];
+    // Digest of every byte this city ships (tile payloads + POIs), recorded in
+    // the manifest so the manifest version moves when CONTENT moves. The
+    // version used to hash only metadata (bounds, labels, way counts), so an
+    // OSM refresh that left the counts unchanged shipped under the same
+    // version and clients kept their cached tiles forever.
+    const contentHash = crypto.createHash("md5");
     let geocodeGate = Promise.resolve();
     for (const [key, tile] of Object.entries(tiles)) {
         // v2 compact format per feature: [id, highway, name, coords, surface?]
@@ -396,7 +402,9 @@ async function buildCity(city, dataDir, options) {
         if (Object.keys(tileNodeAttrs).length > 0) payload.nodeAttrs = tileNodeAttrs;
 
         const filePath = path.join(tileDir, `${key}.json`);
-        fs.writeFileSync(filePath, JSON.stringify(payload));
+        const payloadJson = JSON.stringify(payload);
+        fs.writeFileSync(filePath, payloadJson);
+        contentHash.update(key + "\n" + payloadJson + "\n");
 
         const cached = suburbCache.get(boundsKey(tile.bounds));
         let suburbs;
@@ -438,13 +446,15 @@ async function buildCity(city, dataDir, options) {
     try {
         await sleep(5000); // be polite between the path query and the POI query
         const cityPois = await queryPois(city.bounds);
-        fs.writeFileSync(path.join(tileDir, "pois.json"), JSON.stringify(cityPois));
+        const poisJson = JSON.stringify(cityPois);
+        fs.writeFileSync(path.join(tileDir, "pois.json"), poisJson);
+        contentHash.update("pois\n" + poisJson);
         pois = { file: "pois.json", count: cityPois.length };
     } catch (e) {
         console.log(`  POI fetch failed for ${city.name} — skipping pre-baked POIs: ${e.message}`);
     }
 
-    return { rows, cols, tiles: tileMeta, pois };
+    return { rows, cols, tiles: tileMeta, pois, content: contentHash.digest("hex").substring(0, 12) };
 }
 
 function parseArgs(argv) {
@@ -552,6 +562,7 @@ async function main() {
             bounds: city.bounds,
             tileSize: TILE_SIZE,
             grid: [result.rows, result.cols],
+            content: result.content,
             tiles: result.tiles,
         };
         if (result.pois) manifest.cities[city.id].pois = result.pois;

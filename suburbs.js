@@ -46,7 +46,10 @@ function primeSuburbs(cityId) {
             }
             _suburbs[cityId] = list;
         })
-        .catch(function () { _suburbs[cityId] = null; })
+        // A network failure is NOT cached: leaving the city unset lets the
+        // next route retry, where a cached null would have left every route
+        // "Unknown" for the rest of the session. (A 404 above is cached.)
+        .catch(function () {})
         .then(function () { delete _suburbsPending[cityId]; });
 }
 

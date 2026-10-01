@@ -305,3 +305,23 @@ test("filterPoisNearRoute — corridor width holds at Singapore's latitude", () 
   const kept = R.filterPoisNearRoute([inside, outside], route, 400).map(p => p.id);
   assert.deepEqual(kept, ["in"]);
 });
+
+test("osmToGeoJSON keys a live Overpass node identically to the same node in a pre-baked tile", () => {
+  // Overpass gives 7 dp; build-tiles.js stores 5 dp. Before rounding, the same
+  // OSM node produced two different nodeKeys, so a route leaving a covered
+  // city ran onto a disconnected graph.
+  const raw = {
+    elements: [
+      { type: "node", id: 1, lat: -32.3512345, lon: 115.8567891, tags: { barrier: "gate" } },
+      { type: "node", id: 2, lat: -32.3523456, lon: 115.8578912 },
+      { type: "way", id: 10, nodes: [1, 2], tags: { highway: "footway" } },
+    ],
+  };
+  const g = R.osmToGeoJSON(raw);
+  const [lon, lat] = g.features[0].geometry.coordinates[0];
+  const tileLat = parseFloat((-32.3512345).toFixed(5));
+  const tileLon = parseFloat((115.8567891).toFixed(5));
+  assert.equal(R.nodeKey(lat, lon), R.nodeKey(tileLat, tileLon));
+  // Node attrs are keyed the same way build-tiles.js keys them (nodeKey5dp).
+  assert.ok(g.nodeAttrs[R.nodeKey(tileLat, tileLon)], "gate attr keyed at tile precision");
+});
