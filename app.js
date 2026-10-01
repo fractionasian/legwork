@@ -23,8 +23,6 @@ var state = {
     elevationChart: null,
     pathFeatures: null,
     graph: null,
-    startLat: null,
-    startLon: null,
     gradientLines: [],
     routeOutline: null,
     distanceMarkers: [],
@@ -335,9 +333,18 @@ function setupAutocomplete() {
             e.preventDefault();
             activeIdx = Math.max(activeIdx - 1, 0);
             updateActiveItem(items, activeIdx, input);
-        } else if (e.key === "Enter" && activeIdx >= 0 && items[activeIdx]) {
+        } else if (e.key === "Enter") {
+            // The ONLY Enter handler on this input. A second, unconditional
+            // listener used to run geocodeAddress() as well, so choosing a
+            // highlighted suggestion ran two searches and could leave two
+            // start pins with a route between them.
             e.preventDefault();
-            items[activeIdx].dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+            clearTimeout(autocompleteTimer); // a late suggestion fetch mustn't reopen the list
+            if (list.style.display !== "none" && activeIdx >= 0 && items[activeIdx]) {
+                items[activeIdx].dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+            } else {
+                geocodeAddress();
+            }
         }
     });
     if (clearBtn) clearBtn.addEventListener("click", function () {
@@ -457,20 +464,38 @@ async function geocodeAddress(opts) {
     }
 }
 
-function goToLocation(lat, lon) {
-    // Clear existing waypoints — this sets a new starting point
-    clearRouteLayers(false);
-    updateRoute();
-
-    state.startLat = lat;
-    state.startLon = lon;
+// One path for every "start here" (address search, Locate, first-launch GPS).
+// Loading paths for a new start can take tens of seconds outside a pre-baked
+// city, and the three old copies each appended their pin whenever the load
+// finished — so a slow search, then Locate or a couple of taps, ended with the
+// search's pin tacked onto the new route. Each call takes a generation; a load
+// that finishes after a newer start, or after the user has already placed a
+// pin themselves, drops its pin instead of appending it.
+var _startGen = 0;
+function startRouteAt(lat, lon, opts) {
+    opts = opts || {};
+    var gen = ++_startGen;
+    if (opts.clear) {
+        clearRouteLayers(false);
+        updateRoute();
+    }
     state.map.setView([lat, lon], 15);
-    closeMenu();
-    resetGraphIfCityChanged(lat, lon).then(function () {
+    var stale = function () { return gen !== _startGen || state.waypoints.length > 0; };
+    return resetGraphIfCityChanged(lat, lon).then(function () {
+        if (stale()) return;
         return loadTilesOrPaths(lat, lon);
     }).then(function () {
+        if (stale()) return;
         if (state.graph) addWaypointAt(lat, lon, { exactPosition: true });
+    }).catch(function (e) {
+        console.warn("startRouteAt failed:", e);
     });
+}
+
+function goToLocation(lat, lon) {
+    closeMenu();
+    // Clear existing waypoints — this sets a new starting point
+    startRouteAt(lat, lon, { clear: true });
 }
 
 // ── Elevation (AWS Terrarium tiles, Open-Meteo fallback) ─────
@@ -702,6 +727,17 @@ function wireMarkerEvents(marker) {
             wp.lat = _nk.lat;
             wp.lon = _nk.lon;
             wp.nodeKey = newKey;
+            // A drag that lands on a path settles a still-pending or failed pin.
+            // Bumping resolveId tells the original resolution (still awaiting
+            // in addWaypointAt / retryFailedWaypoint) that it's been superseded
+            // — without this it later snapped the pin back to the first tap,
+            // or marked a now-routed pin as failed.
+            wp.resolveId = (wp.resolveId || 0) + 1;
+            if (wp.pending || wp.failed) {
+                wp.pending = false;
+                wp.failed = false;
+                updateMarkerNumber(wp, state.waypoints.indexOf(wp) + 1);
+            }
         } else {
             // Nothing routable at the drop point — snap the pin back so marker
             // and drawn route can't silently disagree, and say why.
@@ -720,7 +756,9 @@ function onMapClick(e) { addWaypointAt(e.latlng.lat, e.latlng.lng); }
 
 async function addWaypointAt(lat, lon, opts) {
     var num = state.waypoints.length + 1;
-    track("pin-drop", { n: num });
+    // Re-placing pins the user dropped earlier (autosave/share restore, Clear
+    // → Undo) isn't a new pin drop; counting it sent N pin-drops per reload.
+    if (!(opts && opts.restore)) track("pin-drop", { n: num });
 
     // Synchronous fast path: if state.graph already has a usable node within 200m
     // of the tap, create the marker directly in ready state — no red flash.
@@ -752,13 +790,16 @@ async function addWaypointAt(lat, lon, opts) {
     var marker = createNumberedMarker(lat, lon, num, "pending");
     wireMarkerEvents(marker);
 
-    var wp = { lat: lat, lon: lon, marker: marker, nodeKey: null, pending: true };
+    var wp = { lat: lat, lon: lon, marker: marker, nodeKey: null, pending: true, resolveId: 1 };
     state.waypoints.push(wp);
+    var rid = wp.resolveId;
 
     try {
         var nk = await resolveWaypointNode(lat, lon);
+        if (wp.resolveId !== rid) return; // dragged into place meanwhile
         if (!nk) {
-            markWaypointFailed(wp, await failedReason(lat, lon));
+            var why = await failedReason(lat, lon);
+            if (wp.resolveId === rid) markWaypointFailed(wp, why);
             return;
         }
         var liveIdx = state.waypoints.indexOf(wp);
@@ -779,7 +820,7 @@ async function addWaypointAt(lat, lon, opts) {
         updateRoute();
     } catch (e) {
         console.warn("addWaypointAt failed:", e);
-        markWaypointFailed(wp);
+        if (wp.resolveId === rid) markWaypointFailed(wp);
     }
 }
 
@@ -842,11 +883,14 @@ async function retryFailedWaypoint(wp) {
     wp.failed = false;
     wp.pending = true;
     setMarkerState(wp.marker, idx + 1, "pending");
+    var rid = wp.resolveId = (wp.resolveId || 0) + 1;
 
     try {
         var nk = await resolveWaypointNode(wp.lat, wp.lon);
+        if (wp.resolveId !== rid) return; // dragged into place meanwhile
         if (!nk) {
-            markWaypointFailed(wp, await failedReason(wp.lat, wp.lon));
+            var why = await failedReason(wp.lat, wp.lon);
+            if (wp.resolveId === rid) markWaypointFailed(wp, why);
             return;
         }
         var liveIdx = state.waypoints.indexOf(wp);
@@ -863,7 +907,7 @@ async function retryFailedWaypoint(wp) {
         updateRoute();
     } catch (e) {
         console.warn("retryFailedWaypoint failed:", e);
-        markWaypointFailed(wp);
+        if (wp.resolveId === rid) markWaypointFailed(wp);
     }
 }
 
@@ -960,6 +1004,12 @@ function finalizeRoute(allRouteCoords, routeOk) {
 
 async function updateRoute() {
     var gen = ++_routeGen;
+    clearTimeout(_elevationTimer); // the previous route's pending elevation fetch is moot
+    // The old route's samples no longer describe the map: the km/mi toggle and
+    // Save both read lastElevationData, and would otherwise resurrect a cleared
+    // chart or store the previous route's ascent. The fetch for THIS route
+    // refills it.
+    state.lastElevationData = [];
     clearRouteLayers(true); // keep waypoints; we're redrawing the geometry between them
     document.getElementById("distance-pill").disabled = state.waypoints.length < 2;
 
@@ -1070,7 +1120,11 @@ async function updateRoute() {
 var _elevationTimer = null;
 function debouncedFetchElevation(coords) {
     clearTimeout(_elevationTimer);
-    _elevationTimer = setTimeout(function () { fetchRouteElevation(coords); }, 400);
+    // The generation is captured NOW, when this route finalised — reading it
+    // when the timer fired let a timer from a cleared/replaced route adopt the
+    // newer generation and pass the guard (ghost gradient on an empty map).
+    var gen = _routeGen;
+    _elevationTimer = setTimeout(function () { fetchRouteElevation(coords, gen); }, 400);
 }
 
 // ── Points of interest: public toilets + drinking water ──
@@ -1464,12 +1518,14 @@ function updateDistanceMarkers() {
 }
 
 // ── Elevation profile ──────────────────────────────────
-async function fetchRouteElevation(coords) {
+async function fetchRouteElevation(coords, gen) {
     // Same generation guard as updateRoute/resolveSegment: an in-flight fetch
     // for route A must not repaint after route B has redrawn — without this,
     // A's late resolve cleared B's lines and drew A's gradient over them (and
     // left state.lastElevationData, used for GPX <ele>, holding A's samples).
-    var gen = _routeGen;
+    // `gen` is the route this fetch belongs to (see debouncedFetchElevation).
+    if (gen === undefined) gen = _routeGen;
+    if (gen !== _routeGen) return;
     if (coords.length < 2) { updateElevation([]); return; }
     var sampled = sampleRoute(coords, 50);
     var locations = sampled.map(function (p) { return { lat: p[0], lon: p[1] }; });
@@ -1492,6 +1548,7 @@ async function fetchRouteElevation(coords) {
 function colourRouteByGradient(elevData) {
     elevData = smoothElevations(elevData);
     if (elevData.length < 2) return;
+    clearLayerArray("gradientLines"); // never stack a second hotline on an earlier one
     clearLayerArray("routeLines");
     clearLayerSingle("closingLine");
     clearLayerSingle("routeOutline");
@@ -2024,7 +2081,6 @@ function showActionBanner(text, actionLabel, onAction, durationMs) {
 }
 
 // ── Event bindings ─────────────────────────────────────
-document.getElementById("address-input").addEventListener("keydown", function (e) { if (e.key === "Enter") geocodeAddress(); });
 // Single source of truth for route-mode display strings \u2014 `label` for the mode
 // button (with leading glyph), `word` for prose (share text, saved-routes list).
 var MODE_META = {
@@ -2072,7 +2128,7 @@ document.getElementById("clear-btn").addEventListener("click", function () {
     updateRoute();
     showActionBanner("Route cleared", "Undo", async function () {
         for (var i = 0; i < snapshot.length; i++) {
-            await addWaypointAt(snapshot[i].lat, snapshot[i].lon, { exactPosition: i === 0 });
+            await addWaypointAt(snapshot[i].lat, snapshot[i].lon, { exactPosition: i === 0, restore: true });
         }
     }, 5000);
 });
@@ -2097,18 +2153,8 @@ function showGpsDot(lat, lon) {
 
 document.getElementById("locate-btn").addEventListener("click", function () {
     function startHere(lat, lon) {
-        // Clear existing route
-        clearRouteLayers(false);
-        updateRoute();
-        state.startLat = lat;
-        state.startLon = lon;
-        state.map.setView([lat, lon], 15);
         showGpsDot(lat, lon);
-        resetGraphIfCityChanged(lat, lon).then(function () {
-            return loadTilesOrPaths(lat, lon);
-        }).then(function () {
-            if (state.graph) addWaypointAt(lat, lon, { exactPosition: true });
-        });
+        startRouteAt(lat, lon, { clear: true }); // clears the existing route
     }
     if (navigator.geolocation) {
         navigator.geolocation.getCurrentPosition(
@@ -2224,6 +2270,10 @@ document.getElementById("dm-shorten").addEventListener("click", function (e) {
 });
 document.addEventListener("keydown", function (e) {
     if ((e.ctrlKey || e.metaKey) && e.key === "z") {
+        // In a text field Cmd/Ctrl+Z is the field's own text undo — it used to
+        // be swallowed here and delete the last waypoint instead.
+        var t = e.target;
+        if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
         e.preventDefault();
         if (state.waypoints.length > 1) removeWaypoint(state.waypoints.length - 1);
     }
@@ -2360,6 +2410,9 @@ function autoDetectUnits(lat, lon) {
                     state.useMiles = true;
                     document.getElementById("unit-label").textContent = "mi";
                     updateDistance();
+                    // Same chart refresh as the manual toggle — this reply can
+                    // land after the chart drew, leaving its axis in km.
+                    if (state.lastElevationData.length > 1) updateElevation(state.lastElevationData);
                 }
             }
         })
@@ -2437,7 +2490,10 @@ function setupInstallPrompt() {
 function updateShareHash() {
     if (state.waypoints.length < 2) { history.replaceState(null, "", window.location.pathname); return; }
     var pts = state.waypoints.map(function (wp) { return wp.lat.toFixed(5) + "," + wp.lon.toFixed(5); });
-    history.replaceState(null, "", "#r=" + pts.join(";") + "&m=" + state.mode);
+    // pathname + hash, dropping any ?s=<slug>: once the map holds its own
+    // route the slug is stale, and keeping it meant a share of the edited route
+    // ("?s=abc#r=new") resolved to the OLD short-link route on the other end.
+    history.replaceState(null, "", window.location.pathname + "#r=" + pts.join(";") + "&m=" + state.mode);
 }
 
 function loadFromHash() {
@@ -2523,7 +2579,8 @@ function saveNamedRoute() {
     var dist = document.getElementById("distance-display").textContent;
 
     // Show input immediately with distance, then update with geocoded name in background
-    nameInput.value = "Route \u2014 " + dist;
+    var placeholderName = "Route \u2014 " + dist;
+    nameInput.value = placeholderName;
     inputRow.classList.remove("hidden");
     nameInput.focus();
     nameInput.select();
@@ -2537,7 +2594,11 @@ function saveNamedRoute() {
                 if (feat && feat.properties) {
                     var p = feat.properties;
                     var name = p.name || p.street || p.city;
-                    if (name && inputRow.classList.contains("hidden") === false) {
+                    // Only replace OUR placeholder: if the user has started
+                    // typing (or a later Save set a different default), a reply
+                    // arriving up to 10 s later must not overwrite their name.
+                    if (name && inputRow.classList.contains("hidden") === false &&
+                        nameInput.value === placeholderName) {
                         nameInput.value = name + " \u2014 " + dist;
                         nameInput.select();
                     }
@@ -2704,6 +2765,11 @@ async function restoreSavedRoute(id) {
         });
         if (!route) { showBanner("That saved route is no longer here — it may have been deleted"); return; }
 
+        // Same start generation as startRouteAt: a double-click, or tapping
+        // route Y while X's tiles load, used to push BOTH waypoint lists. Only
+        // the newest restore (or search/locate) gets to place pins.
+        var gen = ++_startGen;
+
         // Clear existing state
         clearRouteLayers(false);
 
@@ -2719,15 +2785,25 @@ async function restoreSavedRoute(id) {
         await resetGraphIfCityChanged(route.center.lat, route.center.lon);
 
         // Restore path network from tiles or Overpass
+        if (gen !== _startGen) return;
         await loadTilesOrPaths(route.center.lat, route.center.lon);
+        if (gen !== _startGen) return;
 
-        // Restore waypoints
+        // Restore waypoints (clearing again: this restore wins over any pin
+        // dropped while its tiles were loading)
+        clearRouteLayers(false);
         for (var i = 0; i < route.waypoints.length; i++) {
             var wp = route.waypoints[i];
             var marker = createNumberedMarker(wp.lat, wp.lon, i + 1);
             wireMarkerEvents(marker);
             state.waypoints.push({ lat: wp.lat, lon: wp.lon, marker: marker, nodeKey: wp.nodeKey });
         }
+
+        // Load tiles along every leg first, as both boot restore paths do —
+        // routing against only the tiles around route.center detours wildly
+        // on a long route whose legs leave that area.
+        await ensureTilesAlongRoute();
+        if (gen !== _startGen) return;
 
         // Rebuild route fully (includes closing segment, elevation, gradient colours)
         await updateRoute();
@@ -2849,6 +2925,18 @@ async function renderSavedRoutes() {
             info.appendChild(detail);
             info.addEventListener("click", function () {
                 restoreSavedRoute(route.id);
+            });
+            // Keyboard/switch access: the row is the "open" control, so make
+            // it one. (The ✎ and × buttons were reachable; opening wasn't.)
+            info.setAttribute("role", "button");
+            info.tabIndex = 0;
+            info.setAttribute("aria-label", "Open saved route " + route.name);
+            info.addEventListener("keydown", function (e) {
+                if (e.target !== info) return; // keys typed in the inline rename input
+                if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    restoreSavedRoute(route.id);
+                }
             });
             var del = document.createElement("button");
             del.className = "saved-item-delete";
@@ -3030,11 +3118,13 @@ async function shortenCurrentRoute() {
     }
     showBanner("Shortening…", "loading");
     try {
-        var resp = await fetch(WORKER_BASE + "/api/links", {
+        // Timed out like every other network call: a hung POST left the
+        // "Shortening…" banner up indefinitely.
+        var resp = await fetchWithTimeout(WORKER_BASE + "/api/links", {
             method: "POST",
             headers: { "content-type": "application/json" },
             body: JSON.stringify({ hash: hash }),
-        });
+        }, 10000);
         if (!resp.ok) throw new Error("status " + resp.status);
         var data = await resp.json();
         // Trust boundary: the resolve path validates data.hash strictly, but this
@@ -3060,7 +3150,9 @@ async function maybeResolveShortLink() {
     var s = new URLSearchParams(window.location.search).get("s");
     if (!s || !/^[A-Za-z0-9-]{3,40}$/.test(s)) return;
     try {
-        var resp = await fetch(WORKER_BASE + "/api/links/" + encodeURIComponent(s));
+        // Boot awaits this, so it MUST be bounded: a hung request on a flaky
+        // connection blocked autosave restore and geolocation for minutes.
+        var resp = await fetchWithTimeout(WORKER_BASE + "/api/links/" + encodeURIComponent(s), null, 8000);
         if (resp.ok) {
             var data = await resp.json();
             // Validate the server-returned hash shape before trusting it into the
@@ -3076,9 +3168,16 @@ async function maybeResolveShortLink() {
             }
         } else if (resp.status === 404) {
             showBanner("That short link wasn't found");
+        } else if (resp.status === 429) {
+            // Shared limiter with link creation, so a busy office/club NAT can
+            // hit it — say so instead of booting to an empty map in silence.
+            showBanner("Too many short links opened just now — wait a minute and reload");
+        } else {
+            showBanner("Couldn't open that short link — reload to try again");
         }
     } catch (e) {
-        /* Worker/network down — fall through to normal boot. */
+        /* Worker/network down or timed out — say so, then boot normally. */
+        showBanner("Couldn't open that short link — reload to try again");
     }
 }
 
@@ -3100,7 +3199,7 @@ async function maybeResolveShortLink() {
         await resetGraphIfCityChanged(center.lat, center.lon);
         await loadTilesOrPaths(center.lat, center.lon);
         for (var i = 0; i < sharedPoints.length; i++) {
-            await addWaypointAt(sharedPoints[i].lat, sharedPoints[i].lon, { exactPosition: i === 0 });
+            await addWaypointAt(sharedPoints[i].lat, sharedPoints[i].lon, { exactPosition: i === 0, restore: true });
         }
         // addWaypointAt only loads tiles *near* each waypoint, so a long route can
         // be missing the mid-corridor tiles between far-apart waypoints. Routing
@@ -3129,7 +3228,7 @@ async function maybeResolveShortLink() {
         await resetGraphIfCityChanged(ctr.lat, ctr.lon);
         await loadTilesOrPaths(ctr.lat, ctr.lon);
         for (var i = 0; i < sw.length; i++) {
-            await addWaypointAt(sw[i].lat, sw[i].lon, { exactPosition: i === 0 });
+            await addWaypointAt(sw[i].lat, sw[i].lon, { exactPosition: i === 0, restore: true });
         }
         // Same incomplete-graph race as the share-restore path: load tiles across
         // every leg, then route once against the complete graph.
@@ -3150,20 +3249,13 @@ async function maybeResolveShortLink() {
             function (pos) {
                 var lat = pos.coords.latitude;
                 var lon = pos.coords.longitude;
-                state.startLat = lat;
-                state.startLon = lon;
-                autoDetectUnits(lat, lon);
-                state.map.setView([lat, lon], 15);
                 showGpsDot(lat, lon);
-                resetGraphIfCityChanged(lat, lon).then(function () {
-                    return loadTilesForLocation(lat, lon);
-                }).then(function (loaded) {
-                    if (!loaded) {
-                        return loadPaths(lat, lon);
-                    }
-                }).then(function () {
-                    if (state.graph) addWaypointAt(lat, lon, { exactPosition: true });
-                });
+                // The fix can arrive well after boot. If the user has meanwhile
+                // searched, located, opened a saved route or dropped a pin, a
+                // late fix must not yank the map away or append a GPS pin.
+                if (_startGen > 0 || state.waypoints.length > 0) return;
+                autoDetectUnits(lat, lon);
+                startRouteAt(lat, lon);
             },
             function () {
                 // Geolocation failed — prompt user to search. Only open the
