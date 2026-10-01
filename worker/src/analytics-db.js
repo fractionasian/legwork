@@ -29,7 +29,9 @@ export async function bumpDemand(db, { cell, week }) {
 
 // Retention. Without this an unbounded table eventually meets D1's 5 GB ceiling
 // — remote at Legwork's volume, but the job is cheap and removes the need to
-// think about it again.
+// think about it again. The events DELETE is a full-table scan since migration
+// 0005 dropped idx_events_ts: one scan a week costs reads, while the index cost
+// a billed write on every insert.
 export async function pruneOld(db, { nowSeconds }) {
   const cutoffTs = nowSeconds - EVENT_RETENTION_DAYS * 24 * 3600;
   const ev = await db.prepare("DELETE FROM events WHERE ts < ?").bind(cutoffTs).run();
