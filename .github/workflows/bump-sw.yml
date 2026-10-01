@@ -1,12 +1,13 @@
 name: CI — lint, test, bump SW cache
 
-# On every push to main that touches a shell file: lint (no-undef gate, catches
-# undefined-reference bugs like the dragend `p` ReferenceError) and unit tests
-# run FIRST. Only if both pass does the cache bump run — so broken code never
-# gets its CACHE_NAME bumped onto users' devices. The bump rewrites CACHE_NAME
-# in sw.js (and the #app-version span in index.html) to a short hash of the
-# shell files, committing the change back. Self-pushes don't re-run because the
-# filter below excludes the bot actor.
+# On every push to main that touches a shell file OR anything the tests cover:
+# lint (no-undef gate, catches undefined-reference bugs like the dragend `p`
+# ReferenceError) and unit tests run FIRST. Only if both pass does the cache
+# bump run — so broken code never gets its CACHE_NAME bumped onto users'
+# devices. The bump rewrites CACHE_NAME in sw.js (and the #app-version span in
+# index.html) to a short hash of the shell files, committing the change back.
+# A test-only or script-only push hashes to the same value and bumps nothing.
+# Self-pushes don't re-run because the filter below excludes the bot actor.
 
 on:
   workflow_dispatch:
@@ -18,9 +19,23 @@ on:
       - 'routing.js'
       - 'storage.js'
       - 'tiles.js'
+      - 'suburbs.js'
       - 'style.css'
       - 'welcome-init.js'
       - 'sw.js'
+      - 'test/**'
+      - 'scripts/**'
+      - 'data/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'eslint.config.mjs'
+
+# One run at a time on main; a newer push cancels an older in-flight run, whose
+# code the newer run tests and hashes anyway. Without this two quick pushes
+# raced: the older run's bump could hash the newer, still-untested commit.
+concurrency:
+  group: ci-main
+  cancel-in-progress: true
 
 permissions:
   contents: write
@@ -55,15 +70,20 @@ jobs:
     runs-on: ubuntu-latest
     if: github.actor != 'github-actions[bot]'
     steps:
+      # The exact commit lint + test passed on — not whatever main is now.
       - uses: actions/checkout@v4
         with:
-          ref: main
+          ref: ${{ github.sha }}
           fetch-depth: 1
 
+      # index.html is hashed with its #app-version span blanked out: the span IS
+      # the output of this step, so hashing it made every run (including a no-op
+      # workflow_dispatch) mint a new CACHE_NAME and wipe users' shell cache.
       - name: Compute new cache name
         id: hash
         run: |
-          HASH=$(cat index.html app.js routing.js storage.js tiles.js style.css welcome-init.js \
+          HASH=$( { sed -E 's|<span id="app-version">[^<]*</span>||' index.html; \
+            cat app.js routing.js storage.js tiles.js suburbs.js style.css welcome-init.js; } \
             | sha256sum | cut -c1-8)
           echo "hash=$HASH" >> "$GITHUB_OUTPUT"
           echo "Computed cache hash: $HASH"
@@ -98,4 +118,11 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add sw.js index.html
           git commit -m "chore: bump sw CACHE_NAME to legwork-${NEW_HASH}"
-          git push
+          # If main moved since this run started, a newer run owns the bump
+          # (concurrency cancels us, but not if we're already here).
+          REMOTE_MAIN=$(git ls-remote origin refs/heads/main | cut -f1)
+          if [ "$REMOTE_MAIN" != "${{ github.sha }}" ]; then
+            echo "main moved to $REMOTE_MAIN; leaving the bump to that run."
+            exit 0
+          fi
+          git push origin HEAD:main
