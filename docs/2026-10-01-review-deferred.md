@@ -59,33 +59,26 @@ hosts, so none of these headers were observed live.
     the window rolls over (503 → the client copies the full link instead).
     Re-shares of an existing route still dedup and are unaffected.
 
-## D1 write budget: confirmed over the cap
+## D1 write budget: was over the cap, fixed 2026-10-01
 
 Cloudflare's D1 docs ("Use indexes", via search, 2026-10-01) say each index on
-a written column adds one more row written. Billed per day from one IP, per
-colo:
+a written column adds one more row written. The single-IP worst case was about
+153,700 billed rows/day, over the free tier's 100k account-wide cap. Fixed
+with two changes, agreed 2026-10-01:
 
-| Source | Ceiling | Rows each | Billed rows/day |
-|---|---|---|---|
-| events | 43,200 | 3 | 129,600 |
-| demand | 7,200 | ≤3 | ≤21,600 |
-| links | 500 | ≤5 | 2,500 |
-| **Total** | | | **≈153,700** |
+- Migration 0005 drops `idx_events_ts`. The weekly prune now scans the table
+  instead.
+- `EVENT_RL` lowered from 30 to 15 requests per minute.
 
-That is above the free tier's 100k/day account-wide cap. (The 08-30 "503 rows
-written for 283 events" pairs a 24 h figure with an all-time table count, so
-it says nothing about the multiplier.)
+New worst case is about 67,300 billed rows/day. Workings are in
+`worker/wrangler.toml`.
 
-Options, cheapest first:
-1. **Drop `idx_events_ts`.** Its only user is the weekly
-   `DELETE … WHERE ts < ?`, which can scan the small table instead.
-   Events go to 2 rows each, and the total drops to about 110k.
-2. **Lower `EVENT_RL` from 30 to 15 per minute.** With (1), the total is about
-   67k.
-3. **Paid Workers plan** (50M rows written per month included).
+The limit still applies per IP per colo, so a distributed flood can multiply
+it; the next step there is a paid plan.
 
 - Changes if: Cloudflare changes how D1 counts rows written.
-- Re-check: whenever a migration adds or drops an index.
+- Re-check: whenever a migration adds an index to `events`, `demand` or
+  `links`.
 
 ## Verify, then maybe act
 

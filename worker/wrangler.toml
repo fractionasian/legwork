@@ -40,15 +40,16 @@ binding = "DB"
 database_name = "legwork-links"
 database_id = "38de93c4-53dc-408c-afb0-9c647979f354"
 
-# Per-IP rate limit on analytics ingest (30 requests / 60 s). Higher than the
-# links limit because one active session legitimately fires several events per
-# minute (pin drops, plus a 3 s-debounced route-built per edit); 30 leaves that
-# uncut while bounding the flood. It does NOT make a flood harmless — see the
-# write-budget note below.
+# Per-IP rate limit on analytics ingest (15 requests / 60 s). A normal session
+# fires a few events a minute (pin drops, plus a 3 s-debounced route-built per
+# edit); 15 still covers that. Lowered from 30 on 2026-10-01 to bring the
+# single-IP worst case under D1's daily write cap — see the budget note below.
+# A user tapping more than 15 pins in a minute loses the excess pin-drop
+# events, which was the accepted cost.
 [[ratelimits]]
 name = "EVENT_RL"
 namespace_id = "1003"
-simple = { limit = 30, period = 60 }
+simple = { limit = 15, period = 60 }
 
 # Per-IP budget on the /v1/graph demand counter (5 writes / 60 s). NOT a request
 # limit — GRAPH_RL already caps requests at 60/60 s; this caps only the D1 write
@@ -73,17 +74,17 @@ simple = { limit = 5, period = 60 }
 #   /v1/graph demand   DEMAND_RL  5/60 s  →   7,200 upserts × ≤3 → ≤21,600/day
 #                                             (new row: table + PK + idx_demand_week;
 #                                              an increment touches no index: 1)
-#   /v1/event          EVENT_RL  30/60 s  →  43,200 inserts × 3  → 129,600/day
-#                                             (table + idx_events_ts + idx_events_name)
+#   /v1/event          EVENT_RL  15/60 s  →  21,600 inserts × 2  →  43,200/day
+#                                             (table + idx_events_name; idx_events_ts
+#                                              dropped in migration 0005)
 #   /api/links+vanity  DAILY_LINK_CAP     →     500 rows × ≤5    →   2,500/day
-#   combined                              →  ≈153,700 — ABOVE the 100k cap
+#   combined                              →  ≈67,300 ≈ 67% of the 100k cap
 #
-# So one IP sustaining a flood for a day CAN exhaust the account's D1 writes and
-# take short links down with analytics. The Worker's own 100k requests/day cap
-# does not bind first: ~33k event requests already reach 100k billed rows.
-# Options (drop idx_events_ts, lower EVENT_RL, paid plan) are in
-# docs/2026-10-01-review-deferred.md. A separate database does NOT help — the
-# write quota is account-wide.
+# Was ≈153,700 (over the cap) at EVENT_RL 30 with idx_events_ts. Still per IP
+# per colo, so a distributed flood can multiply it; the escalation then is a
+# paid plan. A separate database does NOT help — the write quota is
+# account-wide. Re-check this table whenever a migration adds an index to
+# events, demand or links.
 
 # Weekly retention sweep — prunes events past 180 days and demand past 104 weeks.
 #
