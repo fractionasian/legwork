@@ -66,24 +66,24 @@ simple = { limit = 5, period = 60 }
 # 24 h, per-colo (Cloudflare rate limits count per-colo, so a distributed client
 # multiplies these):
 #
-#   /v1/graph demand   DEMAND_RL  5/60 s  →   7,200 writes/day
-#   /v1/event          EVENT_RL  30/60 s  →  43,200 writes/day
-#   /api/links+vanity  DAILY_LINK_CAP     →     500 rows/day (global, links-db.js;
-#                                              LINKS_RL alone allowed 28,800)
-#   combined                              →  50,900 ≈ 51% of the daily budget
+# D1 bills one extra row written per index on a written column (Cloudflare D1
+# docs, "Use indexes", checked 2026-10-01), so the ceilings below are in BILLED
+# rows, not INSERTs:
 #
-# Counted in INSERTs. If D1 bills each secondary-index update as a further row
-# written (the 2026-08-30 live figure — 503 rows written for 283 events — fits a
-# multiplier above 1; not yet checked against Cloudflare's pricing docs), the
-# `events` line is ~2-3× larger and a single-IP flood could reach the cap.
+#   /v1/graph demand   DEMAND_RL  5/60 s  →   7,200 upserts × ≤3 → ≤21,600/day
+#                                             (new row: table + PK + idx_demand_week;
+#                                              an increment touches no index: 1)
+#   /v1/event          EVENT_RL  30/60 s  →  43,200 inserts × 3  → 129,600/day
+#                                             (table + idx_events_ts + idx_events_name)
+#   /api/links+vanity  DAILY_LINK_CAP     →     500 rows × ≤5    →   2,500/day
+#   combined                              →  ≈153,700 — ABOVE the 100k cap
 #
-# Down from 259,200 (2.6× the whole budget) before these limits, but NOT zero
-# risk: a determined sustained flood can still consume half the account's daily
-# D1 writes. Accepted for now — the Worker's own free-plan ceiling of 100k
-# requests/day binds at roughly the same point, so such a flood is a Worker DoS
-# regardless; these limits stop it also taking short links down. If it ever
-# bites, the escalation is a paid D1 plan (raises the write ceiling) — NOT a
-# separate database, which does not isolate an account-wide quota.
+# So one IP sustaining a flood for a day CAN exhaust the account's D1 writes and
+# take short links down with analytics. The Worker's own 100k requests/day cap
+# does not bind first: ~33k event requests already reach 100k billed rows.
+# Options (drop idx_events_ts, lower EVENT_RL, paid plan) are in
+# docs/2026-10-01-review-deferred.md. A separate database does NOT help — the
+# write quota is account-wide.
 
 # Weekly retention sweep — prunes events past 180 days and demand past 104 weeks.
 #
