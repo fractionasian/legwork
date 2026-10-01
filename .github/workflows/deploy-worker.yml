@@ -31,6 +31,14 @@ on:
     paths:
       - 'worker/**'
 
+# Deploys queue rather than overlap: two quick worker/** pushes otherwise ran
+# migrations + deploy in parallel and the OLDER commit could finish last,
+# leaving older Worker code live. Not cancel-in-progress — a deploy cut off
+# between migrations and `wrangler deploy` is worse than waiting.
+concurrency:
+  group: deploy-worker
+  cancel-in-progress: false
+
 permissions:
   contents: read
 
