@@ -126,7 +126,11 @@ async function loadTilesFromList(cityId, manifestVersion, tiles, opts) {
     var total = toFetch.length;
     var showProgress = opts && opts.progress;
     var promises = toFetch.map(function (tile) {
-        var url = TILES_BASE + "tiles/" + cityId + "/" + tile.file;
+        // ?v= makes each build a distinct URL. Without it the service worker's
+        // stale-first tile cache answered a post-rebuild fetch with the OLD
+        // file, which was then stored in IndexedDB under the NEW version key
+        // and kept until the next rebuild.
+        var url = TILES_BASE + "tiles/" + cityId + "/" + tile.file + "?v=" + encodeURIComponent(manifestVersion);
         return fetchWithTimeout(url, null, 15000).then(function (resp) {
             if (!resp.ok) throw new Error("HTTP " + resp.status);
             return resp.json();
@@ -303,7 +307,8 @@ async function loadPois(lat, lon) {
         if (!all) {
             try {
                 var poiResp = await fetchWithTimeout(
-                    TILES_BASE + "tiles/" + match.id + "/" + match.city.pois.file, null, 15000);
+                    TILES_BASE + "tiles/" + match.id + "/" + match.city.pois.file +
+                    "?v=" + encodeURIComponent(manifest.version), null, 15000);
                 if (poiResp.ok) {
                     all = await poiResp.json();
                     cacheSet(cityKey, all);
@@ -418,9 +423,10 @@ async function loadGraphFromWorker(lat, lon, radius) {
 async function loadPaths(lat, lon) {
     var radius = radiusFromZoom();
     // paths: → paths2: added node tags; paths2: → paths3: added
-    // track/bridleway/byway to the query. Stale generations are swept by
-    // cachePruneStale.
-    var cacheKey = "paths3:" + lat.toFixed(3) + ":" + lon.toFixed(3) + ":" + radius;
+    // track/bridleway/byway to the query; paths3: → paths4: rounded
+    // coordinates to the tiles' 5 dp so live and pre-baked graphs join.
+    // Stale generations are swept by cachePruneStale.
+    var cacheKey = "paths4:" + lat.toFixed(3) + ":" + lon.toFixed(3) + ":" + radius;
 
     showBanner("Loading paths", "loading");
 

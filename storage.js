@@ -11,9 +11,15 @@ var DB_VERSION = 3;
 var PATHS_TTL = 30 * 24 * 3600 * 1000; // 30 days
 
 var _db = null;
+// The in-flight open is shared: loadTilesFromList and cacheGetMany fire many
+// parallel first calls, and caching only the finished connection opened one
+// connection per caller and leaked all but the last (each leaked connection
+// then blocked any future DB_VERSION upgrade in other tabs).
+var _dbPromise = null;
 function openDB() {
     if (_db) return Promise.resolve(_db);
-    return new Promise(function (resolve, reject) {
+    if (_dbPromise) return _dbPromise;
+    _dbPromise = new Promise(function (resolve, reject) {
         var req = indexedDB.open(DB_NAME, DB_VERSION);
         req.onupgradeneeded = function (e) {
             var db = e.target.result;
@@ -31,15 +37,28 @@ function openDB() {
             console.warn("IndexedDB upgrade blocked — another Legwork tab is open at an older version.");
         };
         req.onsuccess = function () {
-            _db = req.result;
+            var db = req.result;
+            _db = db;
             // If another tab bumps DB_VERSION, close this connection and drop the
             // cache so the next call re-opens cleanly (avoids a dead connection
-            // that throws on every transaction).
-            _db.onversionchange = function () { _db.close(); _db = null; };
-            resolve(_db);
+            // that throws on every transaction). onclose covers the browser
+            // closing it under us (iOS Safari after backgrounding).
+            db.onversionchange = function () { db.close(); _forgetDB(db); };
+            db.onclose = function () { _forgetDB(db); };
+            resolve(db);
         };
-        req.onerror = function () { reject(req.error); };
+        req.onerror = function () { _dbPromise = null; reject(req.error); };
     });
+    return _dbPromise;
+}
+function _forgetDB(db) {
+    if (!db || _db === db) { _db = null; _dbPromise = null; }
+}
+// A transaction on a connection the browser has closed throws
+// InvalidStateError synchronously. Drop the handle so the NEXT call reopens,
+// instead of every later read failing for the rest of the session.
+function _onIDBError(e) {
+    if (e && e.name === "InvalidStateError") _forgetDB(null);
 }
 
 function cacheStoreFor(key) {
@@ -50,7 +69,10 @@ async function cacheGet(key, ttlMs) {
     try {
         var db = await openDB();
         var store = cacheStoreFor(key);
-        return new Promise(function (resolve) {
+        // `return await`, not `return`: transaction() throws synchronously
+        // inside the executor, and only an awaited rejection lands in the
+        // catch below.
+        return await new Promise(function (resolve) {
             var tx = db.transaction(store, "readonly");
             var req = tx.objectStore(store).get(key);
             req.onsuccess = function () {
@@ -61,7 +83,7 @@ async function cacheGet(key, ttlMs) {
             };
             req.onerror = function () { resolve(null); };
         });
-    } catch (e) { return null; }
+    } catch (e) { _onIDBError(e); return null; }
 }
 
 async function cacheSet(key, value) {
@@ -82,7 +104,7 @@ async function cacheSet(key, value) {
                 resolve(false);
             };
         });
-    } catch (e) { return false; }
+    } catch (e) { _onIDBError(e); return false; }
 }
 
 // Sweep stale pathCache rows: pre-baked tile entries whose trailing
@@ -90,7 +112,12 @@ async function cacheSet(key, value) {
 // generations. Nothing else ever deletes pathCache rows, so without this a
 // manifest rebuild orphaned every cached tile until QuotaExceededError.
 // Called fire-and-forget from fetchManifest (tiles.js) on a version change.
-var STALE_KEY_PREFIXES = ["paths:", "paths2:", "pois:", "pois2:"];
+var STALE_KEY_PREFIXES = ["paths:", "paths2:", "paths3:", "pois:", "pois2:"];
+// Live on-demand generations are only hidden by the read-side TTL check; with
+// no delete, a user outside the pre-baked cities accumulated one multi-MB
+// Overpass graph per ~110 m cell forever. Prune rows older than their TTL.
+// (pois3 TTL mirrors POIS_TTL in tiles.js.)
+var EXPIRING_KEY_TTLS = { "paths4:": PATHS_TTL, "pois3:": 7 * 24 * 3600 * 1000 };
 async function cachePruneStale(currentTileVersion) {
     try {
         var db = await openDB();
@@ -112,6 +139,10 @@ async function cachePruneStale(currentTileVersion) {
                     for (var i = 0; i < STALE_KEY_PREFIXES.length; i++) {
                         if (key.indexOf(STALE_KEY_PREFIXES[i]) === 0) { stale = true; break; }
                     }
+                    var ttlPrefix = key.slice(0, key.indexOf(":") + 1);
+                    var ttl = EXPIRING_KEY_TTLS[ttlPrefix];
+                    var v = cur.value;
+                    if (ttl && v && typeof v.ts === "number" && Date.now() - v.ts > ttl) stale = true;
                 }
                 if (stale) { cur.delete(); removed++; }
                 cur.continue();
@@ -120,7 +151,7 @@ async function cachePruneStale(currentTileVersion) {
             tx.oncomplete = function () { resolve(removed); };
             tx.onerror = tx.onabort = function () { resolve(removed); };
         });
-    } catch (e) { return 0; }
+    } catch (e) { _onIDBError(e); return 0; }
 }
 
 // Batched variants of cacheGet/cacheSet: one transaction per store instead of
@@ -152,7 +183,7 @@ async function cacheGetMany(keys, ttlMs) {
                 tx.onerror = tx.onabort = function () { resolve(); };
             });
         }));
-    } catch (e) { /* all-null result reads as a clean miss */ }
+    } catch (e) { _onIDBError(e); /* all-null result reads as a clean miss */ }
     return out;
 }
 
@@ -180,20 +211,20 @@ async function cacheSetMany(pairs) { // [{ key, value }]
                 };
             });
         }));
-    } catch (e) { /* ignore */ }
+    } catch (e) { _onIDBError(e); }
 }
 
 // ── Autosave store ────────────────────────────────────
 async function autosaveGet() {
     try {
         var db = await openDB();
-        return new Promise(function (resolve) {
+        return await new Promise(function (resolve) {
             var tx = db.transaction("autosave", "readonly");
             var req = tx.objectStore("autosave").get("current");
             req.onsuccess = function () { resolve(req.result || null); };
             req.onerror = function () { resolve(null); };
         });
-    } catch (e) { return null; }
+    } catch (e) { _onIDBError(e); return null; }
 }
 
 async function autosaveSet(data) {
@@ -201,7 +232,7 @@ async function autosaveSet(data) {
         var db = await openDB();
         var tx = db.transaction("autosave", "readwrite");
         tx.objectStore("autosave").put(data, "current");
-    } catch (e) { /* ignore */ }
+    } catch (e) { _onIDBError(e); }
 }
 
 async function autosaveClear() {
@@ -209,15 +240,20 @@ async function autosaveClear() {
         var db = await openDB();
         var tx = db.transaction("autosave", "readwrite");
         tx.objectStore("autosave").delete("current");
-    } catch (e) { /* ignore */ }
+    } catch (e) { _onIDBError(e); }
 }
 
 // Migrate legacy localStorage cache + autosave into IndexedDB on first run.
 async function migrateLocalStorage() {
     var migratedCache = false;
+    // With site data blocked, merely reading `localStorage` throws
+    // SecurityError. Unguarded, that rejected the whole boot (no autosave,
+    // share-link or short-link restore). Nothing to migrate in that case.
+    var ls;
+    try { ls = window.localStorage; ls.length; } catch (e) { return; }
     // Cache entries — keys prefixed with "lw:" that map into pathCache/elevCache.
-    for (var i = localStorage.length - 1; i >= 0; i--) {
-        var k = localStorage.key(i);
+    for (var i = ls.length - 1; i >= 0; i--) {
+        var k = ls.key(i);
         if (!k || k.indexOf("lw:") !== 0) continue;
         if (k === "lw:savedRoute" || k === "lw:welcomed") continue;
         try {
