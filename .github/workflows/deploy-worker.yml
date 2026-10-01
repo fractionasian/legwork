@@ -51,9 +51,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # wrangler 4.x refuses to run on Node < 22 ("Wrangler requires at least
+      # Node.js v22.0.0") — every run on '20' failed at the migrations step.
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
 
       # npm ci, not install: worker/package-lock.json pins wrangler (^4.107.0
       # in package.json), so CI deploys with the same version as local rather
