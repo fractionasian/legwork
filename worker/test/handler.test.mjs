@@ -173,3 +173,18 @@ test("an empty-but-clean Overpass result is served and not cached (indistinguish
   assert.equal(res.headers.get("cache-status"), "miss-uncacheable");
   assert.equal(env.store.size, 0);
 });
+
+test("an R2 failure returns a no-store 500 with CORS (not an opaque 1101)", async () => {
+  const env = mockEnv();
+  env.GRAPH.get = async () => { throw new Error("R2 down"); };
+  const realErr = console.error;
+  console.error = () => {};
+  try {
+    const res = await worker.fetch(new Request("https://w.dev/v1/graph?lat=-31.95&lon=115.86&radius=2000"), env, ctx);
+    assert.equal(res.status, 500);
+    assert.equal(res.headers.get("access-control-allow-origin"), "*");
+    assert.equal(res.headers.get("cache-control"), "no-store");
+  } finally {
+    console.error = realErr;
+  }
+});

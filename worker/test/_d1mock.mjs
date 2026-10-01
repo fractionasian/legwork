@@ -61,7 +61,10 @@ export function makeD1Mock() {
           // update is unconstrained. Honour whichever WHERE the SQL carries.
           const constrained = /type\s*=\s*'vanity'/i.test(sql) && /status\s*=\s*'pending'/i.test(sql);
           const matched = !!r && (!constrained || (r.type === "vanity" && r.status === "pending"));
-          if (matched) r.status = status;
+          if (matched) {
+            r.status = status;
+            if (/contact\s*=\s*NULL/i.test(sql)) { r.contact = null; r.note = null; }
+          }
           return { success: true, meta: { changes: matched ? 1 : 0 } };
         }
         if (/^\s*UPDATE\s+links\s+SET\s+hits/i.test(sql)) {
@@ -78,6 +81,10 @@ export function makeD1Mock() {
       },
 
       async first() {
+        if (/COUNT\(\*\)\s+AS\s+n\s+FROM\s+links\s+WHERE\s+created_at\s*>\s*\?/i.test(sql)) {
+          const [since] = args;
+          return { n: [...rows.values()].filter((x) => x.created_at > since).length };
+        }
         // Dedup lookup (createRandomLink): WHERE hash = ?. Must be checked
         // BEFORE the slug+active branch — this SQL also says status='active'.
         if (/WHERE\s+hash\s*=\s*\?/i.test(sql)) {

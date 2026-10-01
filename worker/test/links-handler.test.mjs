@@ -214,3 +214,72 @@ test("POST /api/links rejects a body over the 32 KB cap without minting", async 
   const res = await handleApi(req("POST", "/api/links", { body: { hash: GOOD_HASH, note: "x".repeat(64 * 1024) } }), e, CTX);
   assert.equal(res.status, 400);
 });
+
+test("re-shares that respell a coordinate dedup to the same slug", async () => {
+  // Zero-padded / trailing-zero spellings used to defeat the dedup and mint a
+  // fresh row each, so one IP could fill D1 with variants of one route.
+  const e = env();
+  const a = await (await handleApi(req("POST", "/api/links", { body: { hash: GOOD_HASH } }), e, CTX)).json();
+  const respelt = "#r=-037.8171000,144.97313;-37.81919,144.98498&m=oneway";
+  const b = await (await handleApi(req("POST", "/api/links", { body: { hash: respelt } }), e, CTX)).json();
+  assert.equal(b.slug, a.slug);
+  assert.equal(e.DB._rows.size, 1);
+});
+
+test("link creation returns 503 once the daily cap is reached, re-shares still resolve", async () => {
+  const e = env();
+  const now = Date.now();
+  // Fill the rolling window to the cap with distinct rows.
+  for (let i = 0; i < 500; i++) {
+    e.DB._rows.set("s" + i, { slug: "s" + i, hash: "#x" + i, type: "random", status: "active", created_at: now, hits: 0 });
+  }
+  const res = await handleApi(req("POST", "/api/links", { body: { hash: GOOD_HASH } }), e, CTX);
+  assert.equal(res.status, 503);
+  const vres = await handleApi(req("POST", "/api/vanity", { body: { slug: "fun-run", hash: GOOD_HASH } }), e, CTX);
+  assert.equal(vres.status, 503);
+  // An already-stored route dedups before the cap check.
+  e.DB._rows.set("old111", { slug: "old111", hash: GOOD_HASH, type: "random", status: "active", created_at: now - 1, hits: 0 });
+  const again = await handleApi(req("POST", "/api/links", { body: { hash: GOOD_HASH } }), e, CTX);
+  assert.equal(again.status, 200);
+  assert.equal((await again.json()).slug, "old111");
+});
+
+test("admin routes are rate-limited before the secret is checked", async () => {
+  const e = env({ LINKS_RL: { limit: async () => ({ success: false }) } });
+  const res = await handleApi(req("GET", "/api/admin/pending", { auth: "wrong" }), e, CTX);
+  assert.equal(res.status, 429);
+});
+
+test("rejecting or purging a vanity request drops its contact and note", async () => {
+  const e = env();
+  await handleApi(req("POST", "/api/vanity", { body: { slug: "fun-run", hash: GOOD_HASH, contact: "me@example.com", note: "club" } }), e, CTX);
+  await handleApi(req("POST", "/api/admin/vanity/fun-run", { body: { action: "reject" }, auth: "s3cret" }), e, CTX);
+  let row = e.DB._rows.get("fun-run");
+  assert.equal(row.status, "rejected");
+  assert.equal(row.contact, null);
+  assert.equal(row.note, null);
+
+  await handleApi(req("POST", "/api/vanity", { body: { slug: "parkrun", hash: GOOD_HASH, contact: "x@y.z", note: "n" } }), e, CTX);
+  await handleApi(req("POST", "/api/admin/vanity/parkrun", { body: { action: "approve" }, auth: "s3cret" }), e, CTX);
+  await handleApi(req("POST", "/api/admin/purge/parkrun", { auth: "s3cret" }), e, CTX);
+  row = e.DB._rows.get("parkrun");
+  assert.equal(row.status, "purged");
+  assert.equal(row.contact, null);
+  assert.equal(row.note, null);
+});
+
+test("an over-cap body with NO Content-Length is refused while streaming", async () => {
+  // Chunked request: the old post-read check buffered the whole body first.
+  const big = "x".repeat(40 * 1024);
+  const stream = new ReadableStream({
+    start(c) { c.enqueue(new TextEncoder().encode(JSON.stringify({ hash: big }))); c.close(); },
+  });
+  const r = new Request("https://w.dev/api/links", {
+    method: "POST", body: stream, duplex: "half", headers: { "content-type": "application/json" },
+  });
+  assert.equal(r.headers.get("content-length"), null);
+  const e = env();
+  const res = await handleApi(r, e, CTX);
+  assert.equal(res.status, 400);
+  assert.equal(e.DB._rows.size, 0);
+});

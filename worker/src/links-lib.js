@@ -51,6 +51,12 @@ export function validateRouteHash(input) {
   if (points.length < 2) return { ok: false, reason: "need >= 2 points" };
   if (points.length > MAX_POINTS) return { ok: false, reason: "too many points" };
 
+  // Each coordinate is re-serialised canonically at the client's own precision
+  // (toFixed(5)), so "-31.95", "-031.950" and "-31.9500000" store as the same
+  // hash, and a real client's hash round-trips byte-identical. Before this
+  // the dedup in createRandomLink could be defeated by respelling one number,
+  // minting a fresh row per variant.
+  const canon = [];
   for (const p of points) {
     const parts = p.split(",");
     if (parts.length !== 2) return { ok: false, reason: "malformed point: " + p };
@@ -59,9 +65,10 @@ export function validateRouteHash(input) {
     const lon = Number(parts[1]);
     if (lat < -90 || lat > 90) return { ok: false, reason: "lat out of range: " + p };
     if (lon < -180 || lon > 180) return { ok: false, reason: "lon out of range: " + p };
+    canon.push(lat.toFixed(5) + "," + lon.toFixed(5));
   }
 
-  return { ok: true, hash: "#r=" + r + "&m=" + m };
+  return { ok: true, hash: "#r=" + canon.join(";") + "&m=" + m };
 }
 
 // Words a user-chosen vanity slug may not take. Two groups:
