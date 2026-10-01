@@ -193,6 +193,13 @@ function initMap() {
         // Scopes the water-visibility filter tweak (style.css) to this layer only —
         // satellite/terrain keep the original full-grayscale look.
         className: "basemap-street",
+        // CORS-mode image loads, so the service worker gets a readable
+        // (non-opaque) response it can cache for offline use. Safe because
+        // OSM's tile servers always send Access-Control-Allow-Origin: *
+        // (openstreetmap/chef, cookbooks/tile/templates/default/apache.erb).
+        // NOT set on satellite/terrain: unverified there, and a host without
+        // the header would stop that layer loading at all.
+        crossOrigin: true,
     });
     var satellite = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
         attribution: '&copy; Esri',
