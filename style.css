@@ -1,5 +1,17 @@
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
+/* Top inset for anything drawn under the status bar. From iOS 26, a home-screen
+   app with black-translucent + viewport-fit=cover gets a system "Liquid Glass"
+   blur over the status bar that fades out roughly 40 pt below it, and no meta
+   tag or CSS turns it off. So in the installed app we push the toolbar and menu
+   header below the blur: it then lands on flat toolbar colour, where it's
+   invisible. Browser tabs don't get the blur, so they keep the tight inset.
+   ponytail: fixed 40px from community device reports; tune if iOS changes the ramp. */
+:root { --top-inset: env(safe-area-inset-top, 0px); }
+@media (display-mode: standalone) {
+    :root { --top-inset: calc(env(safe-area-inset-top, 0px) + 40px); }
+}
+
 body {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     background: #0f1117;
@@ -17,7 +29,7 @@ body {
     display: flex;
     gap: 6px;
     padding: 8px 10px;
-    padding-top: calc(env(safe-area-inset-top, 0px) + 8px);
+    padding-top: calc(var(--top-inset) + 8px);
     background: #1a1d28;
     align-items: center;
     border-bottom: 1px solid #2a2d3a;
@@ -278,7 +290,7 @@ body {
     align-items: center;
     justify-content: space-between;
     padding: 16px 18px;
-    padding-top: calc(env(safe-area-inset-top, 0px) + 16px);
+    padding-top: calc(var(--top-inset) + 16px);
     border-bottom: 1px solid #2a2d3a;
 }
 
