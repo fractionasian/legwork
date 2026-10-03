@@ -625,6 +625,39 @@ function sampleRoute(coords, intervalMetres) {
     return points;
 }
 
+// Hotline points for the FULL route geometry, coloured by the elevation
+// samples. sampleRoute keeps only the first vertex after each 50 m, so drawing
+// the samples themselves chorded across corners — a 200 m residential block
+// with no intermediate vertices became one straight line through the houses.
+// Samples are a subsequence of coords, so walk both in step: each vertex takes
+// the grade of the sample segment it sits in. Grade is clamped to ±15% for the
+// colour map. Returns [[lat, lon, grade%], ...], one per coords entry.
+function gradeAlongRoute(coords, samples) {
+    var grades = [0]; // grades[j] = grade of segment samples[j-1] → samples[j]
+    for (var i = 1; i < samples.length; i++) {
+        var a = samples[i - 1], b = samples[i];
+        var dist = haversine(a.lat, a.lon, b.lat, b.lon);
+        var g = dist > 0 ? ((b.elevation - a.elevation) / dist) * 100 : 0;
+        grades.push(Math.max(-15, Math.min(15, g)));
+    }
+    var out = [[coords[0][0], coords[0][1], 0]]; // first point is flat
+    var j = 0; // index of the last sample passed
+    for (var c = 1; c < coords.length; c++) {
+        var p = coords[c];
+        var nxt = samples[j + 1];
+        // Compared at 5 dp: elevation results can come from the cache, which is
+        // keyed at 5 dp, so their lat/lon needn't be bit-identical to the vertex.
+        var isSample = !!nxt && p[0].toFixed(5) === nxt.lat.toFixed(5) && p[1].toFixed(5) === nxt.lon.toFixed(5);
+        if (isSample) j++;
+        // A sample vertex takes the grade of the segment it closes (the old
+        // per-sample convention); a vertex between samples takes the grade of
+        // the segment it's on.
+        var g = isSample ? grades[j] : grades[Math.min(j + 1, grades.length - 1)];
+        out.push([p[0], p[1], g]);
+    }
+    return out;
+}
+
 function smoothElevations(elevData) {
     if (elevData.length < 2) return elevData;
     // Empirically tuned against the Mosman Park ↔ Subiaco out-and-back
@@ -671,6 +704,7 @@ if (typeof module !== "undefined" && module.exports) {
         bilinearSample: bilinearSample,
         medianFilter: medianFilter,
         smoothElevations: smoothElevations,
+        gradeAlongRoute: gradeAlongRoute,
         computeAscent: computeAscent,
         // Routing/graph helpers — exported for the headless test suite and for
         // asserting parity with the duplicated pure functions in build-tiles.js.

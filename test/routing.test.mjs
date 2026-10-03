@@ -227,6 +227,34 @@ test("sampleRoute — keeps first + last, samples by interval", () => {
   assert.deepEqual(pts[pts.length - 1], [0, 0.03]);
 });
 
+test("gradeAlongRoute — keeps every vertex, so corners aren't cut", () => {
+  // An L: 30 m east to a corner, then 220 m north with no vertex in between —
+  // the Doonan Road shape. sampleRoute(50) drops the corner (only 30 m in).
+  const corner = [-31.98646, 115.79758];
+  const coords = [[-31.98646, 115.79790], corner, [-31.98446, 115.79758]];
+  const sampled = R.sampleRoute(coords, 50);
+  assert.equal(sampled.length, 2, "precondition: the corner is not a sample");
+  const elev = sampled.map((p, i) => ({ lat: p[0], lon: p[1], elevation: i * 2.5 }));
+  const out = R.gradeAlongRoute(coords, elev);
+  assert.equal(out.length, coords.length);
+  assert.deepEqual(out[1].slice(0, 2), corner);
+  assert.equal(out[0][2], 0);
+  const g = out[2][2];
+  assert.ok(g > 0.9 && g < 1.2, `~1% climb over the chord, got ${g}`);
+  assert.equal(out[1][2], g, "between samples: grade of the segment it's on");
+});
+
+test("gradeAlongRoute — vertices take their own segment's grade, clamped", () => {
+  const coords = [[0, 0], [0, 0.0005], [0, 0.001], [0, 0.0015], [0, 0.002]];
+  // Samples at vertices 0, 2, 4: +1 m then -50 m over ~55 m each.
+  const elev = [{ lat: 0, lon: 0, elevation: 0 }, { lat: 0, lon: 0.001, elevation: 1 },
+                { lat: 0, lon: 0.002, elevation: -49 }];
+  const g = R.gradeAlongRoute(coords, elev).map((p) => p[2]);
+  assert.ok(g[1] > 0 && g[1] === g[2], "vertex 1 rides the first (uphill) segment");
+  assert.equal(g[3], -15);
+  assert.equal(g[4], -15);
+});
+
 test("poiFromOsmElement — nodes, centred ways, and rejects map correctly", () => {
   // Node: direct lat/lon, type-prefixed id, flag coercion.
   const node = R.poiFromOsmElement({
