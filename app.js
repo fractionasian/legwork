@@ -1543,7 +1543,7 @@ async function fetchRouteElevation(coords, gen) {
         if (gen !== _routeGen) return; // a newer route owns the map now
         state.lastElevationData = results;
         updateElevation(results);
-        colourRouteByGradient(results);
+        colourRouteByGradient(results, coords);
     } catch (e) {
         if (gen !== _routeGen) return;
         console.warn("Elevation fetch failed:", e.message);
@@ -1552,7 +1552,7 @@ async function fetchRouteElevation(coords, gen) {
     }
 }
 
-function colourRouteByGradient(elevData) {
+function colourRouteByGradient(elevData, routeCoords) {
     elevData = smoothElevations(elevData);
     if (elevData.length < 2) return;
     clearLayerArray("gradientLines"); // never stack a second hotline on an earlier one
@@ -1560,18 +1560,9 @@ function colourRouteByGradient(elevData) {
     clearLayerSingle("closingLine");
     clearLayerSingle("routeOutline");
 
-    // Build [lat, lon, grade%] array for hotline
-    // First point has no grade — use 0 (flat)
-    var coords = [[elevData[0].lat, elevData[0].lon, 0]];
-    for (var i = 1; i < elevData.length; i++) {
-        var prev = elevData[i-1], curr = elevData[i];
-        var dist = haversine(prev.lat, prev.lon, curr.lat, curr.lon);
-        var grade = 0;
-        if (dist > 0) grade = ((curr.elevation - prev.elevation) / dist) * 100;
-        // Clamp to ±15% for colour mapping
-        grade = Math.max(-15, Math.min(15, grade));
-        coords.push([curr.lat, curr.lon, grade]);
-    }
+    // Draw the full route geometry, not the 50 m elevation samples — the
+    // samples cut corners (see gradeAlongRoute).
+    var coords = gradeAlongRoute(routeCoords, elevData);
 
     // Hotline palette: blue (downhill) → green (flat) → yellow → red (uphill)
     // min=-15 maps to 0.0, 0 maps to 0.5, max=+15 maps to 1.0
