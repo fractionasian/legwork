@@ -152,47 +152,61 @@ climb saving back (101 m) at climb 8. 15 sits between.
 
 ## Costs
 
+The routing graph is now a packed (typed-array) graph; see below. These are the numbers
+for the code as it stands, measured on all 46 Perth tiles through the app's own scripts
+in a browser-like global context (one fresh process per setting; the older figures that
+came from a `vm` sandbox were roughly 2× too pessimistic on speed).
+
+| 46 Perth tiles | Before (object graph) | Now (packed) |
+|---|---|---|
+| Load all tiles, settings off | 12.1 s | 1.3 s |
+| Memory, settings off | 812 MB | 286 MB |
+| Memory, climb 8 + turn 15 | 981 MB | 315 MB |
+| 11 routes, settings off | 966 ms | 106 ms |
+| 11 routes, climb 8 | 985 ms | 123 ms |
+| 11 routes, climb 8 + turn 15 | 1,065 ms | 335 ms |
+| First load (4 central tiles): time, memory | 0.63 s, 103 MB | 0.19 s, 39 MB |
+
+Memory counts typed-array buffers. Not measured on a phone.
+
 - **Tile size:** Perth's 46 tiles went 6.8 → 8.3 MB gzipped (+22%), 34.7 → 38.8 MB
   raw. About 33 KB gzipped per tile on average; the first load (4 central, denser
   tiles) is ~130 KB heavier or more.
-- **Search time, climb weight:** about +5% (module-scope measurement) to +20% (vm
-  sandbox, which is ~2× slower overall) across the test routes. Worst long leg
-  (20 km): +5–110 ms on a server CPU. Not measured on a phone.
-- **Search time, turn cost:** about 2.1× on top of that (7 routes, sandbox:
-  1.74 s today, 1.96 s climb 8, 4.08 s with turn 15 added; Fremantle → CBD 0.7 s →
-  1.4 s). Every pin drag re-routes two legs, so this is the cost to watch. Options if
-  it bites: route with the plain search while dragging and refine on release, or
-  pack the graph first (the search is ~4–12× faster on typed arrays).
-- **Memory (all 46 Perth tiles, app's real code, one process per setting):** 787 MB
-  today; heights add 24 MB (+3%), climb adds nothing, the turn cost adds 158 MB (+20%)
-  for per-edge headings and scratch fields. A typical session loads a handful of tiles.
+- **Search time, turn cost:** about 2.7× the climb-only search on the packed graph
+  (335 vs 123 ms over the 11 routes): it searches directed edges, about twice the
+  states. Every pin drag re-routes two legs. If it ever bites, route with the plain
+  search while dragging and refine on release.
+- **Heights in the tiles** add about 24 MB of memory for all 46 tiles (+3%).
 - **Build:** Perth sampler 17 s and at least ~380 MB of RAM (two float buffers);
   encoding 5 s. Perth is the largest city, so the others are cheaper.
 
 ## Testing it
 
-Automated: `npm test` (`test/climb.test.mjs`, `test/elevation.test.mjs`).
+Automated: `npm test` (`test/climb.test.mjs`, `test/elevation.test.mjs`,
+`test/turns.test.mjs`, `test/packed-graph.test.mjs`).
 
 By hand, after the new tiles are live (the flag does nothing until Perth tiles
 carry heights — run the **Build City Tiles** workflow in `legwork-tiles`, or
 wait for Sunday's schedule):
 
 1. Open `legwork.day/?climb=8` and `legwork.day/` in two tabs.
-2. In each (try `?climb=4`, `?climb=8` and `?climb=8&turn=15` as well), plan the same route and compare the ascent in the elevation panel:
-   Cottesloe beach → Elizabeth Quay (about 80 m → 59 m), Scarborough →
-   Elizabeth Quay (about 101 m → 79 m). Pins land a few metres differently, so
-   expect ±5 m.
+2. In each (try `?climb=4`, `?climb=8` and `?climb=8&turn=15` as well), plan the same
+   route and compare the ascent in the elevation panel. The app starts in loop mode,
+   so the panel includes the way back; the one-way figures are about half. Real-browser
+   run, default → `?climb=8&turn=15`: Cottesloe beach → Elizabeth Quay 23.9 km, 162 m →
+   24.9 km, 120 m; Scarborough → Elizabeth Quay 28.0 km, 187 m → 28.2 km, 165 m. Pins
+   land a few metres differently, so expect ±5 m.
 3. Look at the line itself. The flatter route should look like something a
    local would run, not a zig-zag. Scarborough → Elizabeth Quay is the one to check
    for the turn cost: its last stretch should be a near-straight diagonal with
-   `turn=15` (about 14,101 m and 75 m with `climb=8&turn=15`; 14,017 m and 101 m today).
+   `turn=15` (one way: 14,101 m and 75 m with `climb=8&turn=15`; 14,017 m and 101 m today).
 4. Plan something flat (Victoria Park → CBD). It should look identical.
 
 ## To turn it on for everyone
 
 Change `var CLIMB_WEIGHT = 0` to `8` and `var TURN_COST = 0` to `15` in
 `routing.js`; `?climb=0` and `?turn=0` stay the off-switches. Two lines plus test
-updates. Consider the search-time cost above first.
+updates.
 
 ## Known gaps
 
@@ -203,6 +217,9 @@ updates. Consider the search-time cost above first.
 - The bike profile uses the same weight. It wasn't re-measured at the final
   settings; at 20 m smoothing its effect was smaller (Fremantle → CBD −16 m,
   most other routes unchanged).
+- The packed graph is on for everyone once merged (there is no switch back to the
+  old structure). Costs and routes were checked identical to the old code on real
+  tiles and in a real browser, but not on a phone.
 - Other cities are off until someone adds `"elevation": true` and checks the result.
 - The turn cost is not applied at a pin: each leg between pins is routed alone, so a
   corner exactly at a pin is free.
@@ -210,9 +227,31 @@ updates. Consider the search-time cost above first.
   small bends is not charged and a sharp corner split across two vertices can slip
   under the 35° threshold. Fine for city grids; untested on trail networks.
 
-## Not done: packed graph
+## Packed graph
 
-Measured separately: a packed (typed-array) graph searches 4–12× faster, loads a
-whole city in ~0.2 s instead of ~9 s, uses ~10× less memory, and could download
-at about half today's size. It also needs a tile-border stitching design and
-carries no street names. Parked until phone measurements show where it's slow.
+The routing graph (`PackedGraph` in `routing.js`) is typed arrays instead of an object
+of arrays of objects keyed by `"lat,lon"` strings. Tiles still arrive one at a time:
+nodes are found by coordinate in an open-addressing hash, so a node shared with a
+neighbouring tile simply gains edges, and edge lists are linked lists so they can grow.
+The download is unchanged (still the JSON tiles; no tile rebuild is needed for it).
+
+- **Keys stay strings at the edges.** Waypoints and saved routes store `"lat,lon"`
+  keys; the graph converts to and from them only at the API (`indexOf`, `keyOf`), so
+  saved routes keep working. Integer microdegrees are rounded exactly as `nodeKey`'s
+  `toFixed(6)` rounds.
+- **Costs.** Each edge stores its weighted length and its raw rise in metres; the climb
+  weight and the turn cost are applied at search time, so they are read live and never
+  baked into edges.
+- **Result.** Identical routes: over 11 Perth routes × 3 settings the worst difference
+  in cost against the old code was 3×10⁻¹⁵ and all 33 routes had the same length. Plus
+  a real-browser run (headless Chromium, the app's own scripts, fake network): default
+  and `?climb=8&turn=15`, 2 and 3 pins, run → bike → run, no console errors.
+- **One behavioural difference.** Nearest-node lookup cells are assigned by one integer
+  formula for nodes and queries. The old string-keyed grid could drop a node sitting
+  exactly on a cell boundary into the next cell (float fuzz); the new one doesn't.
+- **What is left in memory.** About 185 MB of the 286 MB is the tile features kept for
+  drawing the map and for rebuilding the graph when the profile changes. That is the next
+  target if memory matters.
+- **Not done:** a packed tile format on the server (about half the download, needs
+  border stitching and a rebuild); testing on a phone; the live Overpass fallback path
+  (unreachable from the dev container, but it goes through the same `applyPaths`).

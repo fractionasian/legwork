@@ -90,12 +90,13 @@ test("bearingDeg: cardinal directions, and a 45-degree street reads as 45 at Per
 test("graph edges carry headings only while the turn cost is on", () => {
   let app = loadApp();
   apply(app, gridWays());
-  assert.equal(Object.values(app.state.graph)[0][0].b, undefined, "off: graph is as light as before");
+  assert.equal(app.state.graph.eBear, null, "off: no headings stored");
   app = loadApp(); app.setTurnCost(15);
   const g = apply(app, gridWays());
-  const k = key(app, 0, 0), east = g[k].find((e) => e.key === key(app, 0, 1));
+  assert.ok(g.eBear, "on: headings stored");
+  const k = key(app, 0, 0), east = g.edgesFrom(k).find((e) => e.key === key(app, 0, 1));
   assert.ok(Math.abs(east.b - 90) < 0.5, `east heading ${east.b}`);
-  const back = g[key(app, 0, 1)].find((e) => e.key === k);
+  const back = g.edgesFrom(key(app, 0, 1)).find((e) => e.key === k);
   assert.ok(Math.abs(Math.abs(back.b) - 90) < 0.5 && back.b < 0, `reverse edge heads west: ${back.b}`);
 });
 
@@ -141,15 +142,16 @@ test("the turn-aware search finds the exact least-cost route (checked against a 
   }
   const g = apply(app, ws);
   const K = (i, j) => app.nodeKey(pts[i][j][1], pts[i][j][0]);
+  const out = new Map(g.nodeKeys().map((k) => [k, g.edgesFrom(k)]));
   function reference(s, t) {
     const dist = new Map(), done = new Set(), q = [];
-    for (const e of g[s]) { dist.set(s + ">" + e.key, e.dist); q.push([e.dist, s, e]); }
+    for (const e of out.get(s)) { dist.set(s + ">" + e.key, e.dist); q.push([e.dist, s, e]); }
     while (q.length) {
       q.sort((a, b) => a[0] - b[0]);
       const [d, u, e] = q.shift(), sk = u + ">" + e.key;
       if (done.has(sk)) continue; done.add(sk);
       if (e.key === t) return d;
-      for (const e2 of g[e.key]) {
+      for (const e2 of out.get(e.key)) {
         const c = d + e2.dist + app.turnPenalty(e.b, e2.b), k2 = e.key + ">" + e2.key;
         if (!dist.has(k2) || c < dist.get(k2)) { dist.set(k2, c); q.push([c, e.key, e2]); }
       }
@@ -190,7 +192,7 @@ test("turn cost and climb cost work together; rebuilding for the other profile k
   const app = loadApp(); app.setTurnCost(40); app.setClimbWeight(8);
   apply(app, gridWays());
   app.state.profile = "bike"; app.rebuildGraphForProfile();
-  assert.equal(typeof Object.values(app.state.graph)[0][0].b, "number", "headings rebuilt");
+  assert.ok(app.state.graph.eBear, "headings rebuilt");
   assert.ok(turnsIn(app, route(app).path) <= bikeOffTurns, "no more turns than with the cost off");
   assert.ok(turnsIn(app, route(app).path) <= 2);
 });
