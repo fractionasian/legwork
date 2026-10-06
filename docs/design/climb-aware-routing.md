@@ -1,7 +1,8 @@
 # Climb-aware routing
 
 Status: **built, off by default.** Perth tiles carry heights; the router charges
-for climbing only when the page is opened with `?climb=8`.
+for climbing only when the page is opened with `?climb=8`, and for turns only with
+`?turn=15`. The two are meant to be tried together: `?climb=8&turn=15`.
 
 ## What it does
 
@@ -25,7 +26,9 @@ to about **4** in the router's units, not 8.
 routes (Cottesloe flips at any weight from 1; Scarborough at 4). On 120 random
 pin sets in central Perth (below), weight 4 kept about 60% of weight 8's
 ascent saving (12.3 of 19.5 m, summed over the five route types) for about a third of the extra distance (0.6 vs 1.9 percentage points), and made fewer routes worse.
-The default is still 0 (off); 4 or 8 is a decision for after real-route testing.
+The default is still 0 (off). With the turn cost on (below), 8 is the better pairing:
+at climb 4 + turn 15 Scarborough → CBD loses its whole climb saving (100 m vs 79 m),
+at climb 8 + turn 15 it keeps it (75 m).
 
 ## How it works
 
@@ -102,14 +105,67 @@ flips at weight 16+, at 37–41 m per metre saved; weight 8 correctly declines i
 The knob that would cap a detour directly (reject a flatter route more than N%
 longer than the shortest) needs a second search per leg; not built.
 
+## Turn cost
+
+A second hidden preference: `?turn=15` charges 15 weighted metres for each change of
+direction of 35° or more at a junction (`TURN_COST` in `routing.js`; capped at 100).
+
+**Why.** Between two diagonal points a street grid has hundreds of equally short
+staircase routes and a plain shortest-path search picks one arbitrarily (Scarborough →
+Elizabeth Quay ends in one, with the climb weight off). Climb-aware routing makes it
+worse: the flatter corridors run along side streets, and over the seven test routes
+kinks went from 193 to 214 (+11%). A small cost per turn wins that back.
+
+**Why soft, not a minimum run.** Some routes have no straight run over ~100 m to
+offer (block-by-block CBD), so a hard minimum would leave them unroutable. A "short
+legs cost extra" variant was also tested and was no better than a flat cost per turn
+(more distance, more ascent).
+
+**How.** The cost depends on the way you arrived, so the search state is the
+directed edge, not the node (`dijkstraTurns`): about twice the states. Edges carry a
+heading and scratch fields only while the turn cost is on. Checked against an
+independent edge-state Dijkstra in `test/turns.test.mjs`.
+
+**What it did (7 Perth routes, real app code and tiles):**
+
+| | Kinks | Total ascent | Distance | Scarborough → CBD |
+|---|---|---|---|---|
+| Today | 193 | 440 m | 83.2 km | 101 m, 14,017 m |
+| Climb 8 | 214 | 392 m | 83.8 km | 79 m, 14,050 m |
+| Climb 8 + turn 15 | 185 | 381 m | 84.6 km | 75 m, 14,101 m |
+
+A kink is a heading change over 35° between legs of at least 15 m.
+
+**What it did not do, measurably.** Two whole-route measures that try to capture
+"does it hold a line" show no difference between the three settings: sustained
+direction changes (heading toward the point 200 m ahead moves more than 45° and stays
+there) 29 / 27 / 32, and sideways wobble from a smoothed copy of the route 12.2 / 12.2 /
+12.3 m. On the last 2.5 km of Scarborough → CBD wobble is 18 / 22 / 22 m, so it did
+not fall there either. The visible gain is local: with climb 8 + turn 15 the final
+approach becomes a near-straight diagonal with small jogs instead of a staircase, which
+reads as one line to a runner even though the jogs still count as kinks. No
+measure here captures that, so it has to be judged by eye on real routes.
+
+**Settings tried (climb weight 4, 7 routes).** 10 per turn is too gentle to clear the
+Scarborough staircase; 20+ cleans it up fully but is the hillier corridor and gives the
+climb saving back (101 m) at climb 8. 15 sits between.
+
 ## Costs
 
 - **Tile size:** Perth's 46 tiles went 6.8 → 8.3 MB gzipped (+22%), 34.7 → 38.8 MB
   raw. About 33 KB gzipped per tile on average; the first load (4 central, denser
   tiles) is ~130 KB heavier or more.
-- **Search time:** about +5% (module-scope measurement) to +20% (vm sandbox,
-  which is ~2× slower overall) across the test routes. Worst long leg
+- **Search time, climb weight:** about +5% (module-scope measurement) to +20% (vm
+  sandbox, which is ~2× slower overall) across the test routes. Worst long leg
   (20 km): +5–110 ms on a server CPU. Not measured on a phone.
+- **Search time, turn cost:** about 2.1× on top of that (7 routes, sandbox:
+  1.74 s today, 1.96 s climb 8, 4.08 s with turn 15 added; Fremantle → CBD 0.7 s →
+  1.4 s). Every pin drag re-routes two legs, so this is the cost to watch. Options if
+  it bites: route with the plain search while dragging and refine on release, or
+  pack the graph first (the search is ~4–12× faster on typed arrays).
+- **Memory (all 46 Perth tiles, app's real code, one process per setting):** 787 MB
+  today; heights add 24 MB (+3%), climb adds nothing, the turn cost adds 158 MB (+20%)
+  for per-edge headings and scratch fields. A typical session loads a handful of tiles.
 - **Build:** Perth sampler 17 s and at least ~380 MB of RAM (two float buffers);
   encoding 5 s. Perth is the largest city, so the others are cheaper.
 
@@ -122,18 +178,21 @@ carry heights — run the **Build City Tiles** workflow in `legwork-tiles`, or
 wait for Sunday's schedule):
 
 1. Open `legwork.day/?climb=8` and `legwork.day/` in two tabs.
-2. In each (try `?climb=4` and `?climb=8` as well), plan the same route and compare the ascent in the elevation panel:
+2. In each (try `?climb=4`, `?climb=8` and `?climb=8&turn=15` as well), plan the same route and compare the ascent in the elevation panel:
    Cottesloe beach → Elizabeth Quay (about 80 m → 59 m), Scarborough →
    Elizabeth Quay (about 101 m → 79 m). Pins land a few metres differently, so
    expect ±5 m.
 3. Look at the line itself. The flatter route should look like something a
-   local would run, not a zig-zag.
+   local would run, not a zig-zag. Scarborough → Elizabeth Quay is the one to check
+   for the turn cost: its last stretch should be a near-straight diagonal with
+   `turn=15` (about 14,101 m and 75 m with `climb=8&turn=15`; 14,017 m and 101 m today).
 4. Plan something flat (Victoria Park → CBD). It should look identical.
 
 ## To turn it on for everyone
 
-Change `var CLIMB_WEIGHT = 0` to `8` in `routing.js` and make `?climb=0` the
-off-switch (it already is: `setClimbWeight(0)`). One line plus a test update.
+Change `var CLIMB_WEIGHT = 0` to `8` and `var TURN_COST = 0` to `15` in
+`routing.js`; `?climb=0` and `?turn=0` stay the off-switches. Two lines plus test
+updates. Consider the search-time cost above first.
 
 ## Known gaps
 
@@ -145,6 +204,11 @@ off-switch (it already is: `setClimbWeight(0)`). One line plus a test update.
   settings; at 20 m smoothing its effect was smaller (Fremantle → CBD −16 m,
   most other routes unchanged).
 - Other cities are off until someone adds `"elevation": true` and checks the result.
+- The turn cost is not applied at a pin: each leg between pins is routed alone, so a
+  corner exactly at a pin is free.
+- Turn costs use the straight edge-to-edge heading, so a gentle curve made of many
+  small bends is not charged and a sharp corner split across two vertices can slip
+  under the 35° threshold. Fine for city grids; untested on trail networks.
 
 ## Not done: packed graph
 
