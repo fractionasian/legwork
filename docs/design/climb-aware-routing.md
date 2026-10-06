@@ -11,9 +11,21 @@ slider and nothing to explain to the user. A route may be a few percent longer
 and a lot flatter; it never gets longer just to shave a metre of climb.
 
 Cost of an edge = existing weighted length + `CLIMB_WEIGHT` × metres climbed
-(uphill only, downhill is free). `CLIMB_WEIGHT = 8` means one metre of climb
-costs as much as 8 m of flat walking — Naismith's rule for walking, and a
-plateau: weights 5 and 10 gave almost the same routes.
+(uphill only, downhill is free).
+
+**Reading the number.** The weight multiplies the router's own smoothed climb,
+which has no dead-band and so sums 1.6–4.4× the ascent the app displays (CBD →
+Kings Park 110 m vs 67 m, Cottesloe → CBD 168 vs 80, Fremantle → CBD 230 vs 77).
+So weight 8 acts like roughly 17–25 weighted metres per *displayed* metre.
+Naismith's rule (W. W. Naismith, 1892: 1 hour per 5 km plus 1 hour per 600 m of
+ascent, so one metre of climb ≈ 8 m of flat; Scarf's form uses 7.92) corresponds
+to about **4** in the router's units, not 8.
+
+**Choosing it.** On fixed start/end routes, weights 4–12 give nearly the same
+routes (Cottesloe flips at any weight from 1; Scarborough at 4). On 120 random
+pin sets in central Perth (below), weight 4 kept about 60% of weight 8's
+ascent saving (12.3 of 19.5 m, summed over the five route types) for about a third of the extra distance (0.6 vs 1.9 percentage points), and made fewer routes worse.
+The default is still 0 (off); 4 or 8 is a decision for after real-route testing.
 
 ## How it works
 
@@ -59,6 +71,37 @@ Perth is mostly flat, so most routes don't change. Expect more from Hobart,
 Sydney, Seoul (none measured). A forced climb stays forced: in an earlier run the
 Maida Vale scarp route (+219 m) moved by 1 m.
 
+## With pins and loops
+
+The app routes each leg between consecutive pins separately (and closes a loop
+back to the first pin), so the router only chooses *between* pins. Pins placed on
+the shortest line remove the choice. 120 random routes in central Perth, 24 per
+type, through the real app code, mean change in displayed ascent / distance:
+
+| Route type (mean length, mean ascent) | Weight 4 | Weight 8 |
+|---|---|---|
+| open, 2 pins (4.9 km, 23 m) | −1.0 m / 0.0% | −0.8 m / +0.2% |
+| open, 3 pins (10.6 km, 41 m) | −1.3 m / +0.3% | −3.1 m / +0.6% |
+| open, 4 pins (16.2 km, 68 m) | −2.1 m / 0.0% | −3.0 m / +0.1% |
+| loop, 3 pins (18.1 km, 68 m) | −5.2 m / +0.3% | −8.3 m / +0.6% |
+| loop, 4 pins (21.0 km, 100 m) | −2.7 m / +0.1% | −4.3 m / +0.3% |
+
+The average effect is small and lumpy: a few routes improve by 10–38 m and most
+barely move. Some routes show *more* ascent in the app's panel (≥3 m worse on 0–3
+of 24 at weight 4, 1–6 of 24 at weight 8), because the router optimises its own
+smoothed climb, not the displayed figure. A dead-band at bake time (as Flatten
+SF does) would narrow that gap; not done.
+
+## The trade-off per route
+
+Some pairs have only two real choices, so no weight gives a smaller detour.
+Cottesloe → CBD is 11,944 m / 80 m ascent or 12,414 m / 59 m at every weight
+from 1 to 20 (22 m of extra distance per metre of climb saved). Scarborough →
+CBD is cheap (+34 m for 22 m less climb, from weight 4). Fremantle → CBD only
+flips at weight 16+, at 37–41 m per metre saved; weight 8 correctly declines it.
+The knob that would cap a detour directly (reject a flatter route more than N%
+longer than the shortest) needs a second search per leg; not built.
+
 ## Costs
 
 - **Tile size:** Perth's 46 tiles went 6.8 → 8.3 MB gzipped (+22%), 34.7 → 38.8 MB
@@ -79,7 +122,7 @@ carry heights — run the **Build City Tiles** workflow in `legwork-tiles`, or
 wait for Sunday's schedule):
 
 1. Open `legwork.day/?climb=8` and `legwork.day/` in two tabs.
-2. In each, plan the same route and compare the ascent in the elevation panel:
+2. In each (try `?climb=4` and `?climb=8` as well), plan the same route and compare the ascent in the elevation panel:
    Cottesloe beach → Elizabeth Quay (about 80 m → 59 m), Scarborough →
    Elizabeth Quay (about 101 m → 79 m). Pins land a few metres differently, so
    expect ±5 m.

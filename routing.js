@@ -154,8 +154,11 @@ function onewayEdgeCosts(ow, d) {
 // Extra cost, in the same weighted-metre units as every other edge cost, for
 // each metre climbed. 0 = off (the default): routing is exactly as before.
 // `?climb=8` turns it on for testing — see docs/design/climb-aware-routing.md for
-// why 8 (1 m of climb ≈ 8 m of flat, which is Naismith's walking rule) and what
-// it bought on real Perth routes. Climb is charged uphill only; downhill is free.
+// what it bought on real Perth routes and how to read the number. The weight
+// multiplies the router's own smoothed climb, which sums ~2-3x the ascent the app
+// displays (no dead-band), so 8 here is ~17-25 per DISPLAYED metre; Naismith's
+// walking rule (1 m climb ≈ 8 m flat) sits nearer 4. Climb is charged uphill only;
+// downhill is free.
 // Tiles built without elevation (other cities, live Overpass fallback) carry no
 // heights, so they route as before whatever the weight.
 var CLIMB_WEIGHT = 0;
