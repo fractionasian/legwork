@@ -1,8 +1,10 @@
 # Climb-aware routing
 
 Status: **built, on by default** (climb 8, turn 15; switched on 2026-10-06 after a
-phone test). Perth tiles carry heights. `?climb=0` and `?turn=0` switch either off
-for comparison; other cities have no heights yet, so climb changes nothing there.
+phone test). All 12 seeded cities carry heights (Perth since 2026-10-06; the rest
+from the same day's second build). `?climb=0` and `?turn=0` switch either off for
+comparison. Places outside the seeded cities load live from Overpass with no heights,
+so climb changes nothing there.
 
 ## What it does
 
@@ -40,7 +42,7 @@ at climb 8 + turn 15 it keeps it (75 m).
    `data/cities.json` get it — currently Perth. Elevation failure never fails the
    build: the city ships without heights and routes as before.
 3. `routing.js` decodes the field (`decodeElevations`); `applyPaths` in `tiles.js`
-   adds `climbCosts()` to each edge. Tiles without heights (other cities, the
+   adds `climbCosts()` to each edge. Tiles without heights (the
    live-Overpass fallback, tiles cached before the rebuild) route as before.
 4. Old app versions ignore the 7th field, so tiles can ship before the app does.
 
@@ -219,7 +221,10 @@ are the off-switches, handy for comparing a route with and without.
 - The packed graph is on for everyone once merged (there is no switch back to the
   old structure). Costs and routes were checked identical to the old code on real
   tiles and in a real browser, but not on a phone.
-- Other cities are off until someone adds `"elevation": true` and checks the result.
+- Heights are baked for all 12 seeded cities, but only Perth and Hobart were checked in a
+  real browser (Hobart: 27 m less climbing for 0.04 km more). The other ten are
+  unchecked beyond tile contents. New cities added by the weekly suggestion job get
+  `"elevation": true` automatically.
 - The turn cost is not applied at a pin: each leg between pins is routed alone, so a
   corner exactly at a pin is free.
 - Turn costs use the straight edge-to-edge heading, so a gentle curve made of many
