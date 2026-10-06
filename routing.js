@@ -150,6 +150,42 @@ function onewayEdgeCosts(ow, d) {
     return { fwd: d, rev: d };
 }
 
+// ── Climb-aware routing ───────────────────────────────
+// Extra cost, in the same weighted-metre units as every other edge cost, for
+// each metre climbed. 0 = off (the default): routing is exactly as before.
+// `?climb=8` turns it on for testing — see docs/design/climb-aware-routing.md for
+// why 8 (1 m of climb ≈ 8 m of flat, which is Naismith's walking rule) and what
+// it bought on real Perth routes. Climb is charged uphill only; downhill is free.
+// Tiles built without elevation (other cities, live Overpass fallback) carry no
+// heights, so they route as before whatever the weight.
+var CLIMB_WEIGHT = 0;
+var CLIMB_WEIGHT_MAX = 50; // beyond this a route detours kilometres to dodge one hill
+
+function setClimbWeight(w) {
+    var n = Number(w);
+    CLIMB_WEIGHT = (isFinite(n) && n > 0) ? Math.min(n, CLIMB_WEIGHT_MAX) : 0;
+}
+
+// Cost added to an edge from a vertex at height eFrom to one at eTo (metres).
+// fwd = travelling from→to, rev = to→from. Missing heights add nothing.
+function climbCosts(eFrom, eTo) {
+    if (!CLIMB_WEIGHT || typeof eFrom !== "number" || typeof eTo !== "number") return { fwd: 0, rev: 0 };
+    var rise = eTo - eFrom;
+    if (rise > 0) return { fwd: CLIMB_WEIGHT * rise, rev: 0 };
+    if (rise < 0) return { fwd: 0, rev: CLIMB_WEIGHT * -rise };
+    return { fwd: 0, rev: 0 };
+}
+
+// Tile format: a way's heights are decimetres, first value absolute then the
+// step to each next vertex (scripts/elevation.js encodeElevations). Returns
+// metres per vertex, or null when absent or not one value per coordinate.
+function decodeElevations(deltas, n) {
+    if (!Array.isArray(deltas) || deltas.length !== n) return null;
+    var out = new Array(n), dm = 0;
+    for (var i = 0; i < n; i++) { dm += deltas[i]; out[i] = dm / 10; }
+    return out;
+}
+
 function nodeKey(lat, lon) {
     return lat.toFixed(6) + "," + lon.toFixed(6);
 }
@@ -234,6 +270,8 @@ MinHeap.prototype.size = function () { return this.data.length; };
 // wayPref, or nodePref value ever drops below what this product assumes, A*
 // starts silently returning suboptimal routes with no error. Re-derive this
 // number whenever ROAD_WEIGHT / BIKE_ROAD_WEIGHT / *PrefMultiplier change.
+// Climb cost (CLIMB_WEIGHT) is only ever added on top and is never negative, so it
+// cannot break the bound — it just makes the search a little less focused.
 var MIN_EDGE_MULTIPLIER = 0.648;
 
 // A* — Dijkstra plus a straight-line (haversine) lower bound on the cost still
@@ -420,7 +458,7 @@ function nodeAttrsFromTags(tags) {
 function compactToGeoJSON(data) {
     // Accepts either format emitted by build-tiles.js:
     //   v1 (legacy): bare Array of [id, highway, name, coords]
-    //   v2:          { v:2, features: [[id, highway, name, coords, surface?, ow?], ...], nodeAttrs: {...} }
+    //   v2:          { v:2, features: [[id, highway, name, coords, surface?, ow?, elev?], ...], nodeAttrs: {...} }
     //                (ow = bikeOnewayFromTags; when present, surface is "" if unset)
     // Returns a FeatureCollection plus an optional `nodeAttrs` sidecar (same
     // shape as osmToGeoJSON) so applyPaths can merge it into state.nodeAttrs.
@@ -442,6 +480,8 @@ function compactToGeoJSON(data) {
             surface: c[4] || "", // v2 adds surface as optional 5th element; v1 leaves it empty
         };
         if (c[5]) props.ow = c[5]; // tiles built before one-way support have no 6th element
+        var elev = decodeElevations(c[6], c[3].length); // 7th element: heights, only on tiles baked with elevation
+        if (elev) props.elev = elev;
         features.push({
             type: "Feature",
             properties: props,
@@ -728,6 +768,9 @@ if (typeof module !== "undefined" && module.exports) {
         compactToGeoJSON: compactToGeoJSON,
         bikeOnewayFromTags: bikeOnewayFromTags,
         onewayEdgeCosts: onewayEdgeCosts,
+        setClimbWeight: setClimbWeight,
+        climbCosts: climbCosts,
+        decodeElevations: decodeElevations,
         ONEWAY_PUSH_MULTIPLIER: ONEWAY_PUSH_MULTIPLIER,
         osmToGeoJSON: osmToGeoJSON,
     };

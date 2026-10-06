@@ -5,7 +5,7 @@
 // Globals consumed (defined elsewhere):
 //   routing.js — nodeKey, haversine, dijkstra, closestNode, gridInsert,
 //                resetSpatialGrid, routingProfile, compactToGeoJSON, osmToGeoJSON,
-//                poiFromOsmElement, onewayEdgeCosts
+//                poiFromOsmElement, onewayEdgeCosts, climbCosts
 //   storage.js — cacheGet, cacheSet, cachePruneStale, PATHS_TTL
 //   app.js     — state, showBanner, showBannerWithRetry, fetchWithTimeout, escapeText,
 //                track
@@ -588,6 +588,7 @@ function applyPaths(geojson, opts) {
         var hw = props.highway || "";
         // Combine base road weight + way-level preferences (P1 named trails, P5 soft surfaces).
         var baseWeight = (profile.roadWeight[hw] || profile.defaultWeight) * profile.wayPref(hw, props.surface || "", props.name || "");
+        var elev = props.elev; // metres per vertex — only on tiles baked with elevation
         for (var c = 1; c < coords.length; c++) {
             var lat1 = coords[c-1][1], lon1 = coords[c-1][0];
             var lat2 = coords[c][1], lon2 = coords[c][0];
@@ -605,8 +606,12 @@ function applyPaths(geojson, opts) {
             // OSM way order is the "forward" direction (k1 → k2). Only the
             // bike profile honours one-ways; see onewayEdgeCosts (routing.js).
             var cost = onewayEdgeCosts(profile.oneway ? props.ow : 0, d);
-            adj[k1].push({ key: k2, lat: lat2, lon: lon2, dist: cost.fwd });
-            if (cost.rev !== null) adj[k2].push({ key: k1, lat: lat1, lon: lon1, dist: cost.rev });
+            // Climb is charged on top of the way/node weights, uphill only. Both
+            // ends of a vertex get the same height from every way and tile, so a
+            // junction never disagrees with itself. No-op while CLIMB_WEIGHT is 0.
+            var climb = elev ? climbCosts(elev[c-1], elev[c]) : null;
+            adj[k1].push({ key: k2, lat: lat2, lon: lon2, dist: cost.fwd + (climb ? climb.fwd : 0) });
+            if (cost.rev !== null) adj[k2].push({ key: k1, lat: lat1, lon: lon1, dist: cost.rev + (climb ? climb.rev : 0) });
         }
     }
 
