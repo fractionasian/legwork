@@ -8,56 +8,67 @@
   {
     "id": "melbourne",
     "name": "Melbourne",
-    "bounds": [-37.95, 144.75, -37.65, 145.15]
+    "bounds": [-37.95, 144.75, -37.65, 145.15],
+    "elevation": true
   },
   {
     "id": "adelaide",
     "name": "Adelaide",
-    "bounds": [-35.05, 138.45, -34.75, 138.75]
+    "bounds": [-35.05, 138.45, -34.75, 138.75],
+    "elevation": true
   },
   {
     "id": "sydney",
     "name": "Sydney",
-    "bounds": [-33.95, 151.05, -33.75, 151.35]
+    "bounds": [-33.95, 151.05, -33.75, 151.35],
+    "elevation": true
   },
   {
     "id": "brisbane",
     "name": "Brisbane",
-    "bounds": [-27.60, 152.90, -27.35, 153.15]
+    "bounds": [-27.60, 152.90, -27.35, 153.15],
+    "elevation": true
   },
   {
     "id": "darwin",
     "name": "Darwin",
-    "bounds": [-12.50, 130.80, -12.35, 130.95]
+    "bounds": [-12.50, 130.80, -12.35, 130.95],
+    "elevation": true
   },
   {
     "id": "hobart",
     "name": "Hobart",
-    "bounds": [-42.95, 147.25, -42.80, 147.40]
+    "bounds": [-42.95, 147.25, -42.80, 147.40],
+    "elevation": true
   },
   {
     "id": "canberra",
     "name": "Canberra",
-    "bounds": [-35.40, 149.00, -35.20, 149.20]
+    "bounds": [-35.40, 149.00, -35.20, 149.20],
+    "elevation": true
   },
   {
     "id": "london",
     "name": "London",
-    "bounds": [51.40, -0.25, 51.60, 0.05]
+    "bounds": [51.40, -0.25, 51.60, 0.05],
+    "elevation": true
   },
   {
     "id": "tokyo",
     "name": "Tokyo",
-    "bounds": [35.60, 139.60, 35.80, 139.85]
+    "bounds": [35.60, 139.60, 35.80, 139.85],
+    "elevation": true
   },
   {
     "id": "singapore",
     "name": "Singapore",
-    "bounds": [1.21, 103.60, 1.47, 104.05]
+    "bounds": [1.21, 103.60, 1.47, 104.05],
+    "elevation": true
   },
   {
     "id": "seoul",
     "name": "Seoul",
-    "bounds": [37.40, 126.75, 37.70, 127.20]
+    "bounds": [37.40, 126.75, 37.70, 127.20],
+    "elevation": true
   }
 ]
