@@ -61,3 +61,15 @@ test("appendCity keeps the file valid and in its one-line-bounds style", () => {
   assert.ok(out.includes('"bounds": [-33.43, -115.75, -33.13, -115.45],'));
   assert.ok(out.endsWith("}\n]\n") || out.endsWith("}\n]"));
 });
+
+test("describeTop reports the leaders, with where their busiest cell sits", () => {
+  assert.deepEqual(S.describeTop([], [], cities), ["  none recorded"]);
+  const lines = S.describeTop(
+    [{ bucket: "-33.5,115.5", n: 14 }, { bucket: "-32.0,116.0", n: 9 }, { bucket: "-34.5,138.5", n: 2 }, { bucket: "0.0,0.0", n: 1 }],
+    [{ cell: "-33.640:115.600", hits: 9 }, { cell: "-31.950:115.860", hits: 5 }],
+    cities);
+  assert.equal(lines.length, 3, "top three only");
+  assert.equal(lines[0], "  -33.5,115.5: 14 events; busiest cell -33.64, 115.6 (outside all seeded cities)");
+  assert.equal(lines[1], "  -32.0,116.0: 9 events; busiest cell -31.95, 115.86 (inside a seeded city)");
+  assert.equal(lines[2], "  -34.5,138.5: 2 events; no pin cells recorded");
+});
