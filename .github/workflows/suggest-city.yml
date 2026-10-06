@@ -1,0 +1,67 @@
+name: Suggest next city
+
+# Weekly: read where people pin outside the seeded cities (D1 `city-unknown`
+# events) and, if one place clears the threshold, open a PR adding it to
+# data/cities.json. A human merges it; the next tile build in legwork-tiles then
+# picks it up. See scripts/suggest-city.js for the selection rules.
+#
+# Needs repo secrets CLOUDFLARE_API_TOKEN (D1 read only) and CLOUDFLARE_ACCOUNT_ID,
+# and Settings > Actions > General > "Allow GitHub Actions to create and approve
+# pull requests" switched on.
+
+on:
+  schedule:
+    - cron: '17 1 * * 1'    # Monday 01:17 UTC = 09:17 AWST
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  suggest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # One suggestion at a time: an unmerged one is still waiting on a human.
+      - name: Skip if a suggestion is already open
+        id: open
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          n=$(gh pr list --state open --json headRefName --jq '[.[] | select(.headRefName | startswith("suggest-city/"))] | length')
+          echo "open=$n" >> "$GITHUB_OUTPUT"
+
+      - name: Pick a candidate
+        if: steps.open.outputs.open == '0'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          SUMMARY_FILE: ${{ runner.temp }}/suggest-city-summary.md
+        run: node scripts/suggest-city.js
+
+      - name: Open the PR
+        if: steps.open.outputs.open == '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SUMMARY_FILE: ${{ runner.temp }}/suggest-city-summary.md
+        run: |
+          if git diff --quiet data/cities.json; then echo "No change, nothing to open."; exit 0; fi
+          id=$(node -p "const c=require('./data/cities.json'); c[c.length-1].id")
+          name=$(node -p "const c=require('./data/cities.json'); c[c.length-1].name")
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "suggest-city/$id"
+          git add data/cities.json
+          git commit -m "feat(tiles): suggest $name as the next pre-baked city"
+          git push -u origin "suggest-city/$id"
+          {
+            cat "$SUMMARY_FILE"
+            printf '\n## Before merging\n- Check the name, id and box (the box is a fixed 0.3° square around the busiest pin cell).\n- Merging adds the city; run **Build City Tiles** in legwork-tiles afterwards to publish it (about 2 minutes of build per city).\n- Closing this PR without merging means the same place is suggested again next week.\n'
+          } > "$RUNNER_TEMP/body.md"
+          gh pr create --base main --head "suggest-city/$id" --title "Suggest city: $name" --body-file "$RUNNER_TEMP/body.md"
