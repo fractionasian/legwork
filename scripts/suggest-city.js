@@ -62,6 +62,19 @@ function pickCandidate(bucketRows, demandRows, cities, minEvents = MIN_EVENTS) {
     return null;
 }
 
+// One line per leading bucket, so every weekly run shows how close the leader is to
+// the threshold even when nothing qualifies. Same rules as pickCandidate for "busiest cell".
+function describeTop(bucketRows, demandRows, cities, n = 3) {
+    if (!bucketRows.length) return ["  none recorded"];
+    return bucketRows.slice(0, n).map((row) => {
+        const cells = demandRows.filter((d) => cellInBucket(d.cell, row.bucket)).sort((a, b) => b.hits - a.hits);
+        if (!cells.length) return `  ${row.bucket}: ${row.n} events; no pin cells recorded`;
+        const [lat, lon] = cells[0].cell.split(":").map(Number);
+        const where = insideCity(cities, lat, lon) ? "inside a seeded city" : "outside all seeded cities";
+        return `  ${row.bucket}: ${row.n} events; busiest cell ${lat}, ${lon} (${where})`;
+    });
+}
+
 function slugify(name) {
     return name.normalize("NFKD").replace(/[̀-ͯ]/g, "").toLowerCase()
         .replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
@@ -111,6 +124,7 @@ async function main() {
         "WHERE name = 'city-unknown' AND ts >= ? AND bucket IS NOT NULL GROUP BY bucket ORDER BY n DESC LIMIT 20", [since]);
     const demandRows = await d1("SELECT cell, SUM(hits) AS hits FROM demand GROUP BY cell", []);
 
+    console.log(`Leading city-unknown buckets, last ${WINDOW_DAYS} days (threshold ${MIN_EVENTS} events):\n` + describeTop(bucketRows, demandRows, cities).join("\n"));
     const pick = pickCandidate(bucketRows, demandRows, cities);
     if (!pick) { console.log("No candidate: nothing outside the seeded cities cleared " + MIN_EVENTS + " events in " + WINDOW_DAYS + " days."); return; }
 
@@ -129,5 +143,5 @@ async function main() {
     console.log(summary);
 }
 
-module.exports = { bucketBox, cellInBucket, insideCity, boxAround, overlaps, pickCandidate, slugify, appendCity, MIN_EVENTS, BOX };
+module.exports = { describeTop, bucketBox, cellInBucket, insideCity, boxAround, overlaps, pickCandidate, slugify, appendCity, MIN_EVENTS, BOX };
 if (require.main === module) main().catch((e) => { console.error(e.message); process.exit(1); });
