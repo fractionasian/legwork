@@ -16,6 +16,9 @@ function loadApp(profile = "run") {
   const ctx = vm.createContext({ console: { log() {}, warn() {}, error() {} }, state: { profile } });
   vm.runInContext(read("routing.js"), ctx, { filename: "routing.js" });
   vm.runInContext(read("tiles.js"), ctx, { filename: "tiles.js" });
+  // These tests start from the plain router and turn each cost on themselves; the shipped
+  // defaults are asserted separately in climb.test.mjs.
+  vm.runInContext("setClimbWeight(0); setTurnCost(0);", ctx);
   return ctx;
 }
 const way = (id, coords, highway = "residential") => [id, highway, "", coords];
@@ -57,7 +60,7 @@ function turnsIn(app, p) {
 test("setTurnCost accepts a sane number and treats everything else as off", () => {
   const app = loadApp();
   const pen = () => app.turnPenalty(0, 90);
-  assert.equal(pen(), 0);                                   // off by default
+  assert.equal(pen(), 0);                                   // off at baseline
   app.setTurnCost("15"); assert.equal(pen(), 15);           // ?turn= arrives as a string
   app.setTurnCost(0);    assert.equal(pen(), 0);
   for (const bad of [null, undefined, "abc", NaN, -5, "-1", Infinity]) {

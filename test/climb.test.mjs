@@ -23,6 +23,9 @@ function loadApp(profile = "run") {
   });
   vm.runInContext(read("routing.js"), ctx, { filename: "routing.js" });
   vm.runInContext(read("tiles.js"), ctx, { filename: "tiles.js" });
+  // These tests start from the plain router and turn each cost on themselves; the shipped
+  // defaults are asserted separately in climb.test.mjs.
+  vm.runInContext("setClimbWeight(0); setTurnCost(0);", ctx);
   return ctx;
 }
 
@@ -69,7 +72,7 @@ function climbProbe() {
 
 test("setClimbWeight accepts a sane number and treats everything else as off", () => {
   const { app, charge } = climbProbe();
-  assert.equal(charge(), 0);                              // off by default
+  assert.equal(charge(), 0);                              // off at baseline
   app.setClimbWeight("8");  assert.equal(charge(), 80);   // the ?climb= param arrives as a string
   app.setClimbWeight(0);    assert.equal(charge(), 0);
   for (const bad of [null, undefined, "abc", NaN, -5, "-1", Infinity]) {
@@ -185,4 +188,14 @@ test("A* still returns the exact least-cost route with climb costs on (heuristic
     const ref = app.dijkstra(plain, key(...a), key(...b)); // no lat/lon on its edges → heuristic off
     assert.ok(Math.abs(star.dist - ref.dist) < 1e-6, `${a}→${b}: A* ${star.dist} vs Dijkstra ${ref.dist}`);
   }
+});
+
+test("a fresh page routes with climb 8 and turn 15 unless ?climb=0 / ?turn=0 say otherwise", () => {
+  const ctx = vm.createContext({ console: { log() {}, warn() {}, error() {} }, state: { profile: "run" } });
+  vm.runInContext(read("routing.js"), ctx, { filename: "routing.js" });
+  assert.equal(vm.runInContext("CLIMB_WEIGHT", ctx), 8);
+  assert.equal(vm.runInContext("TURN_COST", ctx), 15);
+  vm.runInContext('setClimbWeight("0"); setTurnCost("0");', ctx);   // what the URL params hand over
+  assert.equal(vm.runInContext("CLIMB_WEIGHT", ctx), 0);
+  assert.equal(vm.runInContext("TURN_COST", ctx), 0);
 });

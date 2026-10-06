@@ -1,8 +1,8 @@
 # Climb-aware routing
 
-Status: **built, off by default.** Perth tiles carry heights; the router charges
-for climbing only when the page is opened with `?climb=8`, and for turns only with
-`?turn=15`. The two are meant to be tried together: `?climb=8&turn=15`.
+Status: **built, on by default** (climb 8, turn 15; switched on 2026-10-06 after a
+phone test). Perth tiles carry heights. `?climb=0` and `?turn=0` switch either off
+for comparison; other cities have no heights yet, so climb changes nothing there.
 
 ## What it does
 
@@ -202,11 +202,10 @@ wait for Sunday's schedule):
    `turn=15` (one way: 14,101 m and 75 m with `climb=8&turn=15`; 14,017 m and 101 m today).
 4. Plan something flat (Victoria Park → CBD). It should look identical.
 
-## To turn it on for everyone
+## Defaults
 
-Change `var CLIMB_WEIGHT = 0` to `8` and `var TURN_COST = 0` to `15` in
-`routing.js`; `?climb=0` and `?turn=0` stay the off-switches. Two lines plus test
-updates.
+`CLIMB_WEIGHT = 8` and `TURN_COST = 15` in `routing.js`. `?climb=0` and `?turn=0`
+are the off-switches, handy for comparing a route with and without.
 
 ## Known gaps
 

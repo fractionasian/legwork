@@ -11,12 +11,18 @@ import path from "node:path";
 
 const require = createRequire(import.meta.url);
 const R = require("../routing.js");
+// Baseline for the comparisons below: the plain-object graph has no turn or climb model, so
+// switch both off (the shipped defaults are 8 and 15).
+R.setClimbWeight(0); R.setTurnCost(0);
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 const read = (f) => fs.readFileSync(path.join(root, f), "utf8");
 function loadApp(profile = "run") {
   const ctx = vm.createContext({ console: { log() {}, warn() {}, error() {} }, state: { profile } });
   vm.runInContext(read("routing.js"), ctx, { filename: "routing.js" });
   vm.runInContext(read("tiles.js"), ctx, { filename: "tiles.js" });
+  // These tests start from the plain router and turn each cost on themselves; the shipped
+  // defaults are asserted separately in climb.test.mjs.
+  vm.runInContext("setClimbWeight(0); setTurnCost(0);", ctx);
   return ctx;
 }
 const seeded = (seed) => () => (seed = (seed * 16807) % 2147483647) / 2147483647;

@@ -55,15 +55,15 @@ try {
     if (_savedProfile === "bike" || _savedProfile === "run") state.profile = _savedProfile;
 } catch (e) {}
 function anyPoisVisible() { return state.showToilets || state.showWater; }
-// Climb-aware routing and the turn cost are opt-in while they're tested. Open the
-// app with ?climb=8 to turn the climb weight on (0 or absent = off; what the number
-// means is in docs/design/climb-aware-routing.md). Read once here so every tile
-// applied afterwards is weighted the same.
+// Climb-aware routing and the turn cost are on by default (routing.js sets the values).
+// ?climb=N and ?turn=N override them, 0 switches one off; what the numbers mean is in
+// docs/design/climb-aware-routing.md. Read once here so every tile applied afterwards is
+// weighted the same.
 try {
     var _climbParam = new URLSearchParams(window.location.search).get("climb");
     if (_climbParam !== null) setClimbWeight(_climbParam);
     // ?turn=15 charges 15 weighted metres per turn, so routes take one long diagonal
-    // and a single corner instead of a staircase. Same rules: off unless asked for.
+    // and a single corner instead of a staircase.
     var _turnParam = new URLSearchParams(window.location.search).get("turn");
     if (_turnParam !== null) setTurnCost(_turnParam);
 } catch (e) {}
