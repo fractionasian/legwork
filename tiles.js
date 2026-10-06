@@ -5,7 +5,8 @@
 // Globals consumed (defined elsewhere):
 //   routing.js — nodeKey, haversine, dijkstra, closestNode, gridInsert,
 //                resetSpatialGrid, routingProfile, compactToGeoJSON, osmToGeoJSON,
-//                poiFromOsmElement, onewayEdgeCosts, climbCosts
+//                poiFromOsmElement, onewayEdgeCosts, climbCosts, TURN_COST, bearingDeg,
+//                reverseBearing, addTurnFields
 //   storage.js — cacheGet, cacheSet, cachePruneStale, PATHS_TTL
 //   app.js     — state, showBanner, showBannerWithRetry, fetchWithTimeout, escapeText,
 //                track
@@ -610,8 +611,16 @@ function applyPaths(geojson, opts) {
             // ends of a vertex get the same height from every way and tile, so a
             // junction never disagrees with itself. No-op while CLIMB_WEIGHT is 0.
             var climb = elev ? climbCosts(elev[c-1], elev[c]) : null;
-            adj[k1].push({ key: k2, lat: lat2, lon: lon2, dist: cost.fwd + (climb ? climb.fwd : 0) });
-            if (cost.rev !== null) adj[k2].push({ key: k1, lat: lat1, lon: lon1, dist: cost.rev + (climb ? climb.rev : 0) });
+            var eFwd = { key: k2, lat: lat2, lon: lon2, dist: cost.fwd + (climb ? climb.fwd : 0) };
+            var eRev = cost.rev !== null ? { key: k1, lat: lat1, lon: lon1, dist: cost.rev + (climb ? climb.rev : 0) } : null;
+            if (TURN_COST) {
+                // Turn-aware search needs each edge's heading (and scratch fields).
+                var bFwd = bearingDeg(lat1, lon1, lat2, lon2);
+                addTurnFields(eFwd, bFwd);
+                if (eRev) addTurnFields(eRev, reverseBearing(bFwd));
+            }
+            adj[k1].push(eFwd);
+            if (eRev) adj[k2].push(eRev);
         }
     }
 

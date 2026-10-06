@@ -189,6 +189,52 @@ function decodeElevations(deltas, n) {
     return out;
 }
 
+// ── Turn cost ─────────────────────────────────────────
+// Extra cost, in weighted metres, for each turn (a change of direction of
+// TURN_ANGLE degrees or more at a junction). 0 = off (the default). `?turn=15`
+// turns it on for testing; see docs/design/climb-aware-routing.md.
+//
+// Why it exists: between two diagonal points a street grid has hundreds of equally
+// short staircase routes and a plain shortest-path search picks one arbitrarily.
+// Climb-aware routing makes it worse (flatter corridors run along side streets: +15%
+// turns in testing). A small cost per turn prefers one long diagonal and a single
+// corner. It is deliberately a soft cost: some routes have no straight run over
+// ~100 m to offer, so a hard minimum would leave them unroutable.
+//
+// The cost depends on the way you arrived, so the search state is the directed edge
+// (not the node): about twice the states, see dijkstraTurns.
+var TURN_COST = 0;
+var TURN_COST_MAX = 100;
+var TURN_ANGLE = 35;
+
+function setTurnCost(c) {
+    var n = Number(c);
+    TURN_COST = (isFinite(n) && n > 0) ? Math.min(n, TURN_COST_MAX) : 0;
+}
+
+// Direction of travel in degrees (-180..180, 0 = north). Longitude is scaled by
+// cos(latitude) so a 45-degree street reads as 45 degrees, not ~53 at Perth's latitude.
+function bearingDeg(lat1, lon1, lat2, lon2) {
+    var k = Math.cos((lat1 + lat2) / 2 * Math.PI / 180);
+    return Math.atan2((lon2 - lon1) * k, lat2 - lat1) * 180 / Math.PI;
+}
+function reverseBearing(b) { return b > 0 ? b - 180 : b + 180; }
+
+// Cost of going from an edge heading b1 onto one heading b2.
+function turnPenalty(b1, b2) {
+    var d = Math.abs(b2 - b1);
+    if (d > 180) d = 360 - d;
+    return d >= TURN_ANGLE ? TURN_COST : 0;
+}
+
+// Per-edge fields the turn-aware search needs. Added only while TURN_COST is on, so
+// the default graph is exactly as light as before. _g/_gen/_cg/_prev are the search's
+// own scratch (stamped with a generation number so nothing is cleared between searches).
+function addTurnFields(edge, bearing) {
+    edge.b = bearing; edge._g = 0; edge._gen = 0; edge._cg = 0; edge._prev = null;
+    return edge;
+}
+
 function nodeKey(lat, lon) {
     return lat.toFixed(6) + "," + lon.toFixed(6);
 }
@@ -285,6 +331,10 @@ var MIN_EDGE_MULTIPLIER = 0.648;
 function dijkstra(graph, startKey, endKey) {
     if (!graph[startKey] || !graph[endKey]) return null;
     if (startKey === endKey) return { dist: 0, path: [startKey] };
+    if (TURN_COST) {
+        var tp = graph[startKey][0];
+        if (tp && typeof tp.b === "number") return dijkstraTurns(graph, startKey, endKey);
+    }
     // Goal coordinates come off endKey itself — graph keys ARE "lat,lon"
     // (nodeKey). Deriving them here rather than taking the caller's waypoint
     // lat/lon matters: a waypoint sits up to 200 m from its snapped node, and
@@ -337,6 +387,48 @@ function dijkstra(graph, startKey, endKey) {
     while (cur) { path.push(cur); cur = prev[cur]; }
     path.reverse();
     return { dist: dist[endKey], path: path };
+}
+
+// A* over directed edges, so each junction can charge for the angle between the way
+// you arrived and the way you leave. Same admissible heuristic as dijkstra (turn cost
+// is never negative). Returns { dist, path } like dijkstra; dist includes turn costs.
+// Edge objects carry their own scratch fields (see addTurnFields), stamped per search.
+var _turnGen = 0;
+function dijkstraTurns(graph, startKey, endKey) {
+    var gen = ++_turnGen;
+    var gParts = endKey.split(",");
+    var goalLat = parseFloat(gParts[0]), goalLon = parseFloat(gParts[1]);
+    var useH = gParts.length === 2 && !isNaN(goalLat) && !isNaN(goalLon) && nodeKey(goalLat, goalLon) === endKey;
+    var heap = new MinHeap();
+    var first = graph[startKey];
+    for (var i = 0; i < first.length; i++) {
+        var e0 = first[i];
+        e0._g = e0.dist; e0._gen = gen; e0._prev = null;
+        heap.push({ e: e0, d: e0.dist + (useH ? haversine(e0.lat, e0.lon, goalLat, goalLon) * MIN_EDGE_MULTIPLIER : 0) });
+    }
+    while (heap.size() > 0) {
+        var e = heap.pop().e;
+        if (e._cg === gen) continue;
+        e._cg = gen;
+        if (e.key === endKey) {
+            var path = [], cur = e;
+            while (cur) { path.push(cur.key); cur = cur._prev; }
+            path.push(startKey);
+            path.reverse();
+            return { dist: e._g, path: path };
+        }
+        var next = graph[e.key] || [];
+        for (var n = 0; n < next.length; n++) {
+            var e2 = next[n];
+            if (e2._cg === gen) continue;
+            var c = e._g + e2.dist + turnPenalty(e.b, e2.b);
+            if (e2._gen !== gen || c < e2._g) {
+                e2._g = c; e2._gen = gen; e2._prev = e;
+                heap.push({ e: e2, d: c + (useH ? haversine(e2.lat, e2.lon, goalLat, goalLon) * MIN_EDGE_MULTIPLIER : 0) });
+            }
+        }
+    }
+    return null;
 }
 
 // ── Spatial grid for fast nearest-node lookup ─────────
@@ -772,6 +864,8 @@ if (typeof module !== "undefined" && module.exports) {
         bikeOnewayFromTags: bikeOnewayFromTags,
         onewayEdgeCosts: onewayEdgeCosts,
         setClimbWeight: setClimbWeight,
+        setTurnCost: setTurnCost,
+        bearingDeg: bearingDeg,
         climbCosts: climbCosts,
         decodeElevations: decodeElevations,
         ONEWAY_PUSH_MULTIPLIER: ONEWAY_PUSH_MULTIPLIER,
