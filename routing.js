@@ -161,7 +161,7 @@ function onewayEdgeCosts(ow, d) {
 // downhill is free.
 // Tiles built without elevation (other cities, live Overpass fallback) carry no
 // heights, so they route as before whatever the weight.
-var CLIMB_WEIGHT = 0;
+var CLIMB_WEIGHT = 8;
 var CLIMB_WEIGHT_MAX = 50; // beyond this a route detours kilometres to dodge one hill
 
 function setClimbWeight(w) {
@@ -193,7 +193,7 @@ function decodeElevations(deltas, n) {
 //
 // The cost depends on the way you arrived, so the search state is the directed edge
 // (not the node): about twice the states, see PackedGraph.searchTurns.
-var TURN_COST = 0;
+var TURN_COST = 15;
 var TURN_COST_MAX = 100;
 var TURN_ANGLE = 35;
 
