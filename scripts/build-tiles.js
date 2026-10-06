@@ -6,6 +6,7 @@ const crypto = require("crypto");
 // Shared with the client so the baked pois.json and the live loadPois
 // fallback can never drift in shape.
 const { poiFromOsmElement, bikeOnewayFromTags } = require(path.join(__dirname, "..", "routing.js"));
+const { buildSampler, encodeElevations } = require(path.join(__dirname, "elevation.js"));
 
 const TILE_SIZE = 0.05;
 const HIGHWAYS = [
@@ -342,11 +343,14 @@ function suburbsForTile(bounds, polygons) {
         .map(([name]) => name);
 }
 
-// v2 compact format per feature: [id, highway, name, coords, surface?, ow?]
+// v2 compact format per feature: [id, highway, name, coords, surface?, ow?, elev?]
 // (surface omitted when empty to save bytes, unless ow follows it; ow is
-// bikeOnewayFromTags and omitted when the way is two-way for bikes). Decoded by
-// compactToGeoJSON in routing.js — test/tiles-grid.test.mjs round-trips the two.
-function compactFeature(f) {
+// bikeOnewayFromTags and omitted when the way is two-way for bikes; elev is one
+// height per coordinate — see encodeElevations — present only for cities built
+// with elevation, and then surface and ow are written as "" / 0 placeholders so
+// it lands in slot 7). Decoded by compactToGeoJSON in routing.js —
+// test/tiles-grid.test.mjs and test/climb.test.mjs round-trip the two.
+function compactFeature(f, sampler) {
     const base = [
         f.properties.id,
         f.properties.highway,
@@ -358,6 +362,10 @@ function compactFeature(f) {
     ];
     const surface = f.properties.surface || "";
     const ow = f.properties.ow || 0;
+    if (sampler) {
+        base.push(surface, ow, encodeElevations(base[3], sampler));
+        return base;
+    }
     if (surface || ow) base.push(surface);
     if (ow) base.push(ow);
     return base;
@@ -376,6 +384,20 @@ async function buildCity(city, dataDir, options) {
     const { rows, cols, tiles } = splitIntoTiles(featureCollection, city.bounds);
     console.log(`  Grid: ${rows}x${cols} = ${Object.keys(tiles).length} non-empty tiles`);
 
+    // Heights for climb-aware routing, for cities that opt in (data/cities.json).
+    // Soft-fail like POIs: a city that can't get elevation ships without it and the
+    // client routes it as before — a flaky Terrarium fetch must not cost the week's
+    // path refresh.
+    let sampler = null;
+    if (city.elevation) {
+        try {
+            console.log("  Fetching Terrarium elevation...");
+            sampler = await buildSampler(city.bounds);
+        } catch (e) {
+            console.log(`  Elevation failed for ${city.name} — tiles ship WITHOUT climb data: ${e.message}`);
+        }
+    }
+
     const tileDir = path.join(dataDir, "tiles", city.id);
     // Clear old tiles so a shrunk bounds doesn't leave orphaned .json files.
     if (fs.existsSync(tileDir)) fs.rmSync(tileDir, { recursive: true, force: true });
@@ -390,7 +412,7 @@ async function buildCity(city, dataDir, options) {
     const contentHash = crypto.createHash("md5");
     let geocodeGate = Promise.resolve();
     for (const [key, tile] of Object.entries(tiles)) {
-        const features = tile.features.map(compactFeature);
+        const features = tile.features.map(f => compactFeature(f, sampler));
 
         // Per-tile nodeAttrs: filter to nodes whose coords fall within this
         // tile's bounds. Keys are already nodeKey5dp strings from osmToGeoJSON.

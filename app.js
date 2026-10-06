@@ -55,6 +55,13 @@ try {
     if (_savedProfile === "bike" || _savedProfile === "run") state.profile = _savedProfile;
 } catch (e) {}
 function anyPoisVisible() { return state.showToilets || state.showWater; }
+// Climb-aware routing is opt-in while it's tested: open the app with ?climb=8 to
+// turn it on (8 = metres of flat walking one metre of climb is worth; 0 or absent
+// = off). Read once here so every tile applied afterwards is weighted the same.
+try {
+    var _climbParam = new URLSearchParams(window.location.search).get("climb");
+    if (_climbParam !== null) setClimbWeight(_climbParam);
+} catch (e) {}
 
 // ── Analytics ──────────────────────────────────────────
 // Fire-and-forget beacon to our own Worker (POST /v1/event). Never throws,
