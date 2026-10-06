@@ -3,10 +3,9 @@
 // state.graph, state.pathFeatures, state.pathLayer. resetGraphIfCityChanged
 // wipes them when the user teleports to a different city.
 // Globals consumed (defined elsewhere):
-//   routing.js — nodeKey, haversine, dijkstra, closestNode, gridInsert,
-//                resetSpatialGrid, routingProfile, compactToGeoJSON, osmToGeoJSON,
-//                poiFromOsmElement, onewayEdgeCosts, climbCosts, TURN_COST, bearingDeg,
-//                reverseBearing, addTurnFields
+//   routing.js — nodeKey, haversine, dijkstra, closestNode, routingProfile,
+//                compactToGeoJSON, osmToGeoJSON, poiFromOsmElement, onewayEdgeCosts,
+//                PackedGraph, quantise6
 //   storage.js — cacheGet, cacheSet, cachePruneStale, PATHS_TTL
 //   app.js     — state, showBanner, showBannerWithRetry, fetchWithTimeout, escapeText,
 //                track
@@ -252,13 +251,11 @@ async function resetGraphIfCityChanged(lat, lon) {
             track("city-unknown", { bucket: newId.slice("unknown:".length) });
         }
     } catch (e) { /* never let telemetry break the app */ }
-    state.graph = null;
+    state.graph = null; // the graph owns its spatial index, so this drops that too
     state.pathFeatures = null;
     state.seenIds = {};
-    state.edgeSet = {};
     state.nodeAttrs = {};
     _appliedTiles = {}; // graph is gone — tiles must re-apply on next load
-    resetSpatialGrid(); // single reset path (was a direct spatialGrid = {} reaching across files)
     if (state.pathLayer) {
         state.map.removeLayer(state.pathLayer);
         state.pathLayer = null;
@@ -537,6 +534,18 @@ var pathStyles = {
     },
 };
 
+// The routing graph, created on first use. A new graph (first tile, city change, profile
+// rebuild) is re-fed every node attribute seen so far, so they survive a rebuild.
+function ensureGraph() {
+    if (!state.graph) {
+        state.graph = new PackedGraph();
+        if (TURN_COST) state.graph.ensureBearings();
+        var ks = Object.keys(state.nodeAttrs || {});
+        for (var i = 0; i < ks.length; i++) state.graph.setAttrs(ks[i], state.nodeAttrs[ks[i]]);
+    }
+    return state.graph;
+}
+
 function applyPaths(geojson, opts) {
     if (!state.seenIds) state.seenIds = {};
     if (!state.nodeAttrs) state.nodeAttrs = {};
@@ -548,6 +557,7 @@ function applyPaths(geojson, opts) {
         var keys = Object.keys(geojson.nodeAttrs);
         for (var ni = 0; ni < keys.length; ni++) {
             state.nodeAttrs[keys[ni]] = geojson.nodeAttrs[keys[ni]];
+            if (state.graph) state.graph.setAttrs(keys[ni], geojson.nodeAttrs[keys[ni]]);
         }
     }
 
@@ -560,7 +570,7 @@ function applyPaths(geojson, opts) {
         }
     }
 
-    if (newFeatures.length === 0) return;
+    if (newFeatures.length === 0) return; // and leave state.graph unset: "graph exists" means "paths are loaded"
 
     if (!state.pathFeatures) {
         state.pathFeatures = { type: "FeatureCollection", features: newFeatures };
@@ -579,9 +589,7 @@ function applyPaths(geojson, opts) {
         state.pathLayer.addData(newGeo);
     }
 
-    if (!state.graph) state.graph = {};
-    if (!state.edgeSet) state.edgeSet = {};
-    var adj = state.graph;
+    var g = ensureGraph(); // feeds a new graph every node attribute merged above
     var profile = routingProfile(state.profile || "run");
     for (var f = 0; f < newFeatures.length; f++) {
         var props = newFeatures[f].properties;
@@ -593,38 +601,26 @@ function applyPaths(geojson, opts) {
         for (var c = 1; c < coords.length; c++) {
             var lat1 = coords[c-1][1], lon1 = coords[c-1][0];
             var lat2 = coords[c][1], lon2 = coords[c][0];
-            var k1 = nodeKey(lat1, lon1), k2 = nodeKey(lat2, lon2);
-            if (k1 === k2) continue; // two coords rounding to the same node = zero-length self-edge
-            var edgeId = k1 < k2 ? k1 + "|" + k2 : k2 + "|" + k1;
-            if (state.edgeSet[edgeId]) continue;
-            state.edgeSet[edgeId] = true;
+            var u = g.node(quantise6(lat1), quantise6(lon1)), v = g.node(quantise6(lat2), quantise6(lon2));
+            if (u === v) continue; // two coords rounding to the same node = zero-length self-edge
+            if (g.connected(u, v)) continue; // this segment is already in the graph (either direction)
             // Node-level preferences (P2 traffic signals, P3 marked crossings, P4 barriers)
             // apply to both endpoints; the worst penalty / best bonus dominates via product.
-            var nodeMult = profile.nodePref(state.nodeAttrs[k1]) * profile.nodePref(state.nodeAttrs[k2]);
+            var nodeMult = profile.nodePref(g.attrsOf(u)) * profile.nodePref(g.attrsOf(v));
             var d = haversine(lat1, lon1, lat2, lon2) * baseWeight * nodeMult;
-            if (!adj[k1]) { adj[k1] = []; gridInsert(k1, lat1, lon1); }
-            if (!adj[k2]) { adj[k2] = []; gridInsert(k2, lat2, lon2); }
-            // OSM way order is the "forward" direction (k1 → k2). Only the
+            // OSM way order is the "forward" direction (u → v). Only the
             // bike profile honours one-ways; see onewayEdgeCosts (routing.js).
             var cost = onewayEdgeCosts(profile.oneway ? props.ow : 0, d);
-            // Climb is charged on top of the way/node weights, uphill only. Both
+            // Rise in metres each way; the climb weight is applied at search time. Both
             // ends of a vertex get the same height from every way and tile, so a
-            // junction never disagrees with itself. No-op while CLIMB_WEIGHT is 0.
-            var climb = elev ? climbCosts(elev[c-1], elev[c]) : null;
-            var eFwd = { key: k2, lat: lat2, lon: lon2, dist: cost.fwd + (climb ? climb.fwd : 0) };
-            var eRev = cost.rev !== null ? { key: k1, lat: lat1, lon: lon1, dist: cost.rev + (climb ? climb.rev : 0) } : null;
-            if (TURN_COST) {
-                // Turn-aware search needs each edge's heading (and scratch fields).
-                var bFwd = bearingDeg(lat1, lon1, lat2, lon2);
-                addTurnFields(eFwd, bFwd);
-                if (eRev) addTurnFields(eRev, reverseBearing(bFwd));
-            }
-            adj[k1].push(eFwd);
-            if (eRev) adj[k2].push(eRev);
+            // junction never disagrees with itself.
+            var rise = elev ? elev[c] - elev[c-1] : 0;
+            g.addEdge(u, v, cost.fwd, rise > 0 ? rise : 0);
+            if (cost.rev !== null) g.addEdge(v, u, cost.rev, rise < 0 ? -rise : 0);
         }
     }
 
-    console.log("Graph: " + Object.keys(adj).length + " nodes (+" + newFeatures.length + " ways)");
+    console.log("Graph: " + g.nNodes + " nodes (+" + newFeatures.length + " ways)");
 }
 
 // Re-weight the existing graph against state.profile without re-fetching.
@@ -633,10 +629,8 @@ function rebuildGraphForProfile() {
     if (!state.pathFeatures) return;
     var snapshot = state.pathFeatures;
     state.graph = null;
-    state.edgeSet = null;
     state.seenIds = null;
     state.pathFeatures = null;
-    resetSpatialGrid();
     applyPaths(snapshot, { skipRender: true });
 }
 

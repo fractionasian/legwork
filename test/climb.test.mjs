@@ -56,53 +56,71 @@ test("compactToGeoJSON decodes heights; a bad or missing array is ignored", () =
   assert.equal(app.compactToGeoJSON([[1, "residential", "", [A, B]]]).features.length, 1);
 });
 
-test("setClimbWeight accepts a sane number and treats everything else as off", () => {
+// The charge on A -> B, a 10 m rise, read back through the graph's own debug view. The
+// weight is read live at search time, so one graph answers for every weight.
+function climbProbe() {
   const app = loadApp();
-  const cost = () => app.climbCosts(0, 10).fwd;
-  assert.equal(cost(), 0);                               // off by default
-  app.setClimbWeight("8");  assert.equal(cost(), 80);   // the ?climb= param arrives as a string
-  app.setClimbWeight(0);    assert.equal(cost(), 0);
+  const g = apply(app, [way(1, [A, B], [10, 20])]);
+  const ka = app.nodeKey(A[1], A[0]), kb = app.nodeKey(B[1], B[0]);
+  const dist = (from, to) => g.edgesFrom(from).find((e) => e.key === to).dist;
+  const base = dist(ka, kb);
+  return { app, charge: () => dist(ka, kb) - base, back: () => dist(kb, ka), ka, kb };
+}
+
+test("setClimbWeight accepts a sane number and treats everything else as off", () => {
+  const { app, charge } = climbProbe();
+  assert.equal(charge(), 0);                              // off by default
+  app.setClimbWeight("8");  assert.equal(charge(), 80);   // the ?climb= param arrives as a string
+  app.setClimbWeight(0);    assert.equal(charge(), 0);
   for (const bad of [null, undefined, "abc", NaN, -5, "-1", Infinity]) {
     app.setClimbWeight(8);
     app.setClimbWeight(bad);
-    assert.equal(cost(), 0, `weight ${String(bad)} should switch it off`);
+    assert.equal(charge(), 0, `weight ${String(bad)} should switch it off`);
   }
   app.setClimbWeight(1e6);
-  assert.equal(cost(), 50 * 10, "an absurd weight is capped, not obeyed");
+  assert.equal(charge(), 50 * 10, "an absurd weight is capped, not obeyed");
 });
 
-test("climbCosts charges uphill only, in the direction travelled", () => {
-  const app = loadApp();
+test("the climb is charged uphill only, in the direction travelled", () => {
+  const { app, charge, back } = climbProbe();
+  const flatBack = back();
   app.setClimbWeight(8);
-  assert.deepEqual({ ...app.climbCosts(10, 20) }, { fwd: 80, rev: 0 });  // up going forward
-  assert.deepEqual({ ...app.climbCosts(20, 10) }, { fwd: 0, rev: 80 });  // up going back
-  assert.deepEqual({ ...app.climbCosts(10, 10) }, { fwd: 0, rev: 0 });
-  assert.deepEqual({ ...app.climbCosts(undefined, 10) }, { fwd: 0, rev: 0 }); // no height, no charge
+  assert.equal(charge(), 80);                 // A -> B climbs 10 m
+  assert.equal(back(), flatBack);             // B -> A descends: free
+  // an edge with no rise charges nothing either way, at any weight
+  const dist = (weight) => {
+    const f = loadApp(); f.setClimbWeight(weight);
+    const gg = apply(f, [way(2, [A, B], [10, 10])]);
+    return gg.edgesFrom(f.nodeKey(A[1], A[0])).find((e) => e.key === f.nodeKey(B[1], B[0]));
+  };
+  assert.equal(dist(8).dist, dist(0).dist);
+  assert.equal(dist(8).up, 0);
 });
 
-test("applyPaths adds the climb to the uphill direction of each edge only", () => {
-  const edge = (g, from, to) => g[app.nodeKey(from[1], from[0])].find((e) => e.key === app.nodeKey(to[1], to[0])).dist;
+test("applyPaths stores each edge's rise and the weight adds it on the uphill direction only", () => {
+  const edge = (g, from, to) => g.edgesFrom(app.nodeKey(from[1], from[0])).find((e) => e.key === app.nodeKey(to[1], to[0]));
   // weight off: the climb is invisible
   var app = loadApp();
   let g = apply(app, [way(1, [A, B], [10, 20])]);
-  const off = edge(g, A, B);
-  assert.equal(edge(g, B, A), off, "off: both directions cost the same");
+  const off = edge(g, A, B).dist;
+  assert.equal(edge(g, B, A).dist, off, "off: both directions cost the same");
+  assert.ok(Math.abs(edge(g, A, B).up - 10) < 1e-9 && edge(g, B, A).up === 0, "rise is recorded one way only");
   // weight on: A→B climbs 10 m, B→A descends
   app = loadApp();
   app.setClimbWeight(8);
   g = apply(app, [way(1, [A, B], [10, 20])]);
-  assert.ok(Math.abs(edge(g, A, B) - (off + 80)) < 1e-9, "uphill pays 8 per metre");
-  assert.ok(Math.abs(edge(g, B, A) - off) < 1e-9, "downhill is free");
+  assert.ok(Math.abs(edge(g, A, B).dist - (off + 80)) < 1e-9, "uphill pays 8 per metre");
+  assert.ok(Math.abs(edge(g, B, A).dist - off) < 1e-9, "downhill is free");
 });
 
 test("with no heights in the tile, the weight changes nothing", () => {
-  const costs = (weight) => {
+  const dist = (weight) => {
     const app = loadApp();
     app.setClimbWeight(weight);
-    const g = apply(app, [way(1, [A, M, B])]);
-    return JSON.stringify(Object.values(g).map((es) => es.map((e) => e.dist)));
+    apply(app, [way(1, [A, M, B])]);
+    return app.dijkstra(app.state.graph, app.nodeKey(A[1], A[0]), app.nodeKey(B[1], B[0])).dist;
   };
-  assert.equal(costs(8), costs(0));
+  assert.equal(dist(8), dist(0));
 });
 
 // A ── hump (+30 m) ── B is the direct street. A → C → B is ~70 m longer but flat.
@@ -142,8 +160,9 @@ test("rebuilding the graph for the other profile keeps the climb charge", () => 
 });
 
 test("A* still returns the exact least-cost route with climb costs on (heuristic stays admissible)", () => {
-  // 6x6 street grid with lumpy heights. Compare dijkstra() — A*, because the graph
-  // keys are coordinates — against plain Dijkstra over the same edge costs.
+  // 6x6 street grid with lumpy heights. Compare dijkstra() — A*, on the packed graph —
+  // against plain Dijkstra over the same edge costs, run on an object graph with no
+  // coordinates (so its heuristic is off).
   const app = loadApp();
   app.setClimbWeight(25);
   const N = 6, step = 0.001;
@@ -158,7 +177,8 @@ test("A* still returns the exact least-cost route with climb costs on (heuristic
     if (i + 1 < N) ways.push(way(id++, [pt(i, j), pt(i + 1, j)], [h[i][j], h[i + 1][j]]));
   }
   const graph = apply(app, ways);
-  const plain = Object.fromEntries(Object.entries(graph).map(([k, es]) => [k, es.map((e) => ({ key: e.key, dist: e.dist }))]));
+  const plain = {};
+  for (const k of graph.nodeKeys()) plain[k] = graph.edgesFrom(k).map((e) => ({ key: e.key, dist: e.dist }));
   const key = (i, j) => app.nodeKey(pt(i, j)[1], pt(i, j)[0]);
   for (const [a, b] of [[[0, 0], [5, 5]], [[5, 0], [0, 5]], [[2, 3], [4, 1]], [[0, 5], [5, 0]]]) {
     const star = app.dijkstra(graph, key(...a), key(...b));
