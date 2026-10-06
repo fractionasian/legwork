@@ -294,6 +294,14 @@ body {
     border-bottom: 1px solid #2a2d3a;
 }
 
+.mark {
+    /* the Legwork L, drawn inline wherever the name appears; sized to the text it sits in */
+    width: 1.05em;
+    height: 1.15em;
+    vertical-align: -0.2em;
+    margin-right: 0.15em;
+}
+
 .menu-header .app-title {
     font-size: 16px;
     font-weight: 700;
