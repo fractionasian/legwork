@@ -9,6 +9,8 @@ import { snap } from "./lib.js";
 
 export const EVENT_NAMES = new Set([
   "pin-drop", "route-built", "route-export", "route-save", "route-share",
+  // Reverse presses answer "is the toolbar button earning its space".
+  "route-reverse",
   // Moved off Umami Cloud, which was the last third-party script in the app.
   // These two answer "which city do we pre-bake next": city-resolved when the
   // user lands inside a catalogued city, city-unknown with a coarse 0.5-degree
@@ -24,6 +26,8 @@ const BUCKET_RE = /^-?\d{1,3}\.\d,-?\d{1,3}\.\d$/;
 const KM_BUCKETS = ["0-5", "5-10", "10-20", "20+"];
 const MODES = new Set(["loop", "outback", "oneway"]);
 const PROFILES = new Set(["run", "bike"]);
+// Which base layer the map was showing. Enum, so no new identifier is possible.
+const BASEMAPS = new Set(["street", "satellite", "terrain"]);
 
 // City slug for `route-built`, e.g. "perth" — or the sentinel "uncovered" when
 // the route is outside every catalogue city.
@@ -75,12 +79,15 @@ const PROP_SCHEMA = {
     km_bucket: { test: (v) => KM_BUCKETS.includes(v) },
     mode: { test: (v) => MODES.has(v) },
     profile: { test: (v) => PROFILES.has(v) },
+    // Soft: an older client never sends it, and a bad value must not cost the event.
+    basemap: { test: (v) => BASEMAPS.has(v), soft: true },
     city: { test: isCitySlug, soft: true },
     suburb: { test: isSuburbName, soft: true },
   },
   "route-export": {},
   "route-save": {},
   "route-share": {},
+  "route-reverse": {},
 };
 
 // Distance -> coarse bucket. Defensive by design: this runs on client-supplied

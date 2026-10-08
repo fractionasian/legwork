@@ -173,6 +173,7 @@ function trackRouteBuiltDebounced() {
             km_bucket: kmBucketClient(state.totalDistMetres),
             mode: state.mode,
             profile: state.profile,
+            basemap: state.basemap,
         };
         // Omitted rather than sent empty when unknown — "prop absent" and
         // "uncovered" mean different things and must stay distinguishable.
@@ -232,9 +233,12 @@ function initMap() {
     var basemaps = { "Street": osm, "Satellite": satellite, "Terrain": terrain };
     var savedBasemap = null;
     try { savedBasemap = localStorage.getItem("lw:basemap"); } catch (e) { /* blocked storage */ }
-    (basemaps[savedBasemap] || osm).addTo(state.map);
+    if (!Object.prototype.hasOwnProperty.call(basemaps, savedBasemap)) savedBasemap = "Street";
+    basemaps[savedBasemap].addTo(state.map);
+    state.basemap = savedBasemap.toLowerCase(); // the analytics enum: street | satellite | terrain
     L.control.layers(basemaps, null, { position: "topright" }).addTo(state.map);
     state.map.on("baselayerchange", function (ev) {
+        state.basemap = ev.name.toLowerCase();
         try { localStorage.setItem("lw:basemap", ev.name); } catch (e) { /* blocked storage */ }
     });
 
@@ -2120,6 +2124,7 @@ document.getElementById("reverse-btn").addEventListener("click", function () {
     state.waypoints.reverse();
     for (var i = 0; i < state.waypoints.length; i++) updateMarkerNumber(state.waypoints[i], i + 1);
     updateRoute();
+    track("route-reverse", {});
     showBanner("Route reversed", "hint");
     setTimeout(function () {
         var el = document.getElementById("info-banner");

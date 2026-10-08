@@ -727,6 +727,20 @@ button.menu-item:disabled {
     line-height: 1.5;
 }
 
+/* "What Legwork counts" — a closed <details> in the side menu. */
+.menu-privacy summary {
+    list-style: none;
+    cursor: pointer;
+}
+.menu-privacy summary::-webkit-details-marker { display: none; }
+.menu-privacy p {
+    margin: 0;
+    padding: 0 18px 10px;
+    font-size: 12px;
+    color: #8a8d9a;
+    line-height: 1.5;
+}
+
 /* ── Tip nudge toast (post-export delight moment) ── */
 .tip-toast {
     position: fixed;
