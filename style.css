@@ -1013,6 +1013,27 @@ button.menu-item:disabled {
     right: 0;
     z-index: 800;
     pointer-events: none;
+    /* The chart body is always laid out at full size and the panel slides it
+       in and out with a transform, so the chart is never resized mid-motion
+       (a display:none -> block swap made Chart.js resize into place, which
+       read as the graph stretching in from the side). --elev-body-h is the
+       body's height; sliding the panel down by exactly that leaves only the
+       stats bar showing. */
+    --elev-body-h: 140px;
+    transition: transform 280ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+@media (min-height: 700px) { .elevation-panel { --elev-body-h: 170px; } }
+@media (min-height: 900px) { .elevation-panel { --elev-body-h: 210px; } }
+
+/* Down = stats bar only. "collapsed" is the user's choice (remembered);
+   "no-route" is automatic — nothing to plot yet — and never overrides it. */
+.elevation-panel.collapsed,
+.elevation-panel.no-route {
+    transform: translateY(var(--elev-body-h));
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .elevation-panel, .elevation-stats { transition: none; }
 }
 
 .elevation-panel > * {
@@ -1020,7 +1041,8 @@ button.menu-item:disabled {
 }
 
 .elevation-stats {
-    display: none;
+    display: flex;
+    transition: padding-bottom 280ms cubic-bezier(0.2, 0.8, 0.2, 1);
     align-items: center;
     justify-content: space-between;
     gap: 12px;
@@ -1073,24 +1095,33 @@ button.menu-item:disabled {
     inset: -10px -8px -10px -8px;
 }
 
-.elevation-toggle:hover {
+.elevation-toggle:disabled {
+    opacity: 0.4;
+    cursor: default;
+}
+
+.elevation-toggle:hover:not(:disabled) {
     background: #2f3342;
     border-color: #3a3e4d;
     color: #ffffff;
 }
 
 #elevation-container {
-    /* Height is the chart's drawable area; extra padding-bottom stretches the
-       panel background down across the safe-area without squeezing the chart. */
-    height: 140px;
+    /* Total height of the body, safe-area padding included (border-box), so
+       it equals --elev-body-h and the panel's slide lands exactly. */
+    height: var(--elev-body-h);
     background: rgba(26, 29, 40, 0.92);
     backdrop-filter: blur(8px);
     padding: 2px 10px calc(6px + env(safe-area-inset-bottom, 0px));
-    display: none;
+    visibility: visible;
 }
 
-.elevation-panel.collapsed #elevation-container {
-    display: none !important;
+/* Hidden once the slide has finished, so the off-screen chart can't be
+   focused or tapped; shown at the start of the slide up. */
+.elevation-panel.collapsed #elevation-container,
+.elevation-panel.no-route #elevation-container {
+    visibility: hidden;
+    transition: visibility 0s linear 280ms;
 }
 
 /* When collapsed, the stats strip is the last visible child — extend its
@@ -1104,13 +1135,6 @@ button.menu-item:disabled {
     height: 100%;
 }
 
-/* Larger elevation on taller screens */
-@media (min-height: 700px) {
-    #elevation-container { height: 170px; }
-}
-@media (min-height: 900px) {
-    #elevation-container { height: 210px; }
-}
 
 /* ── Info banner ──────────────────────────────────── */
 /* Overlay across the top of the map area (not in document flow — an in-flow
