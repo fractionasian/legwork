@@ -7,7 +7,13 @@ var CACHE_NAME = "legwork-dbfee16b";
 // it can't grow without bound (the previous single shared cache did both jobs and
 // was wiped on every push).
 var TILE_CACHE = "legwork-tiles-v1";
-var TILE_CACHE_LIMIT = 1000;
+// ponytail: 3000 ≈ 50 MB of OSM PNGs; raise if users report home tiles evicting.
+var TILE_CACHE_LIMIT = 3000;
+// A cached tile is served as-is until it is this old, then refetched. Without
+// the age check the old stale-while-revalidate refetched EVERY tile on EVERY
+// view. Path tiles carry ?v=<version> and elevation tiles never change, so
+// this only ever matters for the OSM street layer.
+var TILE_MAX_AGE_MS = 14 * 24 * 3600 * 1000;
 
 var SHELL_FILES = [
     "./", "./index.html", "./app.js", "./routing.js", "./storage.js",
@@ -128,12 +134,17 @@ self.addEventListener("fetch", function (e) {
     // tile files themselves carry ?v=<version> and stay stale-first below.
     var isManifest = url.indexOf("fractionasian.github.io/legwork-tiles/manifest.json") !== -1;
 
-    // Map/path tiles: stale-while-revalidate from the stable, capped tile cache.
+    // Map/path tiles: cache-first from the stable, capped tile cache. A hit
+    // younger than TILE_MAX_AGE_MS is served with no network request at all;
+    // an older hit is served instantly and refreshed in the background.
     var isTile = !isManifest && TILE_PATTERNS.some(function (p) { return url.indexOf(p) !== -1; });
     if (isTile) {
         e.respondWith(
             caches.open(TILE_CACHE).then(function (cache) {
                 return cache.match(e.request).then(function (cached) {
+                    var dateHdr = cached && cached.headers.get("date");
+                    var age = dateHdr ? Date.now() - new Date(dateHdr).getTime() : Infinity;
+                    if (cached && age < TILE_MAX_AGE_MS) return cached;
                     var fetchPromise = fetch(e.request).then(function (resp) {
                         if (resp && resp.ok) {
                             cache.put(e.request, resp.clone()).then(function () {
