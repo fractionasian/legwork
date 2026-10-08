@@ -2,19 +2,11 @@
 // It versions the APP SHELL cache only — bumping it evicts stale HTML/JS/CSS.
 var CACHE_NAME = "legwork-11c27161";
 
-// Map/path tiles live in a SEPARATE, stable cache that survives shell bumps, so a
-// code push doesn't throw away the user's accumulated offline map data. Capped so
-// it can't grow without bound (the previous single shared cache did both jobs and
-// was wiped on every push).
-var TILE_CACHE = "legwork-tiles-v1";
-// ponytail: 3000 ≈ 50 MB of OSM PNGs; raise if users report home tiles evicting.
-var TILE_CACHE_LIMIT = 3000;
-// A cached tile is served as-is until it is this old, then refetched. Without
-// the age check the old stale-while-revalidate refetched EVERY tile on EVERY
-// view. Path tiles carry ?v=<version> and elevation tiles never change, so
-// this only ever matters for the OSM street layer.
-var TILE_MAX_AGE_MS = 14 * 24 * 3600 * 1000;
-
+// Map/path tiles live in SEPARATE, stable caches that survive shell bumps, so a
+// code push doesn't throw away the user's accumulated offline map data. One
+// cache per source with its own cap, so terrain's bigger images or a city's
+// path files can't push the street tiles out. Oldest tiles drop first.
+var TILE_CACHE_PREFIX = "legwork-tiles-v2-";
 var SHELL_FILES = [
     "./", "./index.html", "./app.js", "./routing.js", "./storage.js",
     "./tiles.js", "./suburbs.js", "./style.css", "./welcome-init.js",
@@ -29,16 +21,35 @@ var CDN_LIBS = [
 // "./" matched essentially every request and mis-routed cache strategy.)
 var SHELL_URLS = SHELL_FILES.map(function (f) { return new URL(f, self.location).href; }).concat(CDN_LIBS);
 
-// Tile hosts served stale-while-revalidate, including our own pre-baked tile repo
-// (legwork-tiles) — without this entry our vector tiles fell through to the
+// Tile hosts, each with its own cache and cap. Includes our own pre-baked tile
+// repo (legwork-tiles) — without it our vector tiles fell through to the
 // network-first API branch instead of being offline-first.
-var TILE_PATTERNS = [
-    "tile.openstreetmap.org",
-    "server.arcgisonline.com",
-    "tile.opentopomap.org",
-    "s3.amazonaws.com/elevation-tiles-prod",
-    "fractionasian.github.io/legwork-tiles",
+// ponytail: caps are guesses from one sample tile each (street ~7 KB, satellite
+// ~18 KB, terrain ~50 KB); measure real usage and tune.
+var TILE_SOURCES = [
+    { host: "tile.openstreetmap.org", name: "street", limit: 3000 },
+    { host: "server.arcgisonline.com", name: "satellite", limit: 1500 },
+    { host: "tile.opentopomap.org", name: "terrain", limit: 800 },
+    { host: "s3.amazonaws.com/elevation-tiles-prod", name: "elevation", limit: 600 },
+    { host: "fractionasian.github.io/legwork-tiles", name: "paths", limit: 500 },
 ];
+// A tile with no usable Cache-Control is treated as fresh this long (OSM's
+// tile policy: if you can't read the headers, keep a tile at least 7 days).
+var TILE_DEFAULT_FRESH_S = 7 * 24 * 3600;
+
+// The server's own freshness rules for a cached tile, per OSM's tile policy
+// ("honour server caching headers"). Fresh = no request at all. Stale but
+// inside stale-while-revalidate = serve it and refresh behind. Older = fetch.
+function tileFreshness(resp) {
+    var cc = resp.headers.get("cache-control") || "";
+    var maxAge = /max-age=(\d+)/.exec(cc);
+    var swr = /stale-while-revalidate=(\d+)/.exec(cc);
+    var fresh = maxAge ? +maxAge[1] : TILE_DEFAULT_FRESH_S;
+    var dateHdr = resp.headers.get("date");
+    var age = dateHdr ? (Date.now() - new Date(dateHdr).getTime()) / 1000 : Infinity;
+    if (!(age >= 0)) age = Infinity;
+    return { fresh: age < fresh, usable: age < fresh + (swr ? +swr[1] : 0) };
+}
 
 self.addEventListener("install", function (e) {
     // Local shell files are the must-have — addAll is atomic, so keep it for
@@ -66,7 +77,7 @@ self.addEventListener("activate", function (e) {
     e.waitUntil(
         caches.keys().then(function (names) {
             return Promise.all(
-                names.filter(function (n) { return n !== CACHE_NAME && n !== TILE_CACHE; })
+                names.filter(function (n) { return n !== CACHE_NAME && n.indexOf(TILE_CACHE_PREFIX) !== 0; })
                      .map(function (n) { return caches.delete(n); })
             );
         }).then(function () { return self.clients.claim(); })
@@ -134,26 +145,26 @@ self.addEventListener("fetch", function (e) {
     // tile files themselves carry ?v=<version> and stay stale-first below.
     var isManifest = url.indexOf("fractionasian.github.io/legwork-tiles/manifest.json") !== -1;
 
-    // Map/path tiles: cache-first from the stable, capped tile cache. A hit
-    // younger than TILE_MAX_AGE_MS is served with no network request at all;
-    // an older hit is served instantly and refreshed in the background.
-    var isTile = !isManifest && TILE_PATTERNS.some(function (p) { return url.indexOf(p) !== -1; });
-    if (isTile) {
+    // Map/path tiles, from the stable per-source tile caches: fresh hit = no
+    // network request; stale hit inside the server's stale-while-revalidate
+    // window = served instantly and refreshed behind; anything older = fetched.
+    var source = isManifest ? null : TILE_SOURCES.filter(function (t) { return url.indexOf(t.host) !== -1; })[0];
+    if (source) {
+        var cacheName = TILE_CACHE_PREFIX + source.name;
         e.respondWith(
-            caches.open(TILE_CACHE).then(function (cache) {
+            caches.open(cacheName).then(function (cache) {
                 return cache.match(e.request).then(function (cached) {
-                    var dateHdr = cached && cached.headers.get("date");
-                    var age = dateHdr ? Date.now() - new Date(dateHdr).getTime() : Infinity;
-                    if (cached && age < TILE_MAX_AGE_MS) return cached;
+                    var f = cached && tileFreshness(cached);
+                    if (f && f.fresh) return cached;
                     var fetchPromise = fetch(e.request).then(function (resp) {
                         if (resp && resp.ok) {
                             cache.put(e.request, resp.clone()).then(function () {
-                                trimCache(TILE_CACHE, TILE_CACHE_LIMIT);
+                                trimCache(cacheName, source.limit);
                             });
                         }
                         return resp;
                     }).catch(function () { return cached; });
-                    return cached || fetchPromise;
+                    return f && f.usable ? cached : fetchPromise;
                 });
             })
         );
