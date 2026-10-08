@@ -1106,8 +1106,12 @@ button.menu-item:disabled {
 .info-banner {
     position: absolute;
     top: 0;
-    left: 0;
-    right: 0;
+    /* Inset past Leaflet's corner controls (zoom top-left, layer switcher
+       top-right: up to 48px wide + 10px margin each). Full-width, it sat above them
+       (z-index 1100 > their 1000) and covered both for as long as it showed. */
+    left: 64px;
+    right: 64px;
+    border-radius: 0 0 10px 10px;
     z-index: 1100;
     padding: 8px 16px;
     text-align: center;
