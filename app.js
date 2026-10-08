@@ -938,7 +938,7 @@ function removeWaypoint(idx) {
     updateRoute();
     // Awareness for accidental taps mid-pan (tap-to-delete is deliberate — no
     // undo — but the deletion shouldn't be silent). Below 2 waypoints the
-    // emptied map + the updateRoute nudge already make it obvious.
+    // emptied map already makes it obvious.
     if (state.waypoints.length >= 2) {
         showBanner("Waypoint " + (idx + 1) + " removed", "hint");
         setTimeout(function () {
@@ -1046,20 +1046,8 @@ async function updateRoute() {
         // Route gone (Clear, or deleted down to one pin) — the corridor filter
         // has nothing to narrow to, so let the area view come back.
         if (anyPoisVisible()) debouncedRefreshPois();
-        // First-run nudge: one marker on the map, no route yet. Only show if no
-        // louder banner is up (loading / error), and clear when we dismiss later.
-        var bannerEl = document.getElementById("info-banner");
-        if (state.waypoints.length === 1 && (!bannerEl.dataset.type || bannerEl.dataset.type === "hint")) {
-            showBanner("Tap the map to add a destination", "hint");
-        } else if (bannerEl.dataset.type === "hint") {
-            showBanner("");
-        }
         return;
     }
-
-    // Clear the single-waypoint hint once the user has added a second point.
-    var hintBanner = document.getElementById("info-banner");
-    if (hintBanner.dataset.type === "hint") showBanner("");
 
     var allRouteCoords = [];
     // Geometry for the route casing — successful legs only. A solid casing
