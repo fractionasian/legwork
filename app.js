@@ -1616,18 +1616,23 @@ function colourRouteByGradient(elevData, routeCoords) {
 }
 
 function updateElevation(elevData) {
-    var container = document.getElementById("elevation-container");
-    var statsEl = document.getElementById("elevation-stats");
+    var panel = document.getElementById("elevation-panel");
+    var toggle = document.getElementById("elevation-toggle");
     hideElevationScrub(); // route data is changing under the scrub dot
     if (elevData.length < 2) {
+        // The stats bar stays; the chart slides away and the numbers go back
+        // to their placeholders.
         state.scrubData = null;
-        container.style.display = "none";
-        statsEl.style.display = "none";
+        panel.classList.add("no-route");
+        toggle.disabled = true;
+        ["stat-ascent", "stat-descent", "stat-gradient"].forEach(function (id) {
+            document.getElementById(id).textContent = "\u2014";
+        });
         return;
     }
 
-    container.style.display = "block";
-    statsEl.style.display = "flex";
+    panel.classList.remove("no-route");
+    toggle.disabled = false;
 
     var distances = [0];
     for (var i = 1; i < elevData.length; i++) {
@@ -1725,6 +1730,9 @@ function updateElevation(elevData) {
         },
         options: {
             responsive: true, maintainAspectRatio: false,
+            // The panel's slide is the only motion; the line must not also
+            // draw itself in.
+            animation: false,
             plugins: { legend: { display: false } },
             scales: {
                 x: {
@@ -2335,8 +2343,6 @@ function applyElevationCollapsed() {
     toggle.setAttribute("aria-label", elevationCollapsed ? "Expand elevation chart" : "Collapse elevation chart");
     // Chevron points down when expanded (▾), up when collapsed (▴).
     toggle.textContent = elevationCollapsed ? "▴" : "▾";
-    // Chart.js needs a redraw when its container changes size.
-    if (state.elevationChart) state.elevationChart.resize();
 }
 var elevToggle = document.getElementById("elevation-toggle");
 if (elevToggle) elevToggle.addEventListener("click", function () {
