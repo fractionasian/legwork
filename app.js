@@ -217,15 +217,26 @@ function initMap() {
         attribution: '&copy; Esri',
         maxZoom: 19,
         className: "basemap-satellite",
+        // Esri sends Access-Control-Allow-Origin: * (checked 2026-10-08), so the
+        // service worker gets a readable response it can cache. Same for terrain.
+        crossOrigin: true,
     });
     var terrain = L.tileLayer("https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png", {
         attribution: '&copy; OpenTopoMap',
         maxZoom: 17,
         className: "basemap-terrain",
+        crossOrigin: true,
     });
 
-    osm.addTo(state.map);
-    L.control.layers({ "Street": osm, "Satellite": satellite, "Terrain": terrain }, null, { position: "topright" }).addTo(state.map);
+    // Reopen on the layer the user last chose.
+    var basemaps = { "Street": osm, "Satellite": satellite, "Terrain": terrain };
+    var savedBasemap = null;
+    try { savedBasemap = localStorage.getItem("lw:basemap"); } catch (e) { /* blocked storage */ }
+    (basemaps[savedBasemap] || osm).addTo(state.map);
+    L.control.layers(basemaps, null, { position: "topright" }).addTo(state.map);
+    state.map.on("baselayerchange", function (ev) {
+        try { localStorage.setItem("lw:basemap", ev.name); } catch (e) { /* blocked storage */ }
+    });
 
     state.map.on("click", onMapClick);
 
