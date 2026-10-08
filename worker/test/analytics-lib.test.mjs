@@ -38,8 +38,9 @@ test("EVENT_NAMES is the closed allowlist", () => {
   assert.deepEqual(
     [...EVENT_NAMES].sort(),
     // city-resolved / city-unknown joined when those two moved off Umami Cloud.
+    // route-reverse measures whether the toolbar's reverse button is used.
     ["city-resolved", "city-unknown", "pin-drop", "route-built", "route-export",
-     "route-save", "route-share"],
+     "route-reverse", "route-save", "route-share"],
   );
 });
 
@@ -191,4 +192,22 @@ test("city event props are soft — a bad value drops the prop, never the event"
     assert.equal(u.ok, true, bad);
     assert.deepEqual(u.props, {}, "should have dropped: " + bad);
   }
+});
+
+test("route-reverse is a known event and carries no props", () => {
+  assert.ok(EVENT_NAMES.has("route-reverse"));
+  const r = validateEvent({ name: "route-reverse", props: { anything: "x" } });
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.props, {});
+});
+
+test("route-built basemap is an enum and soft", () => {
+  const base = { km_bucket: "5-10", mode: "loop", profile: "run" };
+  assert.equal(validateEvent({ name: "route-built", props: { ...base, basemap: "satellite" } }).props.basemap, "satellite");
+  // A bad value drops the prop, never the event.
+  const bad = validateEvent({ name: "route-built", props: { ...base, basemap: "<script>" } });
+  assert.equal(bad.ok, true);
+  assert.equal("basemap" in bad.props, false);
+  // An older client that never sends it still passes.
+  assert.equal(validateEvent({ name: "route-built", props: base }).ok, true);
 });
