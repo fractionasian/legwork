@@ -299,6 +299,7 @@ function numberedMarkerIcon(num, markerState) {
     var overlay = "";
     if (markerState === "pending") overlay = '<div class="wp-spinner"></div>';
     else if (markerState === "failed") overlay = '<div class="wp-retry">↻</div>';
+    else if (markerState === "failed-geo") overlay = '<div class="wp-retry">✕</div>';
     return L.divIcon({
         html: '<div class="wp-marker' + stateClass + '">' + safeNum + overlay + '</div>',
         className: "",
@@ -316,9 +317,13 @@ function createNumberedMarker(lat, lon, num, markerState) {
 // "ready", erasing the spinner/retry affordance on a still-pending/failed
 // waypoint whenever a sibling was removed, reversed, or midpoint-inserted.
 function updateMarkerNumber(wp, num) {
-    var markerState = wp.pending ? "pending" : wp.failed ? "failed" : null;
+    var markerState = wp.pending ? "pending" : wp.failed ? failedMarkerState(wp) : null;
     wp.marker.setIcon(numberedMarkerIcon(num, markerState));
 }
+
+// A pin with no path nearby is removed by tapping it; retrying would fail the
+// same way. A pin that failed to LOAD paths is retried instead.
+function failedMarkerState(wp) { return wp.failReason === "geo" ? "failed-geo" : "failed"; }
 
 function setMarkerState(marker, num, markerState) {
     marker.setIcon(numberedMarkerIcon(num, markerState));
@@ -720,7 +725,7 @@ function wireMarkerEvents(marker) {
         for (var w = 0; w < state.waypoints.length; w++) { if (state.waypoints[w].marker === marker) { idx = w; break; } }
         if (idx < 0) return;
         var wp = state.waypoints[idx];
-        if (wp.failed) {
+        if (wp.failed && wp.failReason !== "geo") {
             retryFailedWaypoint(wp);
         } else {
             removeWaypoint(idx);
@@ -771,6 +776,7 @@ function wireMarkerEvents(marker) {
             if (wp.pending || wp.failed) {
                 wp.pending = false;
                 wp.failed = false;
+                wp.failReason = null;
                 updateMarkerNumber(wp, state.waypoints.indexOf(wp) + 1);
             }
         } else {
@@ -906,8 +912,29 @@ function markWaypointFailed(wp, reason) {
     if (idx < 0) return;
     wp.pending = false;
     wp.failed = true;
-    setMarkerState(wp.marker, idx + 1, "failed");
-    showBanner(reason || "Could not load paths — tap pin to retry");
+    // `reason` is only set for a geographic failure (see failedReason).
+    wp.failReason = reason ? "geo" : "net";
+    setMarkerState(wp.marker, idx + 1, failedMarkerState(wp));
+    showBanner(failedPinMessage());
+}
+
+// A failed pin is skipped by the route, so the route can look fine while the
+// pin the user dropped is being ignored. This message is what says so, and it
+// stays up for as long as any pin is failed.
+function failedPinMessage() {
+    for (var i = 0; i < state.waypoints.length; i++) {
+        var w = state.waypoints[i];
+        if (!w.failed) continue;
+        return w.failReason === "geo"
+            ? "Pin " + (i + 1) + " isn't on a path. Drag it onto a road, or tap it to remove."
+            : "Could not load paths. Tap pin " + (i + 1) + " to retry.";
+    }
+    return "";
+}
+
+// The pins the route is actually built from: failed pins are skipped.
+function liveWaypoints() {
+    return state.waypoints.filter(function (w) { return !w.failed; });
 }
 
 async function retryFailedWaypoint(wp) {
@@ -916,6 +943,7 @@ async function retryFailedWaypoint(wp) {
     if (idx < 0) return;
 
     wp.failed = false;
+    wp.failReason = null;
     wp.pending = true;
     setMarkerState(wp.marker, idx + 1, "pending");
     var rid = wp.resolveId = (wp.resolveId || 0) + 1;
@@ -1046,11 +1074,16 @@ async function updateRoute() {
     // refills it.
     state.lastElevationData = [];
     clearRouteLayers(true); // keep waypoints; we're redrawing the geometry between them
-    document.getElementById("distance-pill").disabled = state.waypoints.length < 2;
+    var live = liveWaypoints(); // failed pins are skipped by the route
+    document.getElementById("distance-pill").disabled = live.length < 2;
 
-    if (state.waypoints.length < 2) {
+    if (live.length < 2) {
         updateDistance();
         updateElevation([]);
+        // Keep the failed-pin message up (but never over a loading/hint banner).
+        var emptyBanner = document.getElementById("info-banner");
+        var failMsg = failedPinMessage();
+        if (failMsg && !emptyBanner.dataset.type) showBanner(failMsg);
         // Keep the share hash and autosave in sync even below 2 waypoints —
         // otherwise Clear (or deleting down to 1) leaves the old route in the
         // URL and in autosave, and it resurrects on the next reload. Safe at
@@ -1073,8 +1106,8 @@ async function updateRoute() {
     var routeOk = true;
 
     // Draw each leg between consecutive waypoints.
-    for (var i = 1; i < state.waypoints.length; i++) {
-        var fromWp = state.waypoints[i-1], toWp = state.waypoints[i];
+    for (var i = 1; i < live.length; i++) {
+        var fromWp = live[i-1], toWp = live[i];
         var seg = await resolveSegment(fromWp, toWp, gen);
         if (seg.superseded) return;
         var result = seg.result;
@@ -1096,8 +1129,8 @@ async function updateRoute() {
     }
 
     // Loop mode: close the loop from last waypoint back to the first.
-    if (state.mode === "loop" && state.waypoints.length >= 2) {
-        var lastWp = state.waypoints[state.waypoints.length-1], firstWp = state.waypoints[0];
+    if (state.mode === "loop" && live.length >= 2) {
+        var lastWp = live[live.length-1], firstWp = live[0];
         var closeSeg = await resolveSegment(lastWp, firstWp, gen);
         if (closeSeg.superseded) return;
         var closeResult = closeSeg.result;
@@ -1309,16 +1342,19 @@ function debouncedRefreshPois() {
 // ── Midpoint markers (drag to insert waypoint) ─────────
 function addMidpointMarkers() {
     clearLayerArray("midpointMarkers");
-    if (state.waypoints.length < 2) return;
+    // Failed pins aren't part of the route, so the route's legs (and
+    // routeSegments) are indexed by the live pins, not by state.waypoints.
+    var live = liveWaypoints();
+    if (live.length < 2) return;
 
     // Add midpoint between each consecutive pair
     var pairs = [];
-    for (var i = 0; i < state.waypoints.length - 1; i++) {
+    for (var i = 0; i < live.length - 1; i++) {
         pairs.push({ afterIdx: i });
     }
     // Loop closing midpoint
-    if (state.mode === "loop" && state.waypoints.length >= 2) {
-        pairs.push({ afterIdx: state.waypoints.length - 1, closing: true });
+    if (state.mode === "loop" && live.length >= 2) {
+        pairs.push({ afterIdx: live.length - 1, closing: true });
     }
 
     for (var p = 0; p < pairs.length; p++) {
@@ -1366,8 +1402,8 @@ function addMidpointMarkers() {
                 }
             } else {
                 // Fallback to straight-line midpoint
-                var from = state.waypoints[fromIdx];
-                var to = state.waypoints[toIdx];
+                var from = live[fromIdx];
+                var to = live[toIdx];
                 midLat = (from.lat + to.lat) / 2;
                 midLon = (from.lon + to.lon) / 2;
             }
@@ -1397,7 +1433,7 @@ function addMidpointMarkers() {
             mid.on("dragend", async function () {
                 var pos = mid.getLatLng();
                 // Insert a new waypoint after fromIdx
-                var insertIdx = pair.closing ? state.waypoints.length : fromIdx + 1;
+                var insertIdx = pair.closing ? state.waypoints.length : state.waypoints.indexOf(live[fromIdx]) + 1;
 
                 // Snap to graph under the same 200 m rule every other snap
                 // site enforces — the old unconditional closestNode could bind
@@ -2040,6 +2076,10 @@ function clearRouteLayers(keepWaypoints) {
 }
 
 function showBanner(msg, type) {
+    // Clearing the banner while a pin has failed brings the failed-pin message
+    // back instead of leaving the screen blank: every toast timer and loading
+    // banner clears with showBanner(""), and each would otherwise erase it.
+    if (!msg) { msg = failedPinMessage(); type = ""; }
     var el = document.getElementById("info-banner");
     el.textContent = msg;
     el.className = "info-banner" + (type ? " " + type : " error");

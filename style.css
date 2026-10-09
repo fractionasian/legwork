@@ -1395,13 +1395,15 @@ kbd {
     to { transform: rotate(360deg); }
 }
 
-/* Failed state — path load failed; tap to retry */
-.wp-marker--failed {
+/* Failed state — "failed": path load failed, tap to retry; "failed-geo": no path nearby, tap to remove */
+.wp-marker--failed,
+.wp-marker--failed-geo {
     background: #f39c12;
     cursor: pointer;
 }
 
-.wp-marker--failed .wp-retry {
+.wp-marker--failed .wp-retry,
+.wp-marker--failed-geo .wp-retry {
     position: absolute;
     inset: 0;
     display: flex;
