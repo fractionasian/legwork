@@ -3088,8 +3088,30 @@ window.addEventListener("offline", updateOnlineStatus);
 
 // ── Service worker ────────────────────────────────────
 if ("serviceWorker" in navigator) {
-    navigator.serviceWorker.register("./sw.js").catch(function (e) {
+    // An installed app is resumed, not reloaded, so the browser never re-checks
+    // sw.js by itself and a phone could sit on an old build for days. Ask for an
+    // update whenever the app comes back to the foreground; when a new worker
+    // takes over, offer a reload (the route autosaves, so nothing is lost).
+    var hadSwController = !!navigator.serviceWorker.controller;
+    var updateReady = false;
+    var offerReload = function () {
+        if (document.visibilityState !== "visible") { updateReady = true; return; }
+        updateReady = false;
+        showActionBanner("New version available", "Reload", function () { location.reload(); }, 30000);
+    };
+    navigator.serviceWorker.register("./sw.js").then(function (reg) {
+        document.addEventListener("visibilitychange", function () {
+            if (document.visibilityState !== "visible") return;
+            reg.update().catch(function () {});
+            if (updateReady) offerReload();
+        });
+    }).catch(function (e) {
         console.warn("SW registration failed:", e.message);
+    });
+    navigator.serviceWorker.addEventListener("controllerchange", function () {
+        // The first install also claims the page, but there is nothing new to load.
+        if (!hadSwController) { hadSwController = true; return; }
+        offerReload();
     });
 }
 
