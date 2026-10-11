@@ -571,6 +571,7 @@ async function main() {
         }
     }
 
+    const failed = [];
     for (let i = 0; i < cities.length; i++) {
         const city = cities[i];
         const prevCity = previousManifest && previousManifest.cities && previousManifest.cities[city.id];
@@ -582,11 +583,27 @@ async function main() {
         const suburbCache = (prevBoundsMatch && !args.regeocode) ? buildSuburbCache(prevCity) : new Map();
         if (suburbCache.size) console.log(`  Suburb cache: ${suburbCache.size} tiles`);
 
-        const result = await buildCity(city, dataDir, {
-            skipGeocode: args.skipGeocode,
-            suburbCache,
-        });
-        manifest.cities[city.id] = {
+        // One city's Overpass outage must not cost every other city its weekly
+        // refresh (2026-10-11: all three endpoints 5xx'd on Tokyo after London
+        // had built, and the whole run was thrown away). A failed city keeps
+        // its previous manifest entry; its tile files are untouched because
+        // buildCity only clears the city's directory AFTER the query succeeds.
+        let result;
+        try {
+            result = await buildCity(city, dataDir, {
+                skipGeocode: args.skipGeocode,
+                suburbCache,
+            });
+        } catch (e) {
+            failed.push(city.id);
+            if (prevCity) {
+                manifest.cities[city.id] = prevCity;
+                console.log(`  ${city.name} FAILED — keeping previous tiles (content ${prevCity.content || "?"}): ${e.message}`);
+            } else {
+                console.log(`  ${city.name} FAILED — no previous tiles, city omitted from manifest: ${e.message}`);
+            }
+        }
+        if (result) manifest.cities[city.id] = {
             name: city.name,
             bounds: city.bounds,
             tileSize: TILE_SIZE,
@@ -594,12 +611,19 @@ async function main() {
             content: result.content,
             tiles: result.tiles,
         };
-        if (result.pois) manifest.cities[city.id].pois = result.pois;
+        if (result && result.pois) manifest.cities[city.id].pois = result.pois;
         if (i < cities.length - 1) {
             // Spacing Overpass queries — individual endpoints rate-limit per-IP.
             console.log("\n  Waiting 30s before next Overpass query...");
             await sleep(30000);
         }
+    }
+
+    // Nothing built at all: leave the previous manifest in place and fail
+    // outright — there is nothing new to publish.
+    if (failed.length === cities.length) {
+        console.error(`\nEvery city failed (${failed.join(", ")}) — manifest not written.`);
+        process.exit(1);
     }
 
     // Sort city keys alphabetically before hashing so partial rebuilds produce
@@ -612,6 +636,13 @@ async function main() {
     fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
     console.log(`\nManifest written: ${manifestPath}`);
     console.log(`Version: ${manifest.version}`);
+    if (failed.length) {
+        // Exit 3 = partial: the manifest IS written and should be published,
+        // but the run must still go red so someone notices. The legwork-tiles
+        // workflow publishes on 0 or 3 and then fails the job on 3.
+        console.error(`\nPartial build — failed: ${failed.join(", ")}. Previous tiles kept for those cities.`);
+        process.exit(3);
+    }
     console.log("Done.");
 }
 
