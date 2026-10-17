@@ -2169,8 +2169,11 @@ document.getElementById("mode-btn").addEventListener("click", function () {
     updateRoute();
 });
 document.getElementById("reverse-btn").addEventListener("click", function () {
-    if (state.waypoints.length < 2) return;
-    state.waypoints.reverse();
+    if (state.waypoints.length < 3) return;
+    // A loop's start is fixed; reversing the direction reverses the waypoints after it.
+    // 1→2→3→4→1 becomes 1→4→3→2→1. A whole-array reverse would move the start to the end.
+    var start = state.waypoints[0];
+    state.waypoints = [start].concat(state.waypoints.slice(1).reverse());
     for (var i = 0; i < state.waypoints.length; i++) updateMarkerNumber(state.waypoints[i], i + 1);
     updateRoute();
     track("route-reverse", {});
