@@ -1102,6 +1102,7 @@ if (typeof module !== "undefined" && module.exports) {
         // Routing/graph helpers — exported for the headless test suite and for
         // asserting parity with the duplicated pure functions in build-tiles.js.
         nodeKey: nodeKey,
+        pathToCoords: pathToCoords,
         pathGeomLength: pathGeomLength,
         dijkstra: dijkstra,
         // Exported so the test suite can re-derive MIN_EDGE_MULTIPLIER from the

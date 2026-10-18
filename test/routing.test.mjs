@@ -1,6 +1,6 @@
 // Headless tests for the pure functions in routing.js.
-// Run: `npm test` (or `node --test`). Complements the browser-opened test.html
-// (which covers DOM/Leaflet-coupled behaviour). This file guards the routing,
+// Run: `npm test` (or `node --test`). routing-tables.test.mjs holds the cases
+// ported from the old browser test.html. This file guards the routing,
 // graph, and elevation maths that are easy to regress and hard to eyeball.
 import { test } from "node:test";
 import assert from "node:assert/strict";
