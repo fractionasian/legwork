@@ -25,9 +25,8 @@ picking it up.
   (`if (top !== self) top.location = self.location`) if it ever matters.
 - **`adminOk` comparison is not constant-time** (index.js). Impractical to
   exploit over the network through Cloudflare. Note only.
-- **test.html is deployed** at legwork.day/test.html. Content is benign
-  (static unit tests, no network calls, no secrets). Delete or exclude at
-  preference.
+- ~~**test.html is deployed** at legwork.day/test.html.~~ Resolved 2026-10-19:
+  test.html deleted, its tests moved to test/routing-tables.test.mjs.
 
 ## Cost/scale backstops (revisit when traffic justifies)
 

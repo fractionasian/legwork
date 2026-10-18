@@ -34,7 +34,6 @@ function apply(app, ways) {
 // turns; 40 per turn gives 2; 100 per turn gives the single-corner L.
 const N = 5, DLAT = 0.0009, DLON = 0.00106;
 const pt = (i, j) => [115.86 + j * DLON, -31.95 - i * DLAT];            // [lon, lat]
-const onEdge = (i, j) => i === 0 || i === N - 1 || j === 0 || j === N - 1;
 function gridWays() {
   const ws = []; let id = 1;
   for (let i = 0; i < N; i++) for (let j = 0; j < N; j++) {
