@@ -35,7 +35,10 @@ export async function backupLinks(db, bucket, { nowMs, keepWeeks = BACKUP_KEEP_W
   // An empty table is the disaster this exists for (database recreated, rows
   // gone). Keep writing the weekly copy, but never prune then — or 8 weeks on
   // the last copies with real rows would age out.
-  if (results.length === 0) return { key, count: 0, deleted: 0 };
+  if (results.length === 0) {
+    console.error(`links backup: ${key} rows=0 — table empty, prune skipped`);
+    return { key, count: 0, deleted: 0 };
+  }
 
   // Prune old copies. Scope is enforced twice: the list is prefix-filtered, and
   // every key must match the exact backup filename shape before it can be
