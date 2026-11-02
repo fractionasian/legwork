@@ -451,7 +451,7 @@ export default {
       }),
     );
     ctx.waitUntil(
-      backupLinks(env.DB, env.GRAPH, { nowMs: Date.now() }).catch((e) => {
+      backupLinks(env.DB, env.BACKUP, { nowMs: Date.now() }).catch((e) => {
         console.error("scheduled links backup:", e);
       }),
     );

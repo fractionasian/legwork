@@ -5,9 +5,11 @@
 // deleted database, or damage noticed after a week, would break every shared
 // link. One copy a week plus that 7-day window leaves no gap.
 //
-// Lives in the existing GRAPH bucket under its own prefix. Graph cache keys are
-// "g2:<lat>:<lon>:<r>", built only from snapped numbers in handleGraph, so no
-// request can read a backup key.
+// Own bucket (BACKUP), not the graph cache: the cache is planned to get a
+// bucket-wide expiry rule and is the kind of bucket people empty to clean up
+// (docs/2026-06-10-review-deferred.md, 2026-08-30-review-deferred.md). Either
+// would silently cut the backups back to nothing. No request handler reads
+// this bucket.
 //
 // contact/note are left out on purpose: they're the only personal fields, and
 // all they'd let us recover is pending vanity requests. Everything a working
@@ -30,6 +32,11 @@ export async function backupLinks(db, bucket, { nowMs, keepWeeks = BACKUP_KEEP_W
   const body = JSON.stringify({ version: 1, taken_at: nowMs, count: results.length, rows: results });
   await bucket.put(key, body, { httpMetadata: { contentType: "application/json" } });
 
+  // An empty table is the disaster this exists for (database recreated, rows
+  // gone). Keep writing the weekly copy, but never prune then — or 8 weeks on
+  // the last copies with real rows would age out.
+  if (results.length === 0) return { key, count: 0, deleted: 0 };
+
   // Prune old copies. Scope is enforced twice: the list is prefix-filtered, and
   // every key must match the exact backup filename shape before it can be
   // deleted — so a bug here can never touch a graph-cache object.
@@ -46,5 +53,8 @@ export async function backupLinks(db, bucket, { nowMs, keepWeeks = BACKUP_KEEP_W
   } while (cursor);
   if (old.length) await bucket.delete(old);
 
+  // ponytail: one .all() + one JSON string, fine to low thousands of rows; past
+  // that, page the SELECT and use a multipart put. count/bytes logged to watch.
+  console.log(`links backup: ${key} rows=${results.length} bytes=${body.length} pruned=${old.length}`);
   return { key, count: results.length, deleted: old.length };
 }
