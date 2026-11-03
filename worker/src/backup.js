@@ -67,7 +67,6 @@ export async function backupLinks(db, bucket, { nowMs, keepWeeks = BACKUP_KEEP_W
 // console.error). Returns the date and nothing else: no keys, counts or rows.
 // Keys sort by date, so the last matching key is the newest; anything not
 // shaped like a backup filename is ignored rather than reported.
-
 export async function newestBackup(bucket, { nowMs }) {
   let newest = null;
   let cursor;
@@ -77,8 +76,10 @@ export async function newestBackup(bucket, { nowMs }) {
       if (!BACKUP_KEY_RE.test(obj.key)) continue;
       // A hand-made key with an impossible or future date would otherwise pin
       // "newest" for good and hide every later failure.
-      const t = Date.parse(obj.key.slice(BACKUP_PREFIX.length, BACKUP_PREFIX.length + 10));
-      if (Number.isNaN(t) || t > nowMs) continue;
+      // Round-trip, because Date.parse rolls 2026-02-31 over to 3 March.
+      const day = obj.key.slice(BACKUP_PREFIX.length, BACKUP_PREFIX.length + 10);
+      const t = Date.parse(day);
+      if (Number.isNaN(t) || new Date(t).toISOString().slice(0, 10) !== day || t > nowMs) continue;
       if (newest === null || obj.key > newest) newest = obj.key;
     }
     cursor = page.truncated ? page.cursor : undefined;

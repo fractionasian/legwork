@@ -139,6 +139,14 @@ test("newestBackup returns the latest date across pages, ignoring stray keys", a
   assert.deepEqual(status, { newest: "2026-10-25", age_days: 9 });
 });
 
+test("newestBackup skips a rolled-over date like Feb 31", async () => {
+  const bucket = makeBucket();
+  bucket.store.set("backups/links/2026-02-28.json", "{}");
+  bucket.store.set("backups/links/2026-02-31.json", "{}"); // Date.parse makes this 3 March
+  const status = await newestBackup(bucket, { nowMs: Date.UTC(2026, 3, 1) });
+  assert.equal(status.newest, "2026-02-28");
+});
+
 test("GET /v1/backup-status returns only the date and age, no-store, CORS", async () => {
   const bucket = makeBucket();
   bucket.store.set(backupKey(Date.now()), JSON.stringify({ count: 3, rows: [{ slug: "abc234" }] }));
