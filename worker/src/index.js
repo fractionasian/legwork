@@ -374,13 +374,14 @@ async function handleApiInner(request, env, ctx) {
 // ── Backup status (/v1/backup-status) ───────────────────────────────────────
 // Public on purpose: the briefing that reads it has no Cloudflare credential,
 // and the newest backup date is harmless to reveal. Each request is one R2
-// list (a Class A operation), so it shares the GRAPH_RL per-IP limit rather
-// than adding a binding. Errors are a no-store 500, as in handleGraph.
+// list (a Class A operation), so it has its own tight per-IP limit (STATUS_RL).
+// Errors are a no-store 500, as in handleGraph. Consumers must treat a failed
+// request, any non-200, newest:null, or age_days > 8 as an alert.
 export async function handleBackupStatus(request, env) {
   try {
-    if (env.GRAPH_RL) {
+    if (env.STATUS_RL) {
       const ip = request.headers.get("cf-connecting-ip") || "anon";
-      const { success } = await env.GRAPH_RL.limit({ key: ip });
+      const { success } = await env.STATUS_RL.limit({ key: ip });
       if (!success) {
         return new Response("rate limited", { status: 429, headers: cors({ "retry-after": "60", "cache-control": "no-store" }) });
       }

@@ -64,6 +64,8 @@ test("prune refuses to delete when an unexpected key sits under the prefix", asy
   await createRandomLink(db, { hash: GOOD, now: 1 });
   const bucket = makeBucket();
   bucket.store.set("backups/links/notes.txt", "x");
+  bucket.store.set("backups/links/2026-13-40.json", "{}");
+  bucket.store.set("backups/links/2099-01-01.json", "{}");
   bucket.store.set(backupKey(NOW - 20 * WEEK), "{}");
   await assert.rejects(backupLinks(db, bucket, { nowMs: NOW }), /unexpected key/);
   assert.ok(bucket.store.has(backupKey(NOW - 20 * WEEK)), "nothing deleted after the refusal");
@@ -130,6 +132,8 @@ test("newestBackup returns the latest date across pages, ignoring stray keys", a
   const bucket = makeBucket();
   for (const w of [3, 2, 1]) bucket.store.set(backupKey(NOW - w * WEEK), "{}");
   bucket.store.set("backups/links/notes.txt", "x");
+  bucket.store.set("backups/links/2026-13-40.json", "{}");
+  bucket.store.set("backups/links/2099-01-01.json", "{}");
   bucket.store.set("g2:-31.950:115.860:2000", "{}");
   const status = await newestBackup(bucket, { nowMs: NOW + 2 * 24 * 3600 * 1000 });
   assert.deepEqual(status, { newest: "2026-10-25", age_days: 9 });
@@ -149,7 +153,7 @@ test("GET /v1/backup-status returns only the date and age, no-store, CORS", asyn
 
 test("GET /v1/backup-status is rate limited and errors as a no-store 500", async () => {
   const limited = await worker.fetch(new Request("https://w.dev/v1/backup-status"),
-    { BACKUP: makeBucket(), GRAPH_RL: { limit: async () => ({ success: false }) } }, {});
+    { BACKUP: makeBucket(), STATUS_RL: { limit: async () => ({ success: false }) } }, {});
   assert.equal(limited.status, 429);
   const broken = { list: async () => { throw new Error("r2 down"); } };
   const realError = console.error;

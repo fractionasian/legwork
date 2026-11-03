@@ -8,8 +8,8 @@
 // Own bucket (BACKUP), not the graph cache: the cache is planned to get a
 // bucket-wide expiry rule and is the kind of bucket people empty to clean up
 // (docs/2026-06-10-review-deferred.md, 2026-08-30-review-deferred.md). Either
-// would silently cut the backups back to nothing. No request handler reads
-// this bucket.
+// would silently cut the backups back to nothing. No request handler writes
+// to this bucket; GET /v1/backup-status lists it for the newest date only.
 //
 // contact/note are left out on purpose: they're the only personal fields, and
 // all they'd let us recover is pending vanity requests. Everything a working
@@ -18,7 +18,7 @@
 
 export const BACKUP_PREFIX = "backups/links/";
 export const BACKUP_KEEP_WEEKS = 8;
-export const BACKUP_KEY_RE = /^backups\/links\/\d{4}-\d{2}-\d{2}\.json$/;
+const BACKUP_KEY_RE = /^backups\/links\/\d{4}-\d{2}-\d{2}\.json$/;
 
 export function backupKey(nowMs) {
   return BACKUP_PREFIX + new Date(nowMs).toISOString().slice(0, 10) + ".json";
@@ -67,13 +67,19 @@ export async function backupLinks(db, bucket, { nowMs, keepWeeks = BACKUP_KEEP_W
 // console.error). Returns the date and nothing else: no keys, counts or rows.
 // Keys sort by date, so the last matching key is the newest; anything not
 // shaped like a backup filename is ignored rather than reported.
+
 export async function newestBackup(bucket, { nowMs }) {
   let newest = null;
   let cursor;
   do {
     const page = await bucket.list({ prefix: BACKUP_PREFIX, cursor });
     for (const obj of page.objects) {
-      if (BACKUP_KEY_RE.test(obj.key) && (newest === null || obj.key > newest)) newest = obj.key;
+      if (!BACKUP_KEY_RE.test(obj.key)) continue;
+      // A hand-made key with an impossible or future date would otherwise pin
+      // "newest" for good and hide every later failure.
+      const t = Date.parse(obj.key.slice(BACKUP_PREFIX.length, BACKUP_PREFIX.length + 10));
+      if (Number.isNaN(t) || t > nowMs) continue;
+      if (newest === null || obj.key > newest) newest = obj.key;
     }
     cursor = page.truncated ? page.cursor : undefined;
   } while (cursor);
