@@ -11,9 +11,17 @@
 // Before restoring:
 //  - Damage within the last 7 days? Use D1 Time Travel instead
 //    (`wrangler d1 time-travel restore`) — it's exact; this is a week old.
-//  - Random links are hard-deleted on purge, so one purged after the backup
-//    comes back as active. Re-apply any admin purges made after `taken_at`
-//    (printed to stderr below).
+//  - A purge after `taken_at` isn't in the copy, so that link comes back as
+//    it was. Purged rows stay in the table as tombstones (src/links-db.js
+//    purgeLink), so on a partial restore INSERT OR IGNORE skips them; on a
+//    restore into an empty table, re-apply any admin purges made after
+//    `taken_at` (printed to stderr below).
+//  - Random links purged before tombstoning landed (PR #46, 2026-11-03) were
+//    hard-deleted and have no tombstone, so a copy older than that purge
+//    brings them back active even on a partial restore. Until every copy
+//    postdates PR #46 (BACKUP_KEEP_WEEKS after deploy), re-apply those purges.
+//  - Purged rows are written with a blank hash whatever the copy holds, so a
+//    restore never puts a taken-down route back in the table.
 //  - Not in a copy: links made since `taken_at`, and contact/note on pending
 //    vanity requests (excluded on purpose).
 import { readFileSync } from "node:fs";
@@ -35,14 +43,20 @@ export function restoreSql(backup) {
   if (backup.rows.length !== backup.count) throw new Error(`row count ${backup.rows.length} != header ${backup.count}`);
   const lines = backup.rows.map((r) => {
     if (!TYPES.has(r.type) || !STATUSES.has(r.status)) throw new Error("bad type/status on " + r.slug);
+    // A tombstone keeps only its slug. Older copies can hold a purged row's
+    // route (vanity tombstones kept it before purge blanked the hash), so drop
+    // it here rather than validate it.
+    const hash = r.status === "purged" ? "" : r.hash;
     // Same boundary the live API enforces: a restored link can only ever be a
     // route under a well-formed slug, so an edited backup can't plant a redirect.
-    const v = validateRouteHash(r.hash);
-    if (!v.ok) throw new Error(`bad hash on ${r.slug}: ${v.reason}`);
+    if (r.status !== "purged") {
+      const v = validateRouteHash(hash);
+      if (!v.ok) throw new Error(`bad hash on ${r.slug}: ${v.reason}`);
+    }
     const slugOk = r.type === "vanity" ? validateVanitySlug(r.slug).ok : RANDOM_SLUG_RE.test(r.slug);
     if (!slugOk) throw new Error("bad slug " + r.slug);
     return "INSERT OR IGNORE INTO links (slug, hash, type, status, created_at, hits) VALUES (" +
-      [sqlText(r.slug), sqlText(r.hash), sqlText(r.type), sqlText(r.status), sqlInt(r.created_at), sqlInt(r.hits)].join(", ") +
+      [sqlText(r.slug), sqlText(hash), sqlText(r.type), sqlText(r.status), sqlInt(r.created_at), sqlInt(r.hits)].join(", ") +
       ");";
   });
   return lines.join("\n") + "\n";

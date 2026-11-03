@@ -119,14 +119,16 @@ test("vanity rejects an oversized note", async () => {
   assert.equal(res.status, 400);
 });
 
-test("admin purge hard-deletes a RANDOM row (storage reclaimed, not just flagged)", async () => {
+test("admin purge tombstones a RANDOM row too (kept, hash blanked, never resolves)", async () => {
   const e = env();
   const mint = await handleApi(req("POST", "/api/links", { body: { hash: GOOD_HASH } }), e, CTX);
   const { slug } = await mint.json();
   const purge = await handleApi(req("POST", "/api/admin/purge/" + slug, { body: {}, auth: "s3cret" }), e, CTX);
   assert.equal(purge.status, 200);
-  assert.equal((await purge.json()).op, "deleted");
-  assert.equal(e.DB._rows.has(slug), false, "row should be deleted, not retained with a status flag");
+  assert.equal((await purge.json()).op, "tombstoned");
+  const row = e.DB._rows.get(slug);
+  assert.equal(row.status, "purged", "row kept as a tombstone so a backup restore can't bring it back");
+  assert.equal(row.hash, "", "route geometry is dropped");
   const resolve = await handleApi(req("GET", "/api/links/" + slug), e, CTX);
   assert.equal(resolve.status, 404);
 });

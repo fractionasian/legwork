@@ -89,6 +89,22 @@ test("restore SQL round-trips a row", () => {
   );
 });
 
+test("restore writes a purged tombstone with a blank hash, whatever the copy holds", () => {
+  const backup = {
+    version: 1, taken_at: NOW, count: 2,
+    rows: [
+      { slug: "abc234", hash: "", type: "random", status: "purged", created_at: 1, hits: 0 },
+      // An older vanity tombstone that still carried its route.
+      { slug: "perth10k", hash: GOOD, type: "vanity", status: "purged", created_at: 2, hits: 4 },
+    ],
+  };
+  assert.equal(
+    restoreSql(backup),
+    "INSERT OR IGNORE INTO links (slug, hash, type, status, created_at, hits) VALUES ('abc234', '', 'random', 'purged', 1, 0);\n" +
+    "INSERT OR IGNORE INTO links (slug, hash, type, status, created_at, hits) VALUES ('perth10k', '', 'vanity', 'purged', 2, 4);\n",
+  );
+});
+
 test("restore refuses a planted redirect or a malformed slug", () => {
   const row = (o) => ({ version: 1, count: 1, rows: [{ slug: "abc234", hash: GOOD, type: "random", status: "active", created_at: 1, hits: 0, ...o }] });
   assert.doesNotThrow(() => restoreSql(row({})));

@@ -118,32 +118,24 @@ export async function setStatus(db, slug, status) {
   return meta.changes;
 }
 
-// Hard-delete a link row. Returns the deleted-row count so callers can 404 a
-// miss. Only safe for RANDOM slugs — see purgeLink for why vanity must not be
-// hard-deleted.
-export async function deleteLink(db, slug) {
-  const { meta } = await db.prepare("DELETE FROM links WHERE slug = ?").bind(String(slug).toLowerCase()).run();
-  return meta.changes;
-}
-
-// Admin purge, split by type:
-//  - VANITY → tombstone (status='purged', the status the schema documents).
-//    Hard-deleting would free the slug, and a previously circulated vanity URL
-//    could later resolve to someone else's route — the slug stays reserved.
-//  - RANDOM → hard DELETE. Storage is actually reclaimed, and the 31^6 keyspace
-//    makes a reuse collision on a re-minted code negligible.
-// Returns "tombstoned" | "deleted", or null when the slug doesn't exist.
+// Admin purge: tombstone the row, random and vanity alike. status='purged' (the
+// status the schema documents) never resolves, and the row is kept rather than
+// deleted:
+//  - VANITY: a hard delete would free the slug, so a previously circulated
+//    vanity URL could later resolve to someone else's route.
+//  - RANDOM: a hard delete let a restore from the weekly R2 backup re-insert
+//    the link as active (INSERT OR IGNORE only skips rows still present). A
+//    route taken down on request, often one starting at someone's home, would
+//    come back live.
+// The hash is blanked and contact/note dropped, so the route itself is gone
+// from D1 at once and ages out of the R2 copies within BACKUP_KEEP_WEEKS.
+// Returns "tombstoned", or null when the slug doesn't exist.
 export async function purgeLink(db, slug) {
-  const s = String(slug).toLowerCase();
-  const row = await db.prepare("SELECT type FROM links WHERE slug = ?").bind(s).first();
-  if (!row) return null;
-  if (row.type === "vanity") {
-    // Tombstone keeps only what reserving the slug needs; contact/note go.
-    await db.prepare("UPDATE links SET status = ?, contact = NULL, note = NULL WHERE slug = ?").bind("purged", s).run();
-    return "tombstoned";
-  }
-  await deleteLink(db, s);
-  return "deleted";
+  const { meta } = await db
+    .prepare("UPDATE links SET status = ?, hash = '', contact = NULL, note = NULL WHERE slug = ?")
+    .bind("purged", String(slug).toLowerCase())
+    .run();
+  return meta.changes ? "tombstoned" : null;
 }
 
 export async function listPending(db) {
