@@ -107,6 +107,13 @@ export function makeD1Mock() {
       },
 
       async all() {
+        // backupLinks: the whole table, minus contact/note.
+        if (/^\s*SELECT\s+slug,\s*hash,\s*type,\s*status,\s*created_at,\s*hits\s+FROM\s+links\s+ORDER\s+BY\s+slug/i.test(sql)) {
+          const results = [...rows.values()]
+            .sort((a, b) => (a.slug < b.slug ? -1 : 1))
+            .map(({ slug, hash, type, status, created_at, hits }) => ({ slug, hash, type, status, created_at, hits }));
+          return { results, success: true };
+        }
         if (/status\s*=\s*'pending'/i.test(sql)) {
           const results = [...rows.values()]
             .filter((r) => r.status === "pending")

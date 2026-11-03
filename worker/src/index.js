@@ -3,6 +3,7 @@ import { validateRouteHash, validateVanitySlug, apiCors, json } from "./links-li
 import { createRandomLink, getActive, requestVanity, setStatus, purgeLink, listPending, bumpHits, TakenError, CapError } from "./links-db.js";
 import { validateEvent, isoWeek, demandCell } from "./analytics-lib.js";
 import { insertEvent, bumpDemand, pruneOld } from "./analytics-db.js";
+import { backupLinks } from "./backup.js";
 
 // App now lives at legwork.day (github.io/legwork stays as a working alias).
 // APP_BASE builds the short-link URLs returned by POST /api/links.
@@ -447,6 +448,11 @@ export default {
     ctx.waitUntil(
       pruneOld(env.DB, { nowSeconds: Math.floor(Date.now() / 1000) }).catch((e) => {
         console.error("scheduled prune:", e);
+      }),
+    );
+    ctx.waitUntil(
+      backupLinks(env.DB, env.BACKUP, { nowMs: Date.now() }).catch((e) => {
+        console.error("scheduled links backup:", e);
       }),
     );
   },

@@ -16,6 +16,14 @@ enabled = true
 binding = "GRAPH"
 bucket_name = "legwork-graph-cache"
 
+# Weekly share-links backup (src/backup.js), written by the Sunday cron. Its
+# own bucket so a lifecycle rule or clean-out of the graph cache can't take
+# the backups with it. Create once: wrangler r2 bucket create legwork-links-backup
+# Backups stay in R2 and out of git: shared routes are users' data.
+[[r2_buckets]]
+binding = "BACKUP"
+bucket_name = "legwork-links-backup"
+
 # Per-IP rate limit on /v1/graph (60 requests / 60 s). Belt-and-suspenders on top
 # of the free plan's 100k-requests/day ceiling — stops one client burning the
 # daily budget. Native Workers Rate Limiting binding; no custom domain needed.
