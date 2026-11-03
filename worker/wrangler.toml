@@ -68,6 +68,14 @@ name = "DEMAND_RL"
 namespace_id = "1004"
 simple = { limit = 5, period = 60 }
 
+# Per-IP rate limit on the public backup-status route (5 requests / 60 s). Each
+# request is one R2 list (a billed Class A op) with no edge cache in front, and
+# the only caller is a once-a-day briefing check.
+[[ratelimits]]
+name = "STATUS_RL"
+namespace_id = "1005"
+simple = { limit = 5, period = 60 }
+
 # ── D1 write budget, account-wide ──────────────────────────────────────────
 # D1's free-tier 100k writes/day is per ACCOUNT, not per database, and `events`,
 # `demand`, and `links` all live in legwork-links — so an analytics write flood

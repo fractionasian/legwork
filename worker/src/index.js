@@ -3,7 +3,7 @@ import { validateRouteHash, validateVanitySlug, apiCors, json } from "./links-li
 import { createRandomLink, getActive, requestVanity, setStatus, purgeLink, listPending, bumpHits, TakenError, CapError } from "./links-db.js";
 import { validateEvent, isoWeek, demandCell } from "./analytics-lib.js";
 import { insertEvent, bumpDemand, pruneOld } from "./analytics-db.js";
-import { backupLinks } from "./backup.js";
+import { backupLinks, newestBackup } from "./backup.js";
 
 // App now lives at legwork.day (github.io/legwork stays as a working alias).
 // APP_BASE builds the short-link URLs returned by POST /api/links.
@@ -371,6 +371,32 @@ async function handleApiInner(request, env, ctx) {
   return json({ error: "not found" }, 404);
 }
 
+// ── Backup status (/v1/backup-status) ───────────────────────────────────────
+// Public on purpose: the briefing that reads it has no Cloudflare credential,
+// and the newest backup date is harmless to reveal. Each request is one R2
+// list (a Class A operation), so it has its own tight per-IP limit (STATUS_RL).
+// Errors are a no-store 500, as in handleGraph. Consumers must treat a failed
+// request, any non-200, newest:null, or age_days > 8 as an alert.
+export async function handleBackupStatus(request, env) {
+  try {
+    if (env.STATUS_RL) {
+      const ip = request.headers.get("cf-connecting-ip") || "anon";
+      const { success } = await env.STATUS_RL.limit({ key: ip });
+      if (!success) {
+        return new Response("rate limited", { status: 429, headers: cors({ "retry-after": "60", "cache-control": "no-store" }) });
+      }
+    }
+    const status = await newestBackup(env.BACKUP, { nowMs: Date.now() });
+    return new Response(JSON.stringify(status), {
+      status: 200,
+      headers: cors({ "content-type": "application/json", "cache-control": "no-store" }),
+    });
+  } catch (e) {
+    console.error("handleBackupStatus:", e);
+    return new Response("server error", { status: 500, headers: cors({ "cache-control": "no-store" }) });
+  }
+}
+
 // ── Analytics ingest (/v1/event) ────────────────────────────────────────────
 
 // Cap the body before parsing. 8 KB is ~50x the largest legitimate event and
@@ -437,6 +463,7 @@ export default {
     }
     if (url.pathname === "/v1/health") return new Response("ok", { status: 200, headers: cors({ "cache-control": "no-store" }) });
     if (url.pathname === "/v1/graph" && request.method === "GET") return handleGraph(request, url, env, ctx);
+    if (url.pathname === "/v1/backup-status" && request.method === "GET") return handleBackupStatus(request, env);
     if (url.pathname === "/v1/event" && request.method === "POST") return handleEvent(request, env, ctx);
     return new Response("not found", { status: 404, headers: cors({ "cache-control": "no-store" }) });
   },

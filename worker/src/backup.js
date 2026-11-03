@@ -8,8 +8,8 @@
 // Own bucket (BACKUP), not the graph cache: the cache is planned to get a
 // bucket-wide expiry rule and is the kind of bucket people empty to clean up
 // (docs/2026-06-10-review-deferred.md, 2026-08-30-review-deferred.md). Either
-// would silently cut the backups back to nothing. No request handler reads
-// this bucket.
+// would silently cut the backups back to nothing. No request handler writes
+// to this bucket; GET /v1/backup-status lists it for the newest date only.
 //
 // contact/note are left out on purpose: they're the only personal fields, and
 // all they'd let us recover is pending vanity requests. Everything a working
@@ -60,4 +60,31 @@ export async function backupLinks(db, bucket, { nowMs, keepWeeks = BACKUP_KEEP_W
   // that, page the SELECT and use a multipart put. count/bytes logged to watch.
   console.log(`links backup: ${key} rows=${results.length} bytes=${body.length} pruned=${old.length}`);
   return { key, count: results.length, deleted: old.length };
+}
+
+// Newest backup date for GET /v1/backup-status, so the morning briefing can
+// warn when the weekly copy stops landing (cron failures only reach
+// console.error). Returns the date and nothing else: no keys, counts or rows.
+// Keys sort by date, so the last matching key is the newest; anything not
+// shaped like a backup filename is ignored rather than reported.
+export async function newestBackup(bucket, { nowMs }) {
+  let newest = null;
+  let cursor;
+  do {
+    const page = await bucket.list({ prefix: BACKUP_PREFIX, cursor });
+    for (const obj of page.objects) {
+      if (!BACKUP_KEY_RE.test(obj.key)) continue;
+      // A hand-made key with an impossible or future date would otherwise pin
+      // "newest" for good and hide every later failure.
+      // Round-trip, because Date.parse rolls 2026-02-31 over to 3 March.
+      const day = obj.key.slice(BACKUP_PREFIX.length, BACKUP_PREFIX.length + 10);
+      const t = Date.parse(day);
+      if (Number.isNaN(t) || new Date(t).toISOString().slice(0, 10) !== day || t > nowMs) continue;
+      if (newest === null || obj.key > newest) newest = obj.key;
+    }
+    cursor = page.truncated ? page.cursor : undefined;
+  } while (cursor);
+  if (newest === null) return { newest: null };
+  const date = newest.slice(BACKUP_PREFIX.length, BACKUP_PREFIX.length + 10);
+  return { newest: date, age_days: Math.floor((nowMs - Date.parse(date)) / 86400000) };
 }
