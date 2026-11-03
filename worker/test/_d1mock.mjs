@@ -58,12 +58,13 @@ export function makeD1Mock() {
           const [status, slug] = args;
           const r = rows.get(slug);
           // setStatus constrains to pending vanity rows; purge's tombstone
-          // update is unconstrained. Honour whichever WHERE the SQL carries.
+          // update (which also blanks the hash) is unconstrained. Honour whichever WHERE the SQL carries.
           const constrained = /type\s*=\s*'vanity'/i.test(sql) && /status\s*=\s*'pending'/i.test(sql);
           const matched = !!r && (!constrained || (r.type === "vanity" && r.status === "pending"));
           if (matched) {
             r.status = status;
             if (/contact\s*=\s*NULL/i.test(sql)) { r.contact = null; r.note = null; }
+            if (/hash\s*=\s*''/i.test(sql)) r.hash = "";
           }
           return { success: true, meta: { changes: matched ? 1 : 0 } };
         }
@@ -71,11 +72,6 @@ export function makeD1Mock() {
           const [slug] = args;
           if (rows.has(slug)) rows.get(slug).hits += 1;
           return { success: true, meta: { changes: rows.has(slug) ? 1 : 0 } };
-        }
-        if (/^\s*DELETE\s+FROM\s+links/i.test(sql)) {
-          const [slug] = args;
-          const existed = rows.delete(slug);
-          return { success: true, meta: { changes: existed ? 1 : 0 } };
         }
         throw new Error("d1mock: unhandled run() sql: " + sql);
       },

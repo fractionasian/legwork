@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createRandomLink, getActive, requestVanity, setStatus, deleteLink, purgeLink, listPending, bumpHits } from "../src/links-db.js";
+import { createRandomLink, getActive, requestVanity, setStatus, purgeLink, listPending, bumpHits } from "../src/links-db.js";
 import { makeD1Mock } from "./_d1mock.mjs";
 
 const NOW = 1_750_000_000_000;
@@ -73,9 +73,9 @@ test("createRandomLink is idempotent for an identical hash (re-share returns the
 test("createRandomLink dedup only matches ACTIVE random rows (purged route re-shares fresh)", async () => {
   const db = makeD1Mock();
   const a = await createRandomLink(db, { hash: "#r=a;b&m=oneway", now: NOW });
-  await purgeLink(db, a); // random → hard delete
+  await purgeLink(db, a); // random → tombstone
   const b = await createRandomLink(db, { hash: "#r=a;b&m=oneway", now: NOW + 1 });
-  assert.notEqual(b, a, "deleted row must not be returned by the dedup lookup");
+  assert.notEqual(b, a, "a tombstone must not be returned by the dedup lookup");
 });
 
 test("setStatus reports matched rows: 1 for a pending vanity, 0 for an unknown slug", async () => {
@@ -105,24 +105,22 @@ test("purgeLink tombstones a vanity slug (reserved forever, never resolves)", as
   const row = db._rows.get("melbourne2027");
   assert.ok(row, "row must be retained as a tombstone");
   assert.equal(row.status, "purged");
+  assert.equal(row.hash, "", "route geometry is gone from the table");
   assert.equal(await getActive(db, "Melbourne2027"), null);
   // The slug stays reserved: a new vanity request for it must be refused.
   await assert.rejects(() => requestVanity(db, { slug: "Melbourne2027", hash: "#r=x;y&m=oneway", now: NOW }));
 });
 
-test("purgeLink hard-deletes a random slug and 404s a missing one", async () => {
+test("purgeLink tombstones a random slug too (blank hash, never resolves) and 404s a missing one", async () => {
   const db = makeD1Mock();
   const slug = await createRandomLink(db, { hash: "#r=a;b&m=oneway", now: NOW });
-  assert.equal(await purgeLink(db, slug), "deleted");
-  assert.equal(db._rows.has(slug), false, "random rows reclaim storage");
+  assert.equal(await purgeLink(db, slug), "tombstoned");
+  const row = db._rows.get(slug);
+  assert.ok(row, "random row kept, so a backup restore's INSERT OR IGNORE can't re-create it");
+  assert.equal(row.status, "purged");
+  assert.equal(row.hash, "", "route geometry is gone from the table");
+  assert.equal(await getActive(db, slug), null);
   assert.equal(await purgeLink(db, "nosuch"), null);
-});
-
-test("deleteLink reports how many rows it removed", async () => {
-  const db = makeD1Mock();
-  const slug = await createRandomLink(db, { hash: "#r=a;b&m=oneway", now: NOW });
-  assert.equal(await deleteLink(db, slug), 1);
-  assert.equal(await deleteLink(db, slug), 0, "second delete matches nothing");
 });
 
 test("bumpHits increments the hit counter", async () => {
