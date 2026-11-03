@@ -1,7 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { makeD1Mock } from "./_d1mock.mjs";
-import { backupLinks, backupKey } from "../src/backup.js";
+import { backupLinks, backupKey, newestBackup } from "../src/backup.js";
+import worker from "../src/index.js";
 import { createRandomLink, requestVanity } from "../src/links-db.js";
 import { restoreSql } from "../scripts/restore-links.mjs";
 
@@ -119,4 +120,43 @@ test("restore rejects a truncated or malformed backup", () => {
   assert.throws(() => restoreSql({ version: 2, count: 0, rows: [] }), /v1/);
   assert.throws(() => restoreSql({ version: 1, count: 1, rows: [{ slug: "abc234", hash: GOOD, type: "evil", status: "active", created_at: 1, hits: 0 }] }), /type/);
   assert.throws(() => restoreSql({ version: 1, count: 1, rows: [{ slug: "abc234", hash: GOOD, type: "random", status: "active", created_at: "1); DROP TABLE links;--", hits: 0 }] }), /integer/);
+});
+
+test("newestBackup is null on an empty bucket", async () => {
+  assert.deepEqual(await newestBackup(makeBucket(), { nowMs: NOW }), { newest: null });
+});
+
+test("newestBackup returns the latest date across pages, ignoring stray keys", async () => {
+  const bucket = makeBucket();
+  for (const w of [3, 2, 1]) bucket.store.set(backupKey(NOW - w * WEEK), "{}");
+  bucket.store.set("backups/links/notes.txt", "x");
+  bucket.store.set("g2:-31.950:115.860:2000", "{}");
+  const status = await newestBackup(bucket, { nowMs: NOW + 2 * 24 * 3600 * 1000 });
+  assert.deepEqual(status, { newest: "2026-10-25", age_days: 9 });
+});
+
+test("GET /v1/backup-status returns only the date and age, no-store, CORS", async () => {
+  const bucket = makeBucket();
+  bucket.store.set(backupKey(Date.now()), JSON.stringify({ count: 3, rows: [{ slug: "abc234" }] }));
+  const res = await worker.fetch(new Request("https://w.dev/v1/backup-status"), { BACKUP: bucket }, {});
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get("cache-control"), "no-store");
+  assert.equal(res.headers.get("access-control-allow-origin"), "*");
+  const body = await res.json();
+  assert.deepEqual(Object.keys(body).sort(), ["age_days", "newest"]);
+  assert.equal(body.age_days, 0);
+});
+
+test("GET /v1/backup-status is rate limited and errors as a no-store 500", async () => {
+  const limited = await worker.fetch(new Request("https://w.dev/v1/backup-status"),
+    { BACKUP: makeBucket(), GRAPH_RL: { limit: async () => ({ success: false }) } }, {});
+  assert.equal(limited.status, 429);
+  const broken = { list: async () => { throw new Error("r2 down"); } };
+  const realError = console.error;
+  console.error = () => {};
+  try {
+    const res = await worker.fetch(new Request("https://w.dev/v1/backup-status"), { BACKUP: broken }, {});
+    assert.equal(res.status, 500);
+    assert.equal(res.headers.get("cache-control"), "no-store");
+  } finally { console.error = realError; }
 });

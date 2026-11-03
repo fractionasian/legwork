@@ -18,7 +18,7 @@
 
 export const BACKUP_PREFIX = "backups/links/";
 export const BACKUP_KEEP_WEEKS = 8;
-const BACKUP_KEY_RE = /^backups\/links\/\d{4}-\d{2}-\d{2}\.json$/;
+export const BACKUP_KEY_RE = /^backups\/links\/\d{4}-\d{2}-\d{2}\.json$/;
 
 export function backupKey(nowMs) {
   return BACKUP_PREFIX + new Date(nowMs).toISOString().slice(0, 10) + ".json";
@@ -60,4 +60,24 @@ export async function backupLinks(db, bucket, { nowMs, keepWeeks = BACKUP_KEEP_W
   // that, page the SELECT and use a multipart put. count/bytes logged to watch.
   console.log(`links backup: ${key} rows=${results.length} bytes=${body.length} pruned=${old.length}`);
   return { key, count: results.length, deleted: old.length };
+}
+
+// Newest backup date for GET /v1/backup-status, so the morning briefing can
+// warn when the weekly copy stops landing (cron failures only reach
+// console.error). Returns the date and nothing else: no keys, counts or rows.
+// Keys sort by date, so the last matching key is the newest; anything not
+// shaped like a backup filename is ignored rather than reported.
+export async function newestBackup(bucket, { nowMs }) {
+  let newest = null;
+  let cursor;
+  do {
+    const page = await bucket.list({ prefix: BACKUP_PREFIX, cursor });
+    for (const obj of page.objects) {
+      if (BACKUP_KEY_RE.test(obj.key) && (newest === null || obj.key > newest)) newest = obj.key;
+    }
+    cursor = page.truncated ? page.cursor : undefined;
+  } while (cursor);
+  if (newest === null) return { newest: null };
+  const date = newest.slice(BACKUP_PREFIX.length, BACKUP_PREFIX.length + 10);
+  return { newest: date, age_days: Math.floor((nowMs - Date.parse(date)) / 86400000) };
 }
