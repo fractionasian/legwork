@@ -16,6 +16,10 @@
 //    purgeLink), so on a partial restore INSERT OR IGNORE skips them; on a
 //    restore into an empty table, re-apply any admin purges made after
 //    `taken_at` (printed to stderr below).
+//  - Random links purged before tombstoning landed (PR #46, 2026-11-03) were
+//    hard-deleted and have no tombstone, so a copy older than that purge
+//    brings them back active even on a partial restore. Until every copy
+//    postdates PR #46 (BACKUP_KEEP_WEEKS after deploy), re-apply those purges.
 //  - Purged rows are written with a blank hash whatever the copy holds, so a
 //    restore never puts a taken-down route back in the table.
 //  - Not in a copy: links made since `taken_at`, and contact/note on pending
