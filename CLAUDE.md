@@ -91,6 +91,17 @@ are cached. (inferred from the app and `docs/show-hn-draft.md`)
   `worker/wrangler.toml`. [doc 2026-10-01]
 - **Short links never expire.** A TTL would break links already shared. New
   links are capped at 500 per rolling 24 h. [doc 2026-10-01]
+- **A purged link is tombstoned, never deleted.** The row stays with its
+  route blanked, so the slug can't be reused and a restore from backup can't
+  bring a taken-down route back. [code, `links-db.js`]
+- **Share links are copied to R2 weekly, in their own bucket, eight weeks
+  kept.** Never fold that bucket into the graph cache, which is the one that
+  gets emptied. The copy leaves out `contact` and `note`. [code, `backup.js`]
+- **`/v1/backup-status` is public on purpose.** Whatever reads it treats a
+  failed request, a non-200, no backup, or one older than 8 days as an alert.
+  [code, `index.js`]
+- **Cloudflare cron uses day names** (`SUN`), never a number. [code,
+  `wrangler.toml`]
 
 ### Interface
 
