@@ -368,6 +368,8 @@ function setupAutocomplete() {
         setTimeout(function () { setAutocompleteOpen(false); }, 200);
     });
     input.addEventListener("keydown", function (e) {
+        // Mid-conversion, Enter/Escape/arrows belong to the IME, not the listbox.
+        if (isImeComposing(e)) return;
         var items = list.querySelectorAll("[role='option']");
         if (e.key === "Escape") { setAutocompleteOpen(false); return; }
         if (e.key === "ArrowDown") {
@@ -379,7 +381,6 @@ function setupAutocomplete() {
             activeIdx = Math.max(activeIdx - 1, 0);
             updateActiveItem(items, activeIdx, input);
         } else if (e.key === "Enter") {
-            if (isImeComposing(e)) return; // confirming a CJK candidate, not searching
             // The ONLY Enter handler on this input. A second, unconditional
             // listener used to run geocodeAddress() as well, so choosing a
             // highlighted suggestion ran two searches and could leave two
@@ -2730,7 +2731,8 @@ async function confirmSaveRoute() {
 
 document.getElementById("save-route-confirm").addEventListener("click", confirmSaveRoute);
 document.getElementById("save-route-name").addEventListener("keydown", function (e) {
-    if (e.key === "Enter" && !isImeComposing(e)) confirmSaveRoute();
+    if (isImeComposing(e)) return; // Enter/Escape belong to the IME mid-conversion
+    if (e.key === "Enter") confirmSaveRoute();
     if (e.key === "Escape") document.getElementById("save-route-input").classList.add("hidden");
 });
 
@@ -3064,7 +3066,8 @@ function startInlineRename(labelEl, routeId) {
     }
 
     input.addEventListener("keydown", function (e) {
-        if (e.key === "Enter") { if (!isImeComposing(e)) commit(); }
+        if (isImeComposing(e)) return; // Enter/Escape belong to the IME mid-conversion
+        if (e.key === "Enter") commit();
         else if (e.key === "Escape") cancel();
     });
     input.addEventListener("blur", commit);
