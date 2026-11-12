@@ -340,6 +340,11 @@ function setAutocompleteOpen(open) {
     if (wrapper) wrapper.setAttribute("aria-expanded", open ? "true" : "false");
 }
 
+// Enter that confirms a Chinese/Japanese/Korean IME candidate is not a submit.
+// isComposing covers Chrome/Firefox; keyCode 229 covers Safari, which resets
+// isComposing before the confirming keydown reaches script (WebKit 165004).
+function isImeComposing(e) { return e.isComposing || e.keyCode === 229; }
+
 function setupAutocomplete() {
     var input = document.getElementById("address-input");
     var list = document.getElementById("autocomplete-list");
@@ -374,6 +379,7 @@ function setupAutocomplete() {
             activeIdx = Math.max(activeIdx - 1, 0);
             updateActiveItem(items, activeIdx, input);
         } else if (e.key === "Enter") {
+            if (isImeComposing(e)) return; // confirming a CJK candidate, not searching
             // The ONLY Enter handler on this input. A second, unconditional
             // listener used to run geocodeAddress() as well, so choosing a
             // highlighted suggestion ran two searches and could leave two
@@ -2724,7 +2730,7 @@ async function confirmSaveRoute() {
 
 document.getElementById("save-route-confirm").addEventListener("click", confirmSaveRoute);
 document.getElementById("save-route-name").addEventListener("keydown", function (e) {
-    if (e.key === "Enter") confirmSaveRoute();
+    if (e.key === "Enter" && !isImeComposing(e)) confirmSaveRoute();
     if (e.key === "Escape") document.getElementById("save-route-input").classList.add("hidden");
 });
 
@@ -3058,7 +3064,7 @@ function startInlineRename(labelEl, routeId) {
     }
 
     input.addEventListener("keydown", function (e) {
-        if (e.key === "Enter") commit();
+        if (e.key === "Enter") { if (!isImeComposing(e)) commit(); }
         else if (e.key === "Escape") cancel();
     });
     input.addEventListener("blur", commit);
