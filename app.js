@@ -340,6 +340,11 @@ function setAutocompleteOpen(open) {
     if (wrapper) wrapper.setAttribute("aria-expanded", open ? "true" : "false");
 }
 
+// Enter that confirms a Chinese/Japanese/Korean IME candidate is not a submit.
+// isComposing covers Chrome/Firefox; keyCode 229 covers Safari, which resets
+// isComposing before the confirming keydown reaches script (WebKit 165004).
+function isImeComposing(e) { return e.isComposing || e.keyCode === 229; }
+
 function setupAutocomplete() {
     var input = document.getElementById("address-input");
     var list = document.getElementById("autocomplete-list");
@@ -363,6 +368,8 @@ function setupAutocomplete() {
         setTimeout(function () { setAutocompleteOpen(false); }, 200);
     });
     input.addEventListener("keydown", function (e) {
+        // Mid-conversion, Enter/Escape/arrows belong to the IME, not the listbox.
+        if (isImeComposing(e)) return;
         var items = list.querySelectorAll("[role='option']");
         if (e.key === "Escape") { setAutocompleteOpen(false); return; }
         if (e.key === "ArrowDown") {
@@ -2724,6 +2731,7 @@ async function confirmSaveRoute() {
 
 document.getElementById("save-route-confirm").addEventListener("click", confirmSaveRoute);
 document.getElementById("save-route-name").addEventListener("keydown", function (e) {
+    if (isImeComposing(e)) return; // Enter/Escape belong to the IME mid-conversion
     if (e.key === "Enter") confirmSaveRoute();
     if (e.key === "Escape") document.getElementById("save-route-input").classList.add("hidden");
 });
@@ -3058,6 +3066,7 @@ function startInlineRename(labelEl, routeId) {
     }
 
     input.addEventListener("keydown", function (e) {
+        if (isImeComposing(e)) return; // Enter/Escape belong to the IME mid-conversion
         if (e.key === "Enter") commit();
         else if (e.key === "Escape") cancel();
     });
