@@ -22,6 +22,8 @@ body {
     height: 100dvh;
     overflow: hidden;
     touch-action: manipulation;
+    /* No grey tap box on phones; buttons show their own :active state instead. */
+    -webkit-tap-highlight-color: transparent;
 }
 
 /* ── Controls bar ─────────────────────────────────── */
@@ -67,9 +69,11 @@ body {
     min-width: 120px;
 }
 
-.controls button:hover:not(:disabled) {
-    background: #2f3344;
-    border-color: #5a5d6a;
+@media (hover: hover) and (pointer: fine) {
+    .controls button:hover:not(:disabled) {
+        background: #2f3344;
+        border-color: #5a5d6a;
+    }
 }
 
 .controls button:active:not(:disabled) {
@@ -149,11 +153,18 @@ body {
     transition: background 0.15s, border-color 0.15s;
 }
 
-.distance-pill:hover:not(:disabled),
-.distance-pill:focus-visible {
+.distance-pill:focus-visible,
+.distance-pill:active:not(:disabled) {
     background: #2d3142;
     border-color: #4a4d5a;
     outline: none;
+}
+@media (hover: hover) and (pointer: fine) {
+    .distance-pill:hover:not(:disabled) {
+        background: #2d3142;
+        border-color: #4a4d5a;
+        outline: none;
+    }
 }
 
 .distance-pill:disabled {
@@ -218,9 +229,15 @@ body {
     cursor: pointer;
 }
 
-.distance-menu button:hover {
+.distance-menu button:active {
     background: #252836;
     color: #6ee7b7;
+}
+@media (hover: hover) and (pointer: fine) {
+    .distance-menu button:hover {
+        background: #252836;
+        color: #6ee7b7;
+    }
 }
 
 /* ── GPS location dot ────────────────────────────── */
@@ -333,8 +350,13 @@ body {
     inset: -8px;
 }
 
-.menu-close:hover {
+.menu-close:active {
     color: #f0f0f0;
+}
+@media (hover: hover) and (pointer: fine) {
+    .menu-close:hover {
+        color: #f0f0f0;
+    }
 }
 
 .menu-body {
@@ -357,8 +379,13 @@ body {
     text-align: left;
 }
 
-.menu-item:hover {
+.menu-item:active {
     background: #252836;
+}
+@media (hover: hover) and (pointer: fine) {
+    .menu-item:hover {
+        background: #252836;
+    }
 }
 
 button.menu-item {
@@ -425,9 +452,15 @@ button.menu-item {
     inset: -8px;
 }
 
-.address-clear:hover {
+.address-clear:active {
     background: #252836;
     color: #d0d0d0;
+}
+@media (hover: hover) and (pointer: fine) {
+    .address-clear:hover {
+        background: #252836;
+        color: #d0d0d0;
+    }
 }
 
 .address-clear.hidden {
@@ -459,8 +492,13 @@ button.menu-item {
     font-weight: 600;
 }
 
-.menu-install:hover {
+.menu-install:active {
     background: rgba(110, 231, 183, 0.12);
+}
+@media (hover: hover) and (pointer: fine) {
+    .menu-install:hover {
+        background: rgba(110, 231, 183, 0.12);
+    }
 }
 
 .menu-install:focus-visible {
@@ -561,8 +599,13 @@ button.menu-item {
     white-space: nowrap;
 }
 
-.saved-item-name:hover {
+.saved-item-name:active {
     color: #6ee7b7;
+}
+@media (hover: hover) and (pointer: fine) {
+    .saved-item-name:hover {
+        color: #6ee7b7;
+    }
 }
 
 .saved-item-edit {
@@ -580,8 +623,13 @@ button.menu-item {
     position: absolute;
     inset: -8px -4px;
 }
-.saved-item-edit:hover {
+.saved-item-edit:active {
     opacity: 1;
+}
+@media (hover: hover) and (pointer: fine) {
+    .saved-item-edit:hover {
+        opacity: 1;
+    }
 }
 .saved-item-rename-input {
     flex: 1;
@@ -610,8 +658,13 @@ button.menu-item {
     inset: -10px -4px -10px -2px;
 }
 
-.saved-item-delete:hover {
+.saved-item-delete:active {
     color: #f87171;
+}
+@media (hover: hover) and (pointer: fine) {
+    .saved-item-delete:hover {
+        color: #f87171;
+    }
 }
 
 .menu-progress {
@@ -665,8 +718,13 @@ button.menu-item:disabled {
     cursor: pointer;
 }
 
-.save-confirm:hover {
+.save-confirm:active {
     background: #3a8063;
+}
+@media (hover: hover) and (pointer: fine) {
+    .save-confirm:hover {
+        background: #3a8063;
+    }
 }
 
 /* ── Saved route detail ──────────────────────────── */
@@ -685,8 +743,13 @@ button.menu-item:disabled {
     text-decoration: none;
 }
 
-.menu-request:hover {
+.menu-request:active {
     color: #6ee7b7;
+}
+@media (hover: hover) and (pointer: fine) {
+    .menu-request:hover {
+        color: #6ee7b7;
+    }
 }
 
 .menu-request.hidden {
@@ -722,8 +785,13 @@ button.menu-item:disabled {
     text-decoration: none;
 }
 
-.menu-support:hover {
+.menu-support:active {
     color: #6ee7b7;
+}
+@media (hover: hover) and (pointer: fine) {
+    .menu-support:hover {
+        color: #6ee7b7;
+    }
 }
 
 .menu-support-blurb {
@@ -792,8 +860,13 @@ button.menu-item:disabled {
     white-space: nowrap;
 }
 
-.tip-toast-link:hover {
+.tip-toast-link:active {
     text-decoration: underline;
+}
+@media (hover: hover) and (pointer: fine) {
+    .tip-toast-link:hover {
+        text-decoration: underline;
+    }
 }
 
 .tip-toast-close {
@@ -807,8 +880,13 @@ button.menu-item:disabled {
     padding: 0 2px;
 }
 
-.tip-toast-close:hover {
+.tip-toast-close:active {
     color: #d0d0d0;
+}
+@media (hover: hover) and (pointer: fine) {
+    .tip-toast-close:hover {
+        color: #d0d0d0;
+    }
 }
 
 @media (max-width: 480px) {
@@ -832,9 +910,15 @@ button.menu-item:disabled {
     text-decoration-color: #3a3d4a;
 }
 
-.menu-credits a:hover {
+.menu-credits a:active {
     color: #d0d0d0;
     text-decoration-color: #6ee7b7;
+}
+@media (hover: hover) and (pointer: fine) {
+    .menu-credits a:hover {
+        color: #d0d0d0;
+        text-decoration-color: #6ee7b7;
+    }
 }
 
 .menu-version {
@@ -872,10 +956,16 @@ button.menu-item:disabled {
     transition: background 0.1s;
 }
 
-.autocomplete-item:hover,
-.autocomplete-item.active {
+.autocomplete-item.active,
+.autocomplete-item:active {
     background: #252836;
     color: #f0f0f0;
+}
+@media (hover: hover) and (pointer: fine) {
+    .autocomplete-item:hover {
+        background: #252836;
+        color: #f0f0f0;
+    }
 }
 
 .autocomplete-item:last-child { border-bottom: none; }
@@ -941,10 +1031,16 @@ button.menu-item:disabled {
     border-bottom-color: #3a3d4a;
 }
 
-.leaflet-bar a:hover,
-.leaflet-bar a:focus {
+.leaflet-bar a:focus,
+.leaflet-bar a:active {
     background-color: #2f3344;
     color: #f0f0f0;
+}
+@media (hover: hover) and (pointer: fine) {
+    .leaflet-bar a:hover {
+        background-color: #2f3344;
+        color: #f0f0f0;
+    }
 }
 
 .leaflet-bar a.leaflet-disabled {
@@ -1106,10 +1202,17 @@ button.menu-item:disabled {
     cursor: default;
 }
 
-.elevation-toggle:hover:not(:disabled) {
+.elevation-toggle:active:not(:disabled) {
     background: #2f3342;
     border-color: #3a3e4d;
     color: #ffffff;
+}
+@media (hover: hover) and (pointer: fine) {
+    .elevation-toggle:hover:not(:disabled) {
+        background: #2f3342;
+        border-color: #3a3e4d;
+        color: #ffffff;
+    }
 }
 
 #elevation-container {
@@ -1220,8 +1323,13 @@ button.menu-item:disabled {
     transition: background 0.15s;
 }
 
-.banner-retry:hover {
+.banner-retry:active {
     background: rgba(255, 255, 255, 0.08);
+}
+@media (hover: hover) and (pointer: fine) {
+    .banner-retry:hover {
+        background: rgba(255, 255, 255, 0.08);
+    }
 }
 
 .info-banner-action {
@@ -1235,8 +1343,13 @@ button.menu-item:disabled {
     cursor: pointer;
 }
 
-.info-banner-action:hover {
+.info-banner-action:active {
     background: rgba(255, 255, 255, 0.1);
+}
+@media (hover: hover) and (pointer: fine) {
+    .info-banner-action:hover {
+        background: rgba(255, 255, 255, 0.1);
+    }
 }
 
 .info-banner.offline {
@@ -1333,8 +1446,13 @@ button.menu-item:disabled {
     transition: background 0.15s;
 }
 
-.modal button:hover {
+.modal button:active {
     background: #3a8063;
+}
+@media (hover: hover) and (pointer: fine) {
+    .modal button:hover {
+        background: #3a8063;
+    }
 }
 
 @media (hover: none), (pointer: coarse) {

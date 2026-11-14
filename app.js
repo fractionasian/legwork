@@ -6,6 +6,11 @@
 // Pure domain code lives in routing.js; IndexedDB wrappers in storage.js; tile
 // + Overpass loading and graph extension in tiles.js.
 
+// iOS Safari only applies CSS :active when a touchstart listener exists on the
+// element or an ancestor. Without this, buttons show no press colour on iPhone
+// (the grey tap box is turned off in style.css). Passive, so it never delays scrolling.
+document.addEventListener("touchstart", function () {}, { passive: true });
+
 // ── State ──────────────────────────────────────────────
 var state = {
     map: null,
