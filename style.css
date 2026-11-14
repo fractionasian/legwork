@@ -192,11 +192,13 @@ body {
     border-radius: 8px;
     box-shadow: 0 4px 16px rgba(0,0,0,0.4);
     min-width: 160px;
-    /* 1001, not 1000: Leaflet's corner controls (.leaflet-top/.leaflet-bottom)
-       are also 1000, and #map comes after the controls bar, so a tie let the
-       layer button draw over the open menu. Stays under banners (1100),
-       toasts (1200) and modals (9998+). */
-    z-index: 1001;
+    /* Above Leaflet's corner controls (.leaflet-top/.leaflet-bottom, 1000):
+       #map comes after the controls bar, so a tie let the layer button draw
+       over the open menu. Above info banners (1100) too, so a banner never
+       covers "Save route" while the menu is open (Peter, 2026-11-14): the
+       menu is short-lived and the banner is still there when it closes.
+       Stays under toasts (1200) and modals (9998+). */
+    z-index: 1150;
     overflow: hidden;
 }
 
