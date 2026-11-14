@@ -55,3 +55,30 @@ any change to `updateRoute`, `resolveSegment`, or `clearRouteLayers`.
 Note: read these counts immediately. Once route elevation loads, the plain
 `routeLines` are intentionally swapped for the gradient `state.gradientLines`, so
 `routeLines` returns to 0 in normal use — that's the hotline render, not a leak.
+
+## Fast-path case (no gap-fill)
+
+A superseded call can also resume after an `await resolveSegment(...)` that did
+no gap-fill. Every `await` yields. Restoring a route re-adds its pins back to
+back, and each one fires `updateRoute()`. Before 2026-11-14, a stale pass then
+drew its dashed "back to start" leg into the single `state.closingLine` slot. The
+newer pass overwrote the slot, and the old line stayed on the map for good.
+
+Open the app with a loop of 3+ pins in a pre-baked city (e.g. a Perth share
+link ending `&m=loop`), wait for it to draw, then paste:
+
+```js
+(async () => {
+  state.mode = "loop";
+  await Promise.all([updateRoute(), updateRoute(), updateRoute()]);
+  let dashed = 0;
+  state.map.eachLayer(l => { if (l instanceof L.Polyline && l.options.dashArray === "10 6") dashed++; });
+  console.log({ dashedClosingLines: dashed }); // EXPECT 1
+})();
+```
+
+`dashedClosingLines > 1` means stale passes are drawing onto the newer route.
+The fix is the `gen !== _routeGen` re-check after each await in `updateRoute`.
+Measured 2026-11-14 on a 4-pin Dalkeith loop: 4 without the re-check, 1 with it.
+Read the count straight away: once elevation loads, the gradient repaint removes
+`state.closingLine`, so the count drops to 0 in normal use.
