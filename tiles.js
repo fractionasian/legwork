@@ -431,6 +431,9 @@ async function loadPaths(lat, lon, opts) {
     // Stale generations are swept by cachePruneStale.
     var cacheKey = "paths4:" + lat.toFixed(3) + ":" + lon.toFixed(3) + ":" + radius;
 
+    // A gap-fill step can go stale while loadTilesOrPaths awaits the tile
+    // check, before this runs — don't post "Loading paths" over the newer route.
+    if (isStale()) return false;
     var posted = "Loading paths";
     showBanner(posted, "loading");
     // Clear only a banner this load put up; a newer one belongs to someone else.
@@ -443,6 +446,7 @@ async function loadPaths(lat, lon, opts) {
     var cached = await cacheGet(cacheKey, PATHS_TTL);
     if (cached) {
         applyPaths(cached, { skipRender: true });
+        if (isStale()) { abandon(); return true; }
         showBanner("");
         return true;
     }
