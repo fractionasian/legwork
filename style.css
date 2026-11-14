@@ -201,7 +201,7 @@ body {
     .controls { gap: 4px; padding-left: 8px; padding-right: 8px; }
     .mode-group { gap: 4px; }
     .controls button { padding: 10px 8px; min-width: 36px; }
-    #mode-btn { min-width: 100px; } /* "⇄ Out & Back" at this padding */
+    #mode-btn { min-width: 101px; } /* fits "⇄ Out & Back", so cycling modes never shifts the bar */
     .distance-pill { padding: 4px 8px; }
     .controls .distance-display { font-size: 17px; }
     .distance-chevron { margin-left: 4px; }
@@ -210,7 +210,7 @@ body {
     .controls { gap: 3px; padding-left: 6px; padding-right: 6px; }
     .mode-group { gap: 3px; }
     .controls button { font-size: 12px; padding: 10px 6px; }
-    #mode-btn { min-width: 88px; }
+    #mode-btn { min-width: 91px; } /* same, at 12 px text */
     .distance-pill { padding: 4px 6px; }
     .controls .distance-display { font-size: 16px; }
 }
