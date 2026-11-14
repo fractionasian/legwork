@@ -1041,6 +1041,8 @@ button.menu-item:disabled {
 }
 
 .elevation-stats {
+    /* Positioned so the toggle's ::before can stretch over the whole bar. */
+    position: relative;
     display: flex;
     transition: padding-bottom 280ms cubic-bezier(0.2, 0.8, 0.2, 1);
     align-items: center;
@@ -1072,7 +1074,6 @@ button.menu-item:disabled {
 
 .elevation-toggle {
     flex-shrink: 0;
-    position: relative;
     background: #252836;
     border: 1px solid #2a2d3a;
     color: #d0d0d0;
@@ -1083,16 +1084,18 @@ button.menu-item:disabled {
     border-radius: 6px;
     cursor: pointer;
     transition: background 0.15s, color 0.15s, border-color 0.15s;
-    /* Expand the touch target above the visible pill so the collapsed strip
-       has a finger-sized hitbox that clears the Leaflet attribution row. */
     min-height: 32px;
     min-width: 48px;
 }
 
+/* The whole stats bar is the toggle (Peter, 2026-11-14): the button is not
+   positioned, so this overlay sizes to .elevation-stats and a tap anywhere on
+   the bar, left or right thumb, hits the button. One control, so keyboard,
+   aria-expanded and the disabled state (no route) all still come from it. */
 .elevation-toggle::before {
     content: "";
     position: absolute;
-    inset: -10px -8px -10px -8px;
+    inset: 0;
 }
 
 .elevation-toggle:disabled {
