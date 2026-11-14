@@ -192,7 +192,11 @@ body {
     border-radius: 8px;
     box-shadow: 0 4px 16px rgba(0,0,0,0.4);
     min-width: 160px;
-    z-index: 1000;
+    /* 1001, not 1000: Leaflet's corner controls (.leaflet-top/.leaflet-bottom)
+       are also 1000, and #map comes after the controls bar, so a tie let the
+       layer button draw over the open menu. Stays under banners (1100),
+       toasts (1200) and modals (9998+). */
+    z-index: 1001;
     overflow: hidden;
 }
 
