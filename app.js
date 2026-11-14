@@ -1024,9 +1024,10 @@ var MIN_DETOUR_DIST = 200;
 
 // Resolve a routed path between two waypoints, gap-filling if needed. Returns
 // { result } normally, or { superseded: true } if a newer updateRoute() bumped the
-// generation while we awaited the gap-fill — the caller MUST then bail without
-// mutating shared route state. This is the concurrency guard; the gen check stays
-// immediately after the await and before any caller-side mutation.
+// generation while we awaited the gap-fill. This is NOT the whole concurrency
+// guard: even with no gap-fill, awaiting this yields, so the caller re-checks
+// `gen !== _routeGen` after every await before mutating shared route state
+// (see updateRoute; test/concurrency-check.md, fast-path case).
 async function resolveSegment(fromWp, toWp, gen) {
     // A pending/failed endpoint (nodeKey null) can't be routed — dijkstra would
     // return null and we'd fire the multi-fetch gap-fill for a leg whose
