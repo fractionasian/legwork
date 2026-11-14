@@ -1047,7 +1047,7 @@ async function resolveSegment(fromWp, toWp, gen) {
     var needsGapFill = !result || result.path.length < 2 ||
         (pathGeomLength(result.path) > straight * MAX_DETOUR_RATIO && straight > MIN_DETOUR_DIST);
     if (needsGapFill) {
-        result = await fillGapAndRetry(fromWp, toWp);
+        result = await fillGapAndRetry(fromWp, toWp, gen);
         if (gen !== _routeGen) return { superseded: true };
     }
     return { result: result };

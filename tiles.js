@@ -8,7 +8,7 @@
 //                PackedGraph, quantise6
 //   storage.js — cacheGet, cacheSet, cachePruneStale, PATHS_TTL
 //   app.js     — state, showBanner, showBannerWithRetry, fetchWithTimeout, escapeText,
-//                track
+//                track, _routeGen
 //   external   — L (Leaflet)
 
 // Pre-baked tiles live in the separate legwork-tiles repo (keeps this repo light).
@@ -208,10 +208,10 @@ async function loadTilesInViewport() {
     if (result.fetched > 0) console.log("Viewport preloaded " + result.fetched + " tiles");
 }
 
-async function loadTilesOrPaths(lat, lon) {
+async function loadTilesOrPaths(lat, lon, opts) {
     var tilesLoaded = await loadTilesForLocation(lat, lon);
     if (tilesLoaded) return true;
-    return await loadPaths(lat, lon); // boolean — false if all retries exhausted
+    return await loadPaths(lat, lon, opts); // boolean — false if all retries exhausted
 }
 
 // Clear the routing graph + cached path features when the user teleports to a
@@ -418,7 +418,12 @@ async function loadGraphFromWorker(lat, lon, radius) {
     }
 }
 
-async function loadPaths(lat, lon) {
+// opts.isStale (optional): returns true once nobody is waiting on this load —
+// the gap-fill passes one that trips when a newer route supersedes it. A stale
+// load stops retrying and leaves the banner to whoever owns it now; otherwise
+// its "retry N/3" lands on top of the newer, already-drawn route.
+async function loadPaths(lat, lon, opts) {
+    var isStale = (opts && opts.isStale) || function () { return false; };
     var radius = radiusFromZoom();
     // paths: → paths2: added node tags; paths2: → paths3: added
     // track/bridleway/byway to the query; paths3: → paths4: rounded
@@ -426,11 +431,22 @@ async function loadPaths(lat, lon) {
     // Stale generations are swept by cachePruneStale.
     var cacheKey = "paths4:" + lat.toFixed(3) + ":" + lon.toFixed(3) + ":" + radius;
 
-    showBanner("Loading paths", "loading");
+    // A gap-fill step can go stale while loadTilesOrPaths awaits the tile
+    // check, before this runs — don't post "Loading paths" over the newer route.
+    if (isStale()) return false;
+    var posted = "Loading paths";
+    showBanner(posted, "loading");
+    // Clear only a banner this load put up; a newer one belongs to someone else.
+    var abandon = function () {
+        var el = document.getElementById("info-banner");
+        if (el.dataset.type === "loading" && el.textContent === posted) showBanner("");
+        return false;
+    };
 
     var cached = await cacheGet(cacheKey, PATHS_TTL);
     if (cached) {
         applyPaths(cached, { skipRender: true });
+        if (isStale()) { abandon(); return true; }
         showBanner("");
         return true;
     }
@@ -489,7 +505,9 @@ async function loadPaths(lat, lon) {
             }
             var geojson = osmToGeoJSON(raw);
             await cacheSet(cacheKey, geojson);
+            // Applied even when stale: the paths are real and the next route can use them.
             applyPaths(geojson, { skipRender: true });
+            if (isStale()) { abandon(); return true; }
             showBanner("");
             return true;
         } catch (e) {
@@ -497,9 +515,12 @@ async function loadPaths(lat, lon) {
             // threw with raw still set — without clearing it, every retry would
             // re-parse the same bad object instead of falling back to Overpass.
             raw = null;
+            if (isStale()) return abandon();
             if (attempt < maxRetries) {
-                showBanner("Loading paths (retry " + (attempt + 1) + "/" + maxRetries + ")...", "loading");
+                posted = "Loading paths (retry " + (attempt + 1) + "/" + maxRetries + ")...";
+                showBanner(posted, "loading");
                 await new Promise(function (r) { setTimeout(r, delay * Math.pow(2, attempt)); });
+                if (isStale()) return abandon();
                 continue;
             }
             showBannerWithRetry("Failed to load paths: " + e.message, function () {
@@ -635,21 +656,27 @@ function rebuildGraphForProfile() {
 }
 
 // ── Gap filling ───────────────────────────────────────
-async function fillGapAndRetry(fromWp, toWp) {
+// gen (optional): the updateRoute generation this fill is for. Once a newer
+// route has started, the fill stops loading and stops touching the banner —
+// the caller discards a superseded result anyway.
+async function fillGapAndRetry(fromWp, toWp, gen) {
+    var isStale = function () { return gen !== undefined && gen !== _routeGen; };
     var dist = haversine(fromWp.lat, fromWp.lon, toWp.lat, toWp.lon);
     var steps = Math.max(1, Math.ceil(dist / 1500)); // one load every ~1.5km
     var loaded = false;
 
     showBanner("Expanding route coverage...", "loading");
     for (var s = 0; s <= steps; s++) {
+        if (isStale()) return null;
         var t = steps === 0 ? 0.5 : s / steps;
         var midLat = fromWp.lat + t * (toWp.lat - fromWp.lat);
         var midLon = fromWp.lon + t * (toWp.lon - fromWp.lon);
         if (steps > 1) showBanner("Expanding route coverage (" + (s + 1) + "/" + (steps + 1) + ")...", "loading");
         // Only count a step as loaded if it actually extended the graph — a
         // failed/exhausted load must not let us proceed to route on stale data.
-        if (await loadTilesOrPaths(midLat, midLon)) loaded = true;
+        if (await loadTilesOrPaths(midLat, midLon, { isStale: isStale })) loaded = true;
     }
+    if (isStale()) return null;
 
     if (!loaded) return null;
 
