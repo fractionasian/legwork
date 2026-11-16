@@ -29,6 +29,25 @@ hosts, so none of these headers were observed live.
 - Re-check: before enabling either layer. Load the app, switch to the layer,
   and look for `access-control-allow-origin` on a tile in DevTools → Network.
 
+## Self-hosted base map (Protomaps / PMTiles): parked until a trigger fires
+
+Added 2026-11-16, after reading Bruce Röttgers' "Protomaps: Self-hosting map
+tiles has gotten cheap and easy" (2026-11-15). Street tiles come free from
+`tile.openstreetmap.org` (`app.js:208`), so there is no bill to save today. The
+risk is OSM's tile usage policy throttling or blocking Legwork as traffic grows.
+
+- **The move:** a PMTiles extract (Australia or per-city, not the 139 GB world
+  file) in R2, served through the existing Worker that translates z/x/y into
+  range reads.
+- **The cost:** PMTiles are vector tiles. Leaflet draws rasters, so this needs
+  the `protomaps-leaflet` plugin or a move to MapLibre GL (a map-layer
+  rewrite). We would also own styling and data refreshes.
+- **Trigger, either one:** (1) OSM tiles return 403 or are throttled for
+  Legwork; (2) analytics show sustained traffic growth beyond the current
+  baseline.
+- Unverified: current R2 pricing and Australia extract size. Check both before
+  costing it.
+
 ## Product decisions
 
 - **Bike one-way handling: shipped 2026-10-01.** Implemented the way OSRM's
