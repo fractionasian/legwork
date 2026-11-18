@@ -109,7 +109,7 @@ for (const cityId of CITIES) {
       const ms = performance.now() - w0;
       results.push({
         city: cityId, start: si, lat, lon, nTiles, target, ms, headingsTried: loops.headingsTried,
-        loops: loops.map((l) => ({ length: l.length, deviation: l.deviation, error: l.error, overlap: l.overlap, ok: l.ok, onAim: l.onAim, turnsPerKm: l.turnsPerKm, jittered: !!l.jittered, tries: l.tries.length })),
+        loops: loops.map((l) => ({ length: l.length, deviation: l.deviation, error: l.error, overlap: l.overlap, ok: l.ok, onAim: l.onAim, turnsPerKm: l.turnsPerKm, vias: l.vias || 0, pins: l.waypoints.length, jittered: !!l.jittered, tries: l.tries.length })),
       });
     }
   }
@@ -157,6 +157,7 @@ console.log(`all: ${all.filter((l) => l.onAim).length}/${all.length} loops on ai
   `mean overlap ${pct(all.reduce((a, l) => a + l.overlap, 0) / all.length)}, ` +
   `turns/km p50 ${at(all.map((l) => l.turnsPerKm).sort((a, b) => a - b), 0.5).toFixed(1)} ` +
   `p90 ${at(all.map((l) => l.turnsPerKm).sort((a, b) => a - b), 0.9).toFixed(1)}, ` +
+  `loops with an extra pin ${all.filter((l) => l.vias > 0).length}, ` +
   `jitter retries ${all.filter((l) => l.jittered).length}, ` +
   `ms p50 ${Math.round(at(allMs, 0.5))} p90 ${Math.round(at(allMs, 0.9))} max ${Math.round(allMs[allMs.length - 1])}, ` +
   `wall ${wall.toFixed(1)} s (includes tile loading)`);

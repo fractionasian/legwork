@@ -1,6 +1,6 @@
 ---
 status: approved — Peter accepted all five Layer-1 defaults and the Assumed list, 2026-11-18
-next: PR 1 open as fractionasian/legwork#57 (Peter accepted Sydney 5 km at 17/20, 2026-11-18); then PR 2 (UI)
+next: PR 1 open as fractionasian/legwork#57, gate passing 8/8 after the review fix (round 6); then PR 2 (UI)
 created: 2026-11-18
 trigger: Three Routes (iOS) OzBargain freebie, ozbargain.com.au/node/983771, 2026-11-17
 ---
@@ -263,6 +263,14 @@ location at the existing 0.005° grid only.
   ground that's actually reachable instead of burning its attempts. Both passes only
   restrict where pins go, and every leg is still routed by `dijkstra()`, so what's
   drawn is what was measured.
+- **No leg the app would re-fetch; such a leg gets an extra pin (round 6, review
+  fix, Peter 2026-11-18).** The app re-fetches paths for any leg more than 3× its
+  straight line (gap over 200 m) and may then draw it differently. That rule now
+  lives in `routing.js` (`legNeedsGapFill`) and both `resolveSegment` and the
+  generator use it. When a generated leg would trip it (corners either side of an
+  inlet), the generator puts a pin at the leg's halfway point by ground distance,
+  near the inlet's head, and routes and measures the two halves. A loop can therefore
+  be 6 pins, not 5. If a half still trips, that attempt counts as no loop.
 - **Not a Web Worker.** The routing graph lives on the main thread (about 40 MB
   after a first pin, up to ~300 MB for a whole city). A worker would need its own
   copy of it, either sent with every request or kept in step as tiles stream in. The
@@ -426,6 +434,21 @@ Gate rows, shipped: Per 19 / 18, Mel 20 / 20, **Syd 17** / 18, Bri 19 / 20.
   pass doesn't, so a reused leg could differ from what the pipeline draws. Each kept
   loop would then need re-routing to check it. Proposal only.
 
+**Round 6 (2026-11-18): the review fix.** `/review-pass` (arch) found the generator
+could offer a leg the app would gap-fill and redraw. The same 80 starts, both runs in
+parallel.
+
+| Setting | Gate rows passing | Syd 5 km | Loops acceptable | Loops with an extra pin | Mean overlap | ms p50 / p90 / max |
+|---|---|---|---|---|---|---|
+| Round 5 (no check) | 7/8 | 17 | 434/474 | 0 | 20% | 1,083 / 2,644 / 7,400 |
+| Strict: refuse such legs (`LOOP_SPLIT=0`) | 5/8 | 14 | 407/474 | 0 | 18% | 1,098 / 2,626 / 7,349 |
+| **Split with an extra pin (shipped)** | **8/8** | **18** | 432/474 | 56 | 19% | 1,183 / 3,020 / 8,223 |
+
+Gate rows, shipped: Per 19 / 18, Mel 20 / 20, Syd 18 / 18, Bri 19 / 20. **Gate: PASS.**
+Round 5's 434 had been counting loops the app might have redrawn. Strict refusal
+showed how many (27 fewer acceptable). The extra pin recovers almost all of them
+honestly.
+
 What would move the gate next, as listed after round 2:
 
 1. *Open, proposal:* **let a near-miss heading try a different radius direction.** A
@@ -439,9 +462,9 @@ What would move the gate next, as listed after round 2:
 ### Sequencing (one PR per idea)
 
 1. `routing.js` generator + unit tests + real-tile harness numbers (no UI).
-   Gate: harness hits the success metric. *Outcome:* 7 of 8 rows; Sydney 5 km at
-   17/20. Peter accepted that and opened the PR anyway (2026-11-18, "No, open the
-   PR"): fractionasian/legwork#57.
+   Gate: harness hits the success metric. *Outcome:* Peter opened the PR at 7 of 8
+   rows (Sydney 5 km 17/20; 2026-11-18, "No, open the PR"): fractionasian/legwork#57.
+   After the review's extra-pin fix (round 6) the gate passes in all 8 rows.
 2. Chip, preset row, candidate flipper, telemetry enum. `/review-pass`, then
    `/first-users` (public app, visible change).
 3. Out-and-back generation (decision 7) on the same chip, reusing PR 1's search.
@@ -457,17 +480,22 @@ need re-routing to check it.
 
 ### Handover (PR 1, 2026-11-18)
 
-PR 1 is open as fractionasian/legwork#57 (branch `claude/loop-generator-engine-e71d07`,
-`/review-pass` run). Not merged. Shipped constants: 6 headings, 5-point polygon, aim
-0 to +5% over (accept −3% to +10%), early stop, fewer turns as a tie-breaker, and
-corners only on ground the shared search marks as reachable and not the long way
-round. On the changed metric (3 loops, 2+ acceptable), 7 of 8 rows pass. Sydney 5 km
-is one start short at 17/20, and Peter accepted that for PR 1. Overlap is reported,
-not gated (see Success metrics). Speed on a Mac: median about 1.1 s, p90 2.6 s, max
-7.4 s, before phone slowdown. Next: merge #57, then PR 2 (UI). PR 2 must load more
-than a first pin's 3 tiles before offering 15 and 21 km. To reproduce: export the tiles
-with `git -C ~/legwork-tiles archive origin/master manifest.json tiles/perth
-tiles/melbourne tiles/sydney tiles/brisbane | tar -x -C <dir>`, then
-`node scripts/loop-harness.mjs --tiles <dir>`. `--set "NAME=value"` and `--tile-km`
-are for tuning runs, and the report header says when either is in use. Unknown flags
-are rejected.
+PR 1 is open as fractionasian/legwork#57 (branch `claude/loop-generator-engine-e71d07`),
+with `/review-pass` run and its findings fixed. Not merged. Shipped constants: 6
+headings, 5-point polygon, aim 0 to +5% over (accept −3% to +10%), early stop, fewer
+turns as a tie-breaker, corners only on ground the shared search marks as reachable
+and not the long way round, and an extra pin on any leg the app would re-fetch. **The
+gate passes in all 8 rows** (3 loops, 2+ acceptable). Overlap is reported, not gated
+(see Success metrics). Speed on a Mac: median about 1.2 s, p90 3.0 s, max 8.2 s, before
+phone slowdown. Next: merge #57, then PR 2 (UI). PR 2 must:
+- extend `isStale` to a replaced graph and to profile or mode changes (see the
+  `generateLoops` comment);
+- load more than a first pin's ~3 tiles before offering 15 and 21 km;
+- feed pins without counting each one as a `pin-drop`, and expect up to 6 pins;
+- take the shown length from the pipeline once a candidate is drawn.
+
+To reproduce: export the tiles with `git -C ~/legwork-tiles archive origin/master
+manifest.json tiles/perth tiles/melbourne tiles/sydney tiles/brisbane | tar -x -C
+<dir>`, then `node scripts/loop-harness.mjs --tiles <dir>`. `--set "NAME=value"` and
+`--tile-km` are for tuning runs, and the report header says when either is in use.
+Unknown flags are rejected.

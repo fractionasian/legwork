@@ -854,6 +854,7 @@ var LOOP_AIM_HI = 0.05;        //   rescaling stops once a loop lands in it
 var LOOP_UNDER = 0.03;         // accept window −3% to +10%; outside it a loop is only
 var LOOP_OVER = 0.10;          //   a near miss, shown with its true length (decision 5)
 var LOOP_EARLY_STOP = 1;       // stop after the first spread of headings if it gave k good loops
+var LOOP_SPLIT = 1;            // split a leg the app would gap-fill with an extra pin (routeLegs)
 var LOOP_REACH = 1;            // corners only on ground reachable from the start and back
 var LOOP_CORNER_DETOUR = 3;    // ...and whose route cost from the start is at most this × the
 var LOOP_CORNER_SLACK = 300;   //   straight line + this many metres (0 = off): no corners
@@ -900,22 +901,57 @@ function loopOverlap(paths) {
     return twice / total;
 }
 
-// Route the legs between consecutive keys. Returns null if a leg has no path, or if a
-// leg is one the app would gap-fill (legNeedsGapFill): the pipeline would fetch more
-// paths for it and could draw a different route from the one measured here. Corners
-// that far round (two sides of an inlet) count as no loop, and r shrinks.
-function routeLegs(graph, keys) {
-    var paths = [], length = 0;
-    for (var i = 1; i < keys.length; i++) {
-        var res = dijkstra(graph, keys[i - 1], keys[i]);
-        if (!res) return null;
-        var a = keys[i - 1].split(","), b = keys[i].split(",");
-        var straight = haversine(parseFloat(a[0]), parseFloat(a[1]), parseFloat(b[0]), parseFloat(b[1]));
-        if (legNeedsGapFill(res.path, straight)) return null;
-        paths.push(res.path);
-        length += pathGeomLength(res.path);
+function keyDistance(a, b) {
+    var p = a.split(","), q = b.split(",");
+    return haversine(parseFloat(p[0]), parseFloat(p[1]), parseFloat(q[0]), parseFloat(q[1]));
+}
+
+// The node halfway along a path by ground distance. For a leg that runs round an inlet,
+// that's near the inlet's head, where an extra pin splits it into two direct legs.
+function pathMidpointKey(path) {
+    var half = pathGeomLength(path) / 2, run = 0;
+    for (var i = 1; i < path.length - 1; i++) {
+        run += keyDistance(path[i - 1], path[i]);
+        if (run >= half) return path[i];
     }
-    return { paths: paths, length: length };
+    return null;
+}
+
+// Route the legs between consecutive keys (the last key closes the loop). Returns
+// { paths, length, keys, vias }, or null if a leg has no path.
+//
+// A leg the app would gap-fill (legNeedsGapFill: more than 3x its straight line) would
+// be re-fetched by the pipeline and could be drawn differently from what's measured
+// here. With LOOP_SPLIT, such a leg gets an extra pin at its halfway point (pathMidpointKey)
+// and both halves are routed afresh, so the pins the pipeline gets are exactly the legs
+// measured. If a half still trips the rule, or LOOP_SPLIT is off, there's no loop and r
+// shrinks. keys comes back with the extra pins in place, minus the closing key.
+function routeLegs(graph, keys) {
+    var paths = [], length = 0, out = [keys[0]], vias = 0;
+    function leg(from, to) {
+        var res = dijkstra(graph, from, to);
+        if (!res) return null;
+        return legNeedsGapFill(res.path, keyDistance(from, to)) ? { tripped: true, path: res.path } : res;
+    }
+    for (var i = 1; i < keys.length; i++) {
+        var from = keys[i - 1], to = keys[i], res = leg(from, to);
+        if (!res) return null;
+        if (res.tripped) {
+            var via = LOOP_SPLIT ? pathMidpointKey(res.path) : null;
+            if (!via) return null;
+            var h1 = leg(from, via), h2 = h1 && !h1.tripped ? leg(via, to) : null;
+            if (!h1 || !h2 || h1.tripped || h2.tripped) return null;
+            paths.push(h1.path, h2.path);
+            length += pathGeomLength(h1.path) + pathGeomLength(h2.path);
+            out.push(via);
+            vias++;
+        } else {
+            paths.push(res.path);
+            length += pathGeomLength(res.path);
+        }
+        if (i < keys.length - 1) out.push(to);
+    }
+    return { paths: paths, length: length, keys: out, vias: vias };
 }
 
 // Corner points for one loop at scale r, as [lat, lon]. Triangle (LOOP_CORNERS 2): A
@@ -960,7 +996,7 @@ function routePolygon(graph, startKey, sLat, sLon, bearing, r, accept) {
     var keys = [startKey].concat(corners);
     var legs = routeLegs(graph, keys.concat([startKey]));
     if (!legs) return null;
-    return { waypoints: keys, paths: legs.paths, length: legs.length, radius: r };
+    return { waypoints: legs.keys, paths: legs.paths, length: legs.length, radius: r, vias: legs.vias };
 }
 
 // How easy a loop is to follow: heading changes of TURN_ANGLE (35°) or more between

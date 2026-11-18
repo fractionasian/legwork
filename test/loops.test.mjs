@@ -343,3 +343,33 @@ test("generateLoops — never offers a leg the app would re-fetch (two sides of 
   }
   assert.equal(tripped, 0, `${tripped} legs the app would re-fetch`);
 });
+
+test("generateLoops — a leg round an inlet gets an extra pin, and the pins re-route to the measured length", async () => {
+  // Same inlet as above. The two far corners straddle it; instead of dropping that loop,
+  // the leg between them is split with a pin near the inlet's head. The pins handed to the
+  // pipeline (start, corners, the extra pin, back to start) must route to exactly the
+  // length measured, with no leg the app would re-fetch.
+  const g = new R.PackedGraph(), h = 30, id = {};
+  const inInlet = (i, j) => Math.abs(i) <= 1 && j >= 2;
+  for (let i = -h; i <= h; i++) for (let j = -h; j <= h; j++) {
+    if (!inInlet(i, j)) id[i + "," + j] = g.node(R.quantise6(LAT0 + i * dLat), R.quantise6(LON0 + j * dLon));
+  }
+  const two = (a, b) => { const u = id[a], v = id[b]; if (u === undefined || v === undefined) return; g.addEdge(u, v, STEP, 0); g.addEdge(v, u, STEP, 0); };
+  for (let i = -h; i <= h; i++) for (let j = -h; j <= h; j++) { two(i + "," + j, (i + 1) + "," + j); two(i + "," + j, i + "," + (j + 1)); }
+  const start = g.keyOf(id["0,0"]);
+  // Route each heading directly so the split loop is seen even if pickLoops prefers others.
+  let split = null;
+  for (let b = 60; b <= 120 && !split; b += 10) {
+    const l = await R.scaleLoop(g, start, 5000, b);
+    if (l && l.vias > 0) split = l;
+  }
+  assert.ok(split, "some heading's loop needed an extra pin");
+  const pins = split.waypoints.concat([split.waypoints[0]]);
+  let total = 0;
+  for (let i = 1; i < pins.length; i++) {
+    const p = R.dijkstra(g, pins[i - 1], pins[i]).path;
+    assert.equal(R.legNeedsGapFill(p, R.haversine(...pins[i - 1].split(",").map(Number), ...pins[i].split(",").map(Number))), false);
+    total += R.pathGeomLength(p);
+  }
+  assert.equal(total, split.length, "drawn = measured, extra pin included");
+});
