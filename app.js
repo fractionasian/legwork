@@ -1022,10 +1022,7 @@ function pushAll(dst, src, start) {
 var _routeGen = 0;
 
 // A segment needs the Overpass gap-fill if the direct graph route is missing or
-// implausibly indirect — a detour > MAX_DETOUR_RATIO× the straight line, and only
-// for gaps longer than MIN_DETOUR_DIST m so short legitimate dog-legs aren't refetched.
-var MAX_DETOUR_RATIO = 3;
-var MIN_DETOUR_DIST = 200;
+// implausibly indirect (legNeedsGapFill in routing.js, shared with the loop generator).
 
 // Resolve a routed path between two waypoints, gap-filling if needed. Returns
 // { result } normally, or { superseded: true } if a newer updateRoute() bumped the
@@ -1046,7 +1043,7 @@ async function resolveSegment(fromWp, toWp, gen) {
     // "detour" on penalised surfaces (trunk ×2.5, bike-over-steps ×5) and made
     // perfectly valid legs re-trigger the multi-fetch gap-fill on every recompute.
     var needsGapFill = !result || result.path.length < 2 ||
-        (pathGeomLength(result.path) > straight * MAX_DETOUR_RATIO && straight > MIN_DETOUR_DIST);
+        legNeedsGapFill(result.path, straight);
     if (needsGapFill) {
         result = await fillGapAndRetry(fromWp, toWp, gen);
         if (gen !== _routeGen) return { superseded: true };

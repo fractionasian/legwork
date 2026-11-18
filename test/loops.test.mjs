@@ -306,3 +306,40 @@ test("generateLoops — a corner never lands on an island, so no leg's search fa
   assert.ok(loops.length >= 1, "still finds loops on the start's own network");
   assert.equal(failed, 0, `${failed} of ${searches} searches failed`);
 });
+
+test("legNeedsGapFill — the app's re-fetch rule, shared: over 3× the straight line and over 200 m", () => {
+  const k = (i, j) => R.nodeKey(LAT0 + i * dLat, LON0 + j * dLon);
+  const uShape = [k(0, 0), k(5, 0), k(5, 1), k(0, 1)];   // 1.1 km round a 100 m gap
+  assert.equal(R.legNeedsGapFill(uShape, 100), false, "a 100 m gap is a dog-leg, never re-fetched");
+  assert.equal(R.legNeedsGapFill(uShape, 300), true, "1.1 km for a 300 m gap is");
+  assert.equal(R.legNeedsGapFill(uShape, 400), false, "under 3× isn't");
+});
+
+test("generateLoops — never offers a leg the app would re-fetch (two sides of an inlet)", async () => {
+  // A 6 km street grid with a long, narrow inlet running east from just past the start:
+  // no streets in rows −1..1 from column 2 to the east edge. Heading east, the two far
+  // corners land ~1.2 km out, either side of it; each is close to the start by road, but
+  // the leg between them runs back round the inlet's head: over 3× the straight line,
+  // which the app's resolveSegment would gap-fill and redraw.
+  const g = new R.PackedGraph(), h = 30, id = {};
+  const inInlet = (i, j) => Math.abs(i) <= 1 && j >= 2;
+  for (let i = -h; i <= h; i++) for (let j = -h; j <= h; j++) {
+    if (!inInlet(i, j)) id[i + "," + j] = g.node(R.quantise6(LAT0 + i * dLat), R.quantise6(LON0 + j * dLon));
+  }
+  const two = (a, b) => { const u = id[a], v = id[b]; if (u === undefined || v === undefined) return; g.addEdge(u, v, STEP, 0); g.addEdge(v, u, STEP, 0); };
+  for (let i = -h; i <= h; i++) for (let j = -h; j <= h; j++) { two(i + "," + j, (i + 1) + "," + j); two(i + "," + j, i + "," + (j + 1)); }
+  const start = g.keyOf(id["0,0"]);
+  let tripped = 0;
+  for (const theta0 of [80, 90, 100]) {
+    const loops = await R.generateLoops(g, start, 5000, { theta0, pause: noPause });
+    assert.ok(loops.length >= 1);
+    for (const l of loops) {
+      const pins = l.waypoints.concat([l.waypoints[0]]);
+      for (let i = 1; i < pins.length; i++) {
+        const [a, b] = [pins[i - 1], pins[i]].map((x) => x.split(",").map(Number));
+        if (R.legNeedsGapFill(l.paths[i - 1], R.haversine(a[0], a[1], b[0], b[1]))) tripped++;
+      }
+    }
+  }
+  assert.equal(tripped, 0, `${tripped} legs the app would re-fetch`);
+});

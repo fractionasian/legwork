@@ -245,6 +245,17 @@ function pathGeomLength(path) {
     return total;
 }
 
+// A leg needs the app's Overpass gap-fill (app.js resolveSegment → fillGapAndRetry) if
+// its routed path is implausibly indirect: more than MAX_DETOUR_RATIO × the straight
+// line, for gaps longer than MIN_DETOUR_DIST m, so short legitimate dog-legs aren't
+// refetched. Lives here so the loop generator can refuse a leg the pipeline would
+// re-fetch and redraw differently. One rule for both.
+var MAX_DETOUR_RATIO = 3;
+var MIN_DETOUR_DIST = 200;
+function legNeedsGapFill(path, straightMetres) {
+    return straightMetres > MIN_DETOUR_DIST && pathGeomLength(path) > straightMetres * MAX_DETOUR_RATIO;
+}
+
 // ── Binary min-heap for Dijkstra ──────────────────────
 function MinHeap() {
     this.data = [];
@@ -889,12 +900,18 @@ function loopOverlap(paths) {
     return twice / total;
 }
 
-// Route S → A → B → S. Returns null if a leg has no path.
+// Route the legs between consecutive keys. Returns null if a leg has no path, or if a
+// leg is one the app would gap-fill (legNeedsGapFill): the pipeline would fetch more
+// paths for it and could draw a different route from the one measured here. Corners
+// that far round (two sides of an inlet) count as no loop, and r shrinks.
 function routeLegs(graph, keys) {
     var paths = [], length = 0;
     for (var i = 1; i < keys.length; i++) {
         var res = dijkstra(graph, keys[i - 1], keys[i]);
         if (!res) return null;
+        var a = keys[i - 1].split(","), b = keys[i].split(",");
+        var straight = haversine(parseFloat(a[0]), parseFloat(a[1]), parseFloat(b[0]), parseFloat(b[1]));
+        if (legNeedsGapFill(res.path, straight)) return null;
         paths.push(res.path);
         length += pathGeomLength(res.path);
     }
@@ -1156,6 +1173,12 @@ function sameCorners(a, b) {
 // checked after every pause, like the gen checks in updateRoute: if the start pin moved
 // or the user pressed Undo meanwhile, it resolves to null and the caller drops
 // everything. opts.pause overrides the pause (tests).
+//
+// For PR 2: isStale must also be true if state.graph is no longer this graph (a city
+// change nulls it; the run/bike toggle rebuilds it) or the profile or mode changed,
+// or the lengths measured here won't match what the pipeline draws. Tiles that stream
+// in meanwhile add edges to this same graph and may shorten a later route slightly, so
+// take the shown length from the pipeline once a candidate is drawn.
 async function generateLoops(graph, startKey, targetM, opts) {
     opts = opts || {};
     var k = opts.k || 3;
@@ -1177,7 +1200,7 @@ async function generateLoops(graph, startKey, targetM, opts) {
         if (reach) {
             // Decided once per node here, not on every snap (snapping looks at hundreds).
             if (cost) for (var m = 0; m < reach.length; m++) {
-                if (reach[m] && !(cost[m] <= LOOP_CORNER_DETOUR * haversine(sLat0, sLon0, graph.latQ[m] / 1e6, graph.lonQ[m] / 1e6) + LOOP_CORNER_SLACK)) reach[m] = 0;
+                if (reach[m] && (cost[m] === Infinity || !(cost[m] <= LOOP_CORNER_DETOUR * haversine(sLat0, sLon0, graph.latQ[m] / 1e6, graph.lonQ[m] / 1e6) + LOOP_CORNER_SLACK))) reach[m] = 0;
             }
             ctl.accept = function (n) { return n < reach.length && reach[n] === 1; };
         }
@@ -1608,6 +1631,7 @@ if (typeof module !== "undefined" && module.exports) {
         loopCornerPoints: loopCornerPoints,
         loopFit: loopFit,
         loopTurns: loopTurns,
+        legNeedsGapFill: legNeedsGapFill,
         compareLoops: compareLoops,
         LOOP_AIM_LO: LOOP_AIM_LO,
         LOOP_AIM_HI: LOOP_AIM_HI,
