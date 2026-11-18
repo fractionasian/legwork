@@ -1,0 +1,501 @@
+---
+status: approved — Peter accepted all five Layer-1 defaults and the Assumed list, 2026-11-18
+next: PR 1 open as fractionasian/legwork#57, gate passing 8/8 after the review fix (round 6); then PR 2 (UI)
+created: 2026-11-18
+trigger: Three Routes (iOS) OzBargain freebie, ozbargain.com.au/node/983771, 2026-11-17
+---
+
+# Target-distance loops — "give me a 5 km loop from here"
+
+## Layer 1 — Decision summary
+
+**Building:** drop one pin, pick a distance, and Legwork draws a loop of about
+that length starting and finishing at the pin.
+
+**Problem:** today a runner who wants "5 km from home, somewhere new" has to
+place pins by trial and error until the distance pill reads right. The
+OzBargain thread for a competing app is mostly people saying they're sick of
+running the same block. Legwork already does the hard part (good paths, parks,
+fewer lights, climbs), but you have to steer it by hand.
+
+**Goals:** one pin plus one tap gives a loop within 10% of the asked distance,
+usually within 5%. Offer more than one option, because any single generated
+loop will sometimes be a dud.
+
+**Non-goals (v1):**
+- One-way of N km (it needs a destination you choose). Out-and-back was a non-goal
+  and is now decision 7, as its own PR after the loop UI.
+- Time-based ("30 minutes"). Needs a pace, and Legwork stores nothing per user.
+- Learned or popular routes. Still on the not-built list.
+- A new routing engine. The loops come from the same router as hand-drawn ones.
+
+**Success metrics:** on 20 test starts in each of 4 cities, at each distance, at
+least 18 give three loops, at least two of them inside the accept window (−3% to
++10% of target, decision 6). The third may be a near miss shown with its true length
+(decision 5). No loop should run the same street out and back for more than a short
+stretch. You try it from home and would actually run one. *(Changed 2026-11-18 from
+"three loops within 10%", after two tuning rounds showed the third heading is the one
+that misses: Peter, "Yes, change metric". The 15% overlap measure is unchanged.)*
+*Note: the harness gate counts length only. Overlap is reported (mean, and loops
+over 15%) but doesn't gate, and it never has since round 1. In round 5, 146 of 474
+loops were over 15%. Counting only loops under 15% toward the "2+" gives 11–16 of 20
+per row, which fails every row. So whether overlap should gate is a call still open,
+not settled.*
+
+**Decisions for you:**
+
+1. **Where do you start it?** → **A chip beside the distance pill that appears
+   once there's exactly one pin ("Loop ▸")** / an item in the side menu /
+   long-press on the map. Why: your own rule for new controls is a contextual
+   chip near the distance pill, never a floating button.
+   Done when: you drop one pin on your phone and the chip is there without
+   opening any menu.
+
+2. **How do you pick the distance?** → **A row of preset buttons (3, 5, 8, 10,
+   15, 21 km) plus "Other" that takes a typed number** / a slider / typed number
+   only. Why: thumb-friendly, no dropdown, and the presets cover most runs.
+   Done when: you can ask for 5 km in two taps and 12.5 km by typing it.
+
+3. **How are the options shown?** → **One loop at a time on the map, with
+   "1 of 3 ›" to flip to the next** / all three drawn together and you tap
+   one. Why: three gradient-coloured routes on top of each other is hard to
+   read on a phone. *I'm least sure about this one.* Three Routes shows all
+   three. What would settle it is trying both on a phone.
+   Done when: you can look at three different loops in three taps and keep one.
+
+4. **What happens once you pick one?** → **It becomes ordinary pins you can
+   drag, undo and export, like any route you drew** / a locked route you can
+   only export or throw away. Why: it reuses everything (GPX, share links,
+   elevation, undo) and lets you fix a dud stretch by dragging one pin.
+   Done when: you drag a pin on a generated loop and it reroutes like a
+   hand-drawn one.
+
+5. **What if it can't get close to the distance?** → **Show the nearest it
+   found, label it with the real length ("7.2 km — couldn't find a closer 8
+   km loop here")** / show nothing and say it failed. Why: a near miss is
+   usually still runnable, and the label keeps it honest.
+   Done when: a start on a peninsula or a dead-end suburb still shows a loop
+   with its true distance, never a silently wrong one.
+
+**Decisions added 2026-11-18** (Peter, "yes", after the PR 1 harness rounds):
+
+6. **Aim slightly over, not either side.** A loop finishes at the start, so a
+   runner can stop the watch at the target and walk the rest; running short means
+   inventing extra distance. **Aim 0 to +5% over; accept −3% to +10%.** Outside
+   that it's a near miss shown with its true length (decision 5). GPS usually reads
+   a few percent off the map, so aiming over also leaves a margin.
+   Done when: the harness reports hits against −3%/+10% and the 2-of-3 gate is
+   re-measured on that window. *Built in round 3:* the gate count didn't change in
+   any row, and loops shorter than asked fell from 46% to 18% (Harness results).
+
+7. **Out-and-back of N km, following the mode.** The chip generates whatever
+   mode is selected: loop mode gives loops, out-and-back gives out-and-backs.
+   One-way isn't offered. An out-and-back is two ordinary pins, the start and a
+   turnaround. One search from the start gives the true route distance to every
+   node, so the turnaround sits at N/2 exactly, with no radius guessing. "Nice"
+   needs no new data: rank turnarounds by the router's own cost per metre (paths
+   and parks over roads, fewer lights, gentler climbs), prefer a junction or park
+   to a dead end, and keep three heading in different directions. The overlap
+   rule doesn't apply, since retracing is the point.
+   Done when: in out-and-back mode, one pin plus 5 km gives three options whose
+   true length is within the decision-6 window, and each drags like any other pin.
+
+**Assumed (say if wrong):**
+- Run or bike follows whatever mode is already selected, and so do scenic,
+  climb-aware and traffic-light settings.
+- Works offline in the 12 pre-baked cities for loops up to about 25 km. Outside
+  them it uses the live path download, which is slower; I'd cap it at 10 km
+  there and say so on screen. *Measured in PR 1: a first pin loads only about 3
+  tiles (about 5 × 10 km of ground), not enough for a 25 km loop. Fine to 10 km;
+  PR 2 must load more ground before the 15 and 21 km presets (see Harness
+  results, "Ruled out: tiles truncating the graph").*
+- The three options head off in different directions from the start, so they
+  feel different rather than three versions of the same block.
+- Analytics records only "a loop was generated" and which preset bucket
+  (3/5/8/10/15/21/other). No exact distance, no location finer than today.
+- Nothing new is stored on the server. A generated loop is saved and shared
+  exactly like any other route.
+
+---
+
+## Layer 2 — Technical spec
+
+### Fit with existing code
+
+- Graph: `PackedGraph` / `dijkstra()` (A*) in `routing.js`; nodes snapped with
+  `closestNode()`. Tiles load in a 5 km radius around the start
+  (`loadTilesForLocation`, `tilesInRadius(..., 5)`), which covers a loop of
+  ~25 km (radius ≈ L / (2π × detour)). Above that, call
+  `ensureTilesAlongRoute()` per candidate or cap the preset list.
+- Output: candidates are expressed as waypoints and fed through
+  `addWaypointAt()` so the normal pipeline (segments, hotline, elevation,
+  share hash `#r=…&m=loop`) renders them. **The generator must use the same
+  router and weights as the pipeline**, or the drawn route will differ from
+  the one measured. So no generator-only edge penalties.
+
+### Algorithm (polygon waypoints, scaled to target)
+
+For target length L, start S, and k = 3 candidate bearings θ ∈ {θ0, θ0+120°,
+θ0+240°} (θ0 random, so "Try again" gives new loops):
+
+1. Place two virtual points A, B at radius r from S, at bearings θ − 35° and
+   θ + 35°, which makes a fat triangle S→A→B→S. Initial r = L / (2π × 1.3)
+   (1.3 = typical street detour; tune on real tiles).
+2. Snap A and B with `closestNode()`. Route S→A, A→B, B→S with `dijkstra()`.
+   Measure the summed geometry length (`pathGeomLength`), not the weighted cost.
+3. If |len − L| / L > 5%, set r ← r × L / len and repeat, at most 4 times.
+   Keep the best attempt.
+4. **Reject on overlap:** if more than 15% of the loop's length runs on edges
+   used twice (lollipop or out-and-back), try a ±20° bearing jitter once, then
+   accept the best with the overlap noted.
+5. Return candidates sorted by |len − L|. A candidate outside 10% is shown
+   only as the decision-5 fallback, with its true length.
+
+Cost: ≤ 3 candidates × 4 iterations × 3 legs = 36 A* calls; on packed tiles
+1–15 km legs are ms to tens of ms each. Run candidates sequentially with an
+`await` between them, and check a generation counter (`gen`) after each one,
+the same stale-guard pattern as `addWaypointAt`, so moving the start pin or
+pressing Undo mid-generation drops the stale results.
+
+### UI
+
+- Chip renders only when `liveWaypoints().length === 1`. It hides on 0 or ≥ 2
+  pins and while generating, when it turns into a spinner.
+- Preset row: plain `<button>`s, no `<select>`. "Other" opens a numeric
+  `<input inputmode="decimal">`, clamped 1–42 km (10 km outside tiled cities).
+- Candidate view: the selected candidate is drawn via the normal pipeline. The
+  "1 of 3 ›" control swaps the waypoint set. "Keep" leaves the pins in place
+  and dismisses the control. Undo after Keep removes the generated pins but
+  must respect "Undo cannot remove the last pin" (the start stays).
+- Mode is forced to `loop` on generation. If the user then cycles mode, the
+  pins stay and the router redraws as out-and-back / one-way. That's
+  acceptable and needs no special handling.
+
+### Telemetry
+
+One `/v1/event` enum: `loop_generated` with `bucket ∈ {3,5,8,10,15,21,other}`
+and `result ∈ {ok, near_miss, failed}`. No raw distance (privacy invariant),
+location at the existing 0.005° grid only.
+
+### Edge cases
+
+- Start on an island or headland: B→S fails or the overlap check fails
+  everywhere. Fall back to the best candidate and label it. All legs failing
+  gives "No loop found from here — try moving the pin onto a path."
+- Graph not loaded yet (first pin still fetching tiles): the chip is disabled
+  until the start node snaps.
+- Untiled area via Overpass: one bbox fetch at radius r × 1.5 before
+  generating; reuse `loadPaths` retry and fail-loud behaviour.
+- One-way bike edges: legs are directed, so S→A→B and the reverse can differ.
+  That's fine, because a loop is directional anyway.
+
+### Tests
+
+- Unit (synthetic grid graph in `test/`): the scaler converges within 4
+  iterations to ±5% on a regular grid; the overlap detector flags a pure
+  out-and-back; the stale guard drops results after the start moves.
+- Real-tile harness (like the climb-aware 80-pair run): 20 starts × 4 cities ×
+  presets {5, 10}. Report the hit rate within 5% and 10%, mean overlap, and
+  wall time. This is the success metric above.
+- `verifier-legwork` drive: one pin → chip → 5 km → flip three → Keep → drag
+  a pin → export GPX.
+
+### As built in PR 1 (differences from the algorithm above)
+
+- **Six headings, keep three (tuning round 2, approved 2026-11-18).** Six
+  headings 60° apart are each scaled to L, and the best three that are ≥ 90°
+  apart are kept. Every valid set of three is scored, not picked greedily: taking
+  the single best first can lock in a pair with no third heading 90° from both.
+  A set scores on loops within 10% and under the overlap cap, then on loops
+  within 10%, then on total error. Separation is measured on the nominal heading,
+  not the ±20° retry's bearing. If no valid three exist, the best of the rest fill in.
+- **A 5-point polygon, not a triangle (round 2).** Four corners plus S, evenly
+  spaced round a circle through S whose centre is r out along the heading. There
+  are shorter legs between neighbouring corners. These are still ordinary pins
+  on the same router and weights. `LOOP_CORNERS = 2` brings back the ±35° triangle.
+  A corner that snaps onto S or onto another corner is dropped, and fewer than two
+  left counts as no loop.
+- **Corners snap to junctions.** Each corner snaps to the nearest node with at
+  least 3 edges (`closestNode(..., 3)`), so it never sits at the end of a
+  cul-de-sac the loop has to run into and back out of. Pins still snap to the
+  nearest node. This places waypoints only. The router and weights are unchanged,
+  and a node key dropped back in as a pin snaps to itself, so the pipeline draws
+  what was measured (unit test: the waypoints re-route to exactly the measured
+  length).
+- **The first radius comes from the shape's own perimeter** (regular polygon, or
+  the triangle's two spokes plus chord) × 1.3 detour. The spec's L / (2π × 1.3)
+  starts about 50% short for the triangle.
+- **Bracketing, not just r × L / len.** Routed length is a step function of r, so
+  plain rescaling can bounce between a loop just short and one just long. Once
+  there's an attempt each side of L, the next r is interpolated between them.
+- **Ranking within one heading.** Inside 10%, a loop under the 15% overlap cap
+  beats one over it, then the closer one wins. Outside 10%, the closer one wins.
+- **The ±20° retry also fires on a length miss**, not only on overlap.
+- **Tried and dropped: trimming spurs at corners.** Moving a corner back to the
+  junction where the two legs split, then re-routing, cut mean overlap by only
+  3–5 points on 8 Perth starts. It also lost 5% hits and doubled the time.
+- **Aims slightly over (round 3, decision 6).** The scaler aims at L × 1.025, the
+  middle of the 0 to +5% aim window, and stops once a loop lands in it. `ok` means
+  inside −3% to +10%. Ranking is by distance from the +2.5% middle.
+- **Pauses after every routed attempt (round 3)**, not only between headings, so
+  the map stays usable while it works. `isStale()` is checked after each pause.
+- **Early stop (round 3).** It tries every other heading first (three, 120° apart). If
+  those already give three acceptable loops under the overlap cap, the other three
+  headings are skipped.
+- **No route offered twice (round 3).** On sparse ground two headings can snap to
+  the same corners, in the same or the reverse order (the same streets), so only
+  the first is kept.
+- **Fewer turns as a tie-breaker (round 4, Peter 2026-11-18).** Each loop counts its
+  turns: heading changes of 35° or more between stretches of at least 15 m, the
+  "kink" from climb-aware routing, so a footpath jog doesn't count. Between two loops
+  that are acceptable and on the same side of the overlap cap: one on aim beats one
+  off aim, then fewer turns per km wins when the gap is over 0.5 per km, and
+  otherwise closer to the aim wins. Sets of three are scored the same way. It
+  only chooses between loops already routed, so the router, its turn cost of 15 and
+  "what you see is what was measured" are unchanged.
+- **One shared search from the start (round 5).** Before any heading is routed, one
+  pass marks every node you can reach from the start *and* get back from. A second,
+  bounded pass gives each node's route cost from the start, and drops any whose cost
+  exceeds 3 × its straight-line distance + 300 m (the far side of a harbour). Corners
+  snap only to the nodes left. So no leg's search can fail: a failed search had been
+  exploring everything reachable before giving up, 75–80 ms each on dense Sydney
+  tiles, which was most of the slow tail. And a heading across water bends to
+  ground that's actually reachable instead of burning its attempts. Both passes only
+  restrict where pins go, and every leg is still routed by `dijkstra()`, so what's
+  drawn is what was measured.
+- **No leg the app would re-fetch; such a leg gets an extra pin (round 6, review
+  fix, Peter 2026-11-18).** The app re-fetches paths for any leg more than 3× its
+  straight line (gap over 200 m) and may then draw it differently. That rule now
+  lives in `routing.js` (`legNeedsGapFill`) and both `resolveSegment` and the
+  generator use it. When a generated leg would trip it (corners either side of an
+  inlet), the generator puts a pin at the leg's halfway point by ground distance,
+  near the inlet's head, and routes and measures the two halves. A loop can therefore
+  be 6 pins, not 5. If a half still trips, that attempt counts as no loop.
+- **Not a Web Worker.** The routing graph lives on the main thread (about 40 MB
+  after a first pin, up to ~300 MB for a whole city). A worker would need its own
+  copy of it, either sent with every request or kept in step as tiles stream in. The
+  per-attempt pause was chosen instead, and the worker is left as a PR 2 decision
+  if phones still stutter.
+- API: `generateLoops(graph, startKey, L, { k, theta0, isStale, pause })` resolves
+  to candidates `{ waypoints: [S, corners…], length, deviation, error, ok, onAim,
+  overlap, heading, tries, … }` sorted by error (with `.headingsTried`), or `null`
+  if `isStale()` turned true at any pause.
+
+### Harness results
+
+`node scripts/loop-harness.mjs --tiles <dir> --set "…"`, 2026-11-18. Tiles
+b6173198 (built 2026-11-15), run profile, shipped climb 8 and turn 15, seed 1, so
+every row uses the same 80 starts. Each city gets 20 random starts that snap to a
+path within 200 m, at least 3 km inside the city bounds, with the tiles a first pin
+would load (5 km radius). Mac, Node 22, six runs in parallel, so the times are
+inflated relative to one another but comparable.
+
+**Gate rows: starts out of 20 with 3 loops within 10%** (≥ 18 needed in every row):
+
+| Setting (`--set`) | Per 5 | Per 10 | Mel 5 | Mel 10 | Syd 5 | Syd 10 | Bri 5 | Bri 10 |
+|---|---|---|---|---|---|---|---|---|
+| Baseline: 3 headings, triangle (`LOOP_HEADINGS=3;LOOP_CORNERS=2`) | 15 | 14 | 15 | 17 | 14 | 14 | 13 | 13 |
+| Option 1 only: 6 headings, triangle (`6;2`) | 16 | 16 | 16 | **18** | 14 | 15 | 15 | 16 |
+| Option 2 only: 4-point polygon (`3;3`) | 15 | 14 | 14 | 15 | 12 | 14 | 14 | 15 |
+| Option 2 only: 5-point polygon (`3;4`) | 16 | 15 | 13 | 15 | 12 | 12 | 13 | 16 |
+| Both: 6 headings, 4-point (`6;3`) | 15 | 17 | 14 | **18** | 14 | 16 | 14 | 15 |
+| **Both: 6 headings, 5-point (`6;4`, shipped)** | 16 | 17 | 14 | **19** | 12 | 15 | 14 | 16 |
+
+**Starts with 3 loops within 10% *and* under 15% overlap:**
+
+| Setting | Per 5 | Per 10 | Mel 5 | Mel 10 | Syd 5 | Syd 10 | Bri 5 | Bri 10 |
+|---|---|---|---|---|---|---|---|---|
+| Baseline | 1 | 0 | 4 | 8 | 2 | 3 | 2 | 6 |
+| Option 1 only | 2 | 4 | 5 | 10 | 2 | 5 | 2 | 6 |
+| Option 2 only, 5-point | 6 | 6 | 8 | 9 | 5 | 5 | 5 | 8 |
+| Both, 5-point (shipped) | 6 | 9 | 10 | 12 | 7 | 7 | 8 | 10 |
+
+**All loops:**
+
+| Setting | ≤ 5% | ≤ 10% | Mean overlap | Median overlap | > 15% overlap | Median ms (5 / 10 km, range over cities) |
+|---|---|---|---|---|---|---|
+| Baseline | 63% | 88% | 29% | 18% | 259/473 | 340–620 / 1,160–1,600 |
+| Option 1 only | 68% | 92% | 28% | 14% | 208/474 | 770–1,050 / 1,880–2,740 |
+| Option 2 only, 4-point | 68% | 87% | 22% | 11% | 184/473 | 350–670 / 840–1,530 |
+| Option 2 only, 5-point | 68% | 86% | 20% | 11% | 176/472 | 360–620 / 790–1,280 |
+| Both, 4-point | 74% | 90% | 21% | 10% | 143/474 | 720–1,150 / 1,760–2,300 |
+| Both, 5-point (shipped) | 75% | 90% | 19% | 10% | 137/474 | 710–950 / 1,670–2,550 |
+
+The shipped setting's slowest single generation was 15.7 s (Sydney, 10 km), and
+its per-city max is 3–16 s.
+
+**Gate: still MISSED.** With both options, 12–19 of 20 starts per row get three
+loops within 10%. Only Melbourne 10 km passes. Tolerances and the 15% overlap
+metric are unchanged.
+
+What each option did:
+
+- **Option 1 (more headings)** fixes length more than overlap. Loops within 10%
+  go from 88% to 92%, and every row gains 0–3 starts. Median overlap goes from
+  18% to 14%. It roughly doubles the time.
+- **Option 2 (polygon)** fixes overlap, not length. Median overlap falls from 18%
+  to 11% and clean-loop starts roughly double. Within 10% is flat to slightly
+  worse (86–87%), because more corners give more chances for one of them to land
+  across water. It's no slower, since the legs are shorter.
+- **Together** they stack on overlap (median 10%, under half the baseline's loops
+  over the cap) and 5% hits (63% → 75%). The 10% gate count moves only 0–4 per row.
+
+What the remaining misses are (shipped setting): 146 of 160 runs have at least two
+loops within 10%. 35 have three loops with one outside 10%, and 2 found fewer than
+three. So the miss is still the weakest of the three. Sydney 5 km is the worst row
+(12/20) and got no better with tuning. Its starts sit near the harbour and its inlets
+(going by the coordinates, not traced one by one).
+
+Speed is now the larger concern for PR 2. A median of about 2 s on a Mac for 10 km,
+with a tail to 16 s, means roughly 5–10 s and worse on a phone. Ten headings'
+worth of A* calls are the cost.
+
+**Changed metric (2026-11-18): 3 loops, at least 2 within 10%.** Same shipped run,
+re-run with the new gate, and it gave identical loops:
+
+| | Per 5 | Per 10 | Mel 5 | Mel 10 | Syd 5 | Syd 10 | Bri 5 | Bri 10 |
+|---|---|---|---|---|---|---|---|---|
+| Starts out of 20 (≥ 18 needed) | 19 | 18 | 19 | 20 | **16 ✗** | 18 | 18 | 18 |
+
+**Gate: MISSED in one row, Sydney 5 km.** Five of the passing rows sit at exactly
+18. The four Sydney 5 km misses are real geography: two on the edge of Lane Cove
+National Park (#3, #10), Vaucluse/Watsons Bay on its harbour peninsula (#13), and
+#6, a start that snapped onto a 2-node path fragment joined to nothing. A hand-drawn
+route from that pin fails too, and "No loop found from here" is the right answer.
+
+Ruled out: **tiles truncating the graph.** A first pin loads tiles whose *centres*
+are within 5 km. That's 2.9 tiles on average and as few as 1, so about 5 × 10 km of
+ground, not the "loop of ~25 km" assumed under Fit with existing code. Loading
+within 8 km (7.4 tiles on average) left Sydney 5 km at 16/20 and 10 km at 18/20, so
+it isn't behind the misses. It still matters for PR 2 at 15–21 km
+(`--tile-km` in the harness measures it).
+
+**Round 3 (2026-11-18): decision 6 window, early stop, per-attempt pause, no
+duplicates.** The same 80 starts, four runs in parallel. The gate counts the
+generator's own accept window, which is −3% to +10% when shipped and ±10% for the
+"old window" rows.
+
+| Setting | Gate rows passing | Syd 5 km | Loops acceptable | Loops short of L | Mean overlap | ms p50 / p90 / max |
+|---|---|---|---|---|---|---|
+| Old ±10% window, no early stop (round 2 as was) | 7/8 | 16 | 426/474 | 218 (46%) | 19% | 971 / 3,212 / 12,440 |
+| Old window + early stop | 7/8 | 16 | 426/474 | 211 (45%) | 19% | 868 / 3,240 / 12,183 |
+| New window, no early stop | 7/8 | 16 | 416/474 | 85 (18%) | 20% | 1,255 / 3,632 / 14,192 |
+| **New window + early stop (shipped)** | 7/8 | **16 ✗** | 416/474 | 84 (18%) | 20% | 994 / 3,462 / 13,839 |
+
+Gate rows for the shipped setting are identical to round 2's on the changed metric
+(19, 18, 19, 20, **16**, 18, 18, 18). **Gate: still MISSED in Sydney 5 km.**
+
+- **The over-bias does what was asked at almost no cost.** Loops shorter than asked
+  fell from 46% to 18%. Acceptable loops dropped 2% (426 → 416), and no gate row moved.
+- **Early stop barely helps.** It fires on only 4–8 of 20 starts per row, because the
+  first three headings rarely give three loops that are all acceptable *and* under
+  the overlap cap. The median drops by about 10–20%, and the slow tail (p90 about
+  3.5 s, max about 14 s on a Mac) is unchanged. **Speed is not solved.**
+- A run of the shipped settings four times over gave identical loops, and medians
+  within about 6% of each other, so the timings above are steady.
+- The slow tail is mostly Sydney 10 km (p90 12 s). My guess is starts where most
+  headings use all 4 attempts plus the retry, but I haven't traced it.
+
+**Round 4 (2026-11-18): turn count as a tie-breaker.** The same 80 starts, both runs
+in parallel.
+
+| Setting | Gate rows passing | Loops acceptable | On aim | Mean overlap | Turns/km p50 / p90 |
+|---|---|---|---|---|---|
+| Turn ranking off (`LOOP_TURN_RANK=0`) | 7/8 (Syd 5 km 16) | 416/474 | 278 | 20% | 4.6 / 6.7 |
+| **Turn ranking on (shipped)** | 7/8 (Syd 5 km 16) | 416/474 | 285 | 21% | 4.5 / 6.6 |
+
+It changes the chosen loops in 18 of 160 runs, and in those turns fall 7% (4.9 → 4.6
+per km). Nothing else gets worse. The effect is small because it's a tie-breaker:
+most of the time, length and doubling back have already decided. Across all loops,
+turns per km run from 3.1 (p10) to 6.6 (p90), one turn every 150–320 m, with a
+maximum of 10.1. If loops still feel fiddly on a phone, the bigger levers are giving
+turns more weight than an on-aim length, or raising the router's turn cost for
+everyone. Both are your call; the second changes hand-drawn routes too.
+
+**Round 5 (2026-11-18): the shared search.** The same 80 starts, three runs in
+parallel.
+
+| Setting | Gate rows passing | Syd 5 km | Loops acceptable | Mean overlap | ms p50 / p90 / max |
+|---|---|---|---|---|---|
+| Before (`LOOP_REACH=0`, round 4 as shipped) | 7/8 | 16 | 416/474 | 21% | 1,055 / 3,734 / 14,476 |
+| Reach pass only (`LOOP_CORNER_DETOUR=0`) | 6/8 (Bri 5 km 17) | 16 | 419/474 | 20% | 1,021 / 2,715 / 12,131 |
+| **Reach + detour bound (shipped)** | 7/8 | **17 ✗** | **434/474** | 20% | 1,083 / **2,644 / 7,400** |
+
+Gate rows, shipped: Per 19 / 18, Mel 20 / 20, **Syd 17** / 18, Bri 19 / 20.
+
+- **The slow tail halves.** The maximum fell from 14.5 s to 7.4 s and p90 from 3.7 s to
+  2.6 s (Sydney 10 km's p90 went from 13.5 s to 4.1 s). The median doesn't move: a
+  normal request is already all successful searches.
+- **Quality improves too.** Acceptable loops rose by 18, and every gate row is equal
+  or better. Sydney 5 km is now one start short (17/20).
+- What's left in the time is ordinary successful searches: about 150–200 legs per
+  request at 4–35 ms each. Reusing the outward search for every loop's first and last
+  leg would cut that by up to ~40%. But the router charges for turns, and the shared
+  pass doesn't, so a reused leg could differ from what the pipeline draws. Each kept
+  loop would then need re-routing to check it. Proposal only.
+
+**Round 6 (2026-11-18): the review fix.** `/review-pass` (arch) found the generator
+could offer a leg the app would gap-fill and redraw. The same 80 starts, both runs in
+parallel.
+
+| Setting | Gate rows passing | Syd 5 km | Loops acceptable | Loops with an extra pin | Mean overlap | ms p50 / p90 / max |
+|---|---|---|---|---|---|---|
+| Round 5 (no check) | 7/8 | 17 | 434/474 | 0 | 20% | 1,083 / 2,644 / 7,400 |
+| Strict: refuse such legs (`LOOP_SPLIT=0`) | 5/8 | 14 | 407/474 | 0 | 18% | 1,098 / 2,626 / 7,349 |
+| **Split with an extra pin (shipped)** | **8/8** | **18** | 432/474 | 56 | 19% | 1,183 / 3,020 / 8,223 |
+
+Gate rows, shipped: Per 19 / 18, Mel 20 / 20, Syd 18 / 18, Bri 19 / 20. **Gate: PASS.**
+Round 5's 434 had been counting loops the app might have redrawn. Strict refusal
+showed how many (27 fewer acceptable). The extra pin recovers almost all of them
+honestly.
+
+What would move the gate next, as listed after round 2:
+
+1. *Open, proposal:* **let a near-miss heading try a different radius direction.** A
+   heading whose best attempt is short could retry with corners pulled inward on
+   the water side. That's speculative, and I haven't measured it.
+2. *Settled:* "2 good + 1 labelled near miss" became the success metric (Peter,
+   2026-11-18).
+3. *Settled:* stop early was built in round 3. The shared search (round 5) is what
+   actually moved the slow tail.
+
+### Sequencing (one PR per idea)
+
+1. `routing.js` generator + unit tests + real-tile harness numbers (no UI).
+   Gate: harness hits the success metric. *Outcome:* Peter opened the PR at 7 of 8
+   rows (Sydney 5 km 17/20; 2026-11-18, "No, open the PR"): fractionasian/legwork#57.
+   After the review's extra-pin fix (round 6) the gate passes in all 8 rows.
+2. Chip, preset row, candidate flipper, telemetry enum. `/review-pass`, then
+   `/first-users` (public app, visible change).
+3. Out-and-back generation (decision 7) on the same chip, reusing PR 1's search.
+
+*Speed pass: approved (Peter, 2026-11-18).* Built in round 3: early stop, and a
+pause after every attempt instead of a worker. Built in round 5: the shared search
+from the start, used to keep corners on reachable ground that isn't the long way
+round. That isn't skipping headings: a heading's corners move onto good ground
+instead. **Still open, proposal only** (Claude): reusing that search for each loop's
+first and last leg. The router charges for turns and the shared pass doesn't, so a
+reused leg could differ from what the pipeline draws, and every kept loop would
+need re-routing to check it.
+
+### Handover (PR 1, 2026-11-18)
+
+PR 1 is open as fractionasian/legwork#57 (branch `claude/loop-generator-engine-e71d07`),
+with `/review-pass` run and its findings fixed. Not merged. Shipped constants: 6
+headings, 5-point polygon, aim 0 to +5% over (accept −3% to +10%), early stop, fewer
+turns as a tie-breaker, corners only on ground the shared search marks as reachable
+and not the long way round, and an extra pin on any leg the app would re-fetch. **The
+gate passes in all 8 rows** (3 loops, 2+ acceptable). Overlap is reported, not gated
+(see Success metrics). Speed on a Mac: median about 1.2 s, p90 3.0 s, max 8.2 s, before
+phone slowdown. Next: merge #57, then PR 2 (UI). PR 2 must:
+- extend `isStale` to a replaced graph and to profile or mode changes (see the
+  `generateLoops` comment);
+- load more than a first pin's ~3 tiles before offering 15 and 21 km;
+- feed pins without counting each one as a `pin-drop`, and expect up to 6 pins;
+- take the shown length from the pipeline once a candidate is drawn.
+
+To reproduce: export the tiles with `git -C ~/legwork-tiles archive origin/master
+manifest.json tiles/perth tiles/melbourne tiles/sydney tiles/brisbane | tar -x -C
+<dir>`, then `node scripts/loop-harness.mjs --tiles <dir>`. `--set "NAME=value"` and
+`--tile-km` are for tuning runs, and the report header says when either is in use.
+Unknown flags are rejected.

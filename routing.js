@@ -245,6 +245,17 @@ function pathGeomLength(path) {
     return total;
 }
 
+// A leg needs the app's Overpass gap-fill (app.js resolveSegment → fillGapAndRetry) if
+// its routed path is implausibly indirect: more than MAX_DETOUR_RATIO × the straight
+// line, for gaps longer than MIN_DETOUR_DIST m, so short legitimate dog-legs aren't
+// refetched. Lives here so the loop generator can refuse a leg the pipeline would
+// re-fetch and redraw differently. One rule for both.
+var MAX_DETOUR_RATIO = 3;
+var MIN_DETOUR_DIST = 200;
+function legNeedsGapFill(path, straightMetres) {
+    return straightMetres > MIN_DETOUR_DIST && pathGeomLength(path) > straightMetres * MAX_DETOUR_RATIO;
+}
+
 // ── Binary min-heap for Dijkstra ──────────────────────
 function MinHeap() {
     this.data = [];
@@ -384,8 +395,13 @@ function resetSpatialGrid() {
     spatialGrid = {};
 }
 
-function closestNode(graph, lat, lon) {
-    if (graph instanceof PackedGraph) return graph.closest(lat, lon);
+// minDegree (optional): only consider nodes with at least that many edges out. The loop
+// generator passes 3 so a loop's corners land on junctions, not on the end of a
+// cul-de-sac it would have to run into and back out of. Pins never pass it.
+// accept (optional, PackedGraph only): accept(nodeIndex) must be true, e.g. "can be
+// reached from the start and back" (PackedGraph.reachBothWays).
+function closestNode(graph, lat, lon, minDegree, accept) {
+    if (graph instanceof PackedGraph) return graph.closest(lat, lon, minDegree, accept);
     var bestKey = null, bestDist = Infinity;
     var cLat = Math.floor(lat / GRID_CELL) * GRID_CELL;
     var cLon = Math.floor(lon / GRID_CELL) * GRID_CELL;
@@ -399,6 +415,7 @@ function closestNode(graph, lat, lon) {
                 var bucket = spatialGrid[gk];
                 if (!bucket) continue;
                 for (var i = 0; i < bucket.length; i++) {
+                    if (minDegree && (graph[bucket[i].key] || []).length < minDegree) continue;
                     var d = haversine(lat, lon, bucket[i].lat, bucket[i].lon);
                     if (d < bestDist) { bestDist = d; bestKey = bucket[i].key; }
                 }
@@ -583,7 +600,9 @@ PackedGraph.prototype.hasNode = function (key) { return this.indexOf(key) >= 0; 
 
 // Nearest node to a point, as a key. Same search as the plain-object closestNode: rings of
 // cells outward from the point's cell, one ring past the first hit, capped at 7 (~3.5 km).
-PackedGraph.prototype.closest = function (lat, lon) {
+// minDegree, accept (optional): skip nodes with fewer edges out, or that accept(n)
+// rejects (see closestNode).
+PackedGraph.prototype.closest = function (lat, lon, minDegree, accept) {
     var ci = Math.floor((lat + 90) / PG_CELL), cj = Math.floor((lon + 180) / PG_CELL);
     var best = -1, bestD = Infinity, self = this;
     function ring(r) {
@@ -593,7 +612,10 @@ PackedGraph.prototype.closest = function (lat, lon) {
                 var b = self.grid.get((ci + di) * 100000 + (cj + dj));
                 if (!b) continue;
                 for (var k = 0; k < b.length; k++) {
-                    var n = b[k], d = haversine(lat, lon, self.latQ[n] / 1e6, self.lonQ[n] / 1e6);
+                    var n = b[k];
+                    if (minDegree && self.degree(n) < minDegree) continue;
+                    if (accept && !accept(n)) continue;
+                    var d = haversine(lat, lon, self.latQ[n] / 1e6, self.lonQ[n] / 1e6);
                     if (d < bestD) { bestD = d; best = n; }
                 }
             }
@@ -606,6 +628,75 @@ PackedGraph.prototype.closest = function (lat, lon) {
         if (foundAt >= 0 && r >= foundAt + 1) break;
     }
     return best >= 0 ? this.keyOf(best) : null;
+};
+
+// Edges out of node n (both directions of a two-way segment count once each way).
+PackedGraph.prototype.degree = function (n) {
+    var c = 0;
+    for (var e = this.first[n]; e >= 0; e = this.eNext[e]) c++;
+    return c;
+};
+
+// Nodes you can get to from `key` AND get back to it from, as a Uint8Array indexed by
+// node (1 = yes), or null if key isn't a node. Two breadth-first passes, along the edges
+// and against them, so one-way bike edges are honoured. Every route between two marked
+// nodes exists (a → key → b), so a corner snapped to a marked node never makes a search
+// fail. That matters for speed: a failed search explores everything reachable before
+// giving up (75–80 ms each on dense Sydney tiles, against 5–25 ms for one that
+// succeeds). Nodes added after the call (tiles streaming in) are unmarked.
+PackedGraph.prototype.reachBothWays = function (key) {
+    var s = this.indexOf(key);
+    if (s < 0) return null;
+    var N = this.nNodes, E = this.nEdges, fwd = new Uint8Array(N), out = new Uint8Array(N);
+    var queue = new Int32Array(N), head, tail, u, e;
+    fwd[s] = 1; queue[0] = s; head = 0; tail = 1;
+    while (head < tail) {
+        u = queue[head++];
+        for (e = this.first[u]; e >= 0; e = this.eNext[e]) {
+            var v = this.eTo[e];
+            if (!fwd[v]) { fwd[v] = 1; queue[tail++] = v; }
+        }
+    }
+    // Reverse adjacency (edges by head), built once for this pass.
+    var rFirst = new Int32Array(N).fill(-1), rNext = new Int32Array(E);
+    for (e = 0; e < E; e++) { var h = this.eTo[e]; rNext[e] = rFirst[h]; rFirst[h] = e; }
+    out[s] = 1; queue[0] = s; head = 0; tail = 1;
+    while (head < tail) {
+        u = queue[head++];
+        for (e = rFirst[u]; e >= 0; e = rNext[e]) {
+            var w = this.eFrom[e];
+            if (!out[w] && fwd[w]) { out[w] = 1; queue[tail++] = w; }
+        }
+    }
+    return out;
+};
+
+// Route cost from `key` to every node within maxCost, as a Float64Array indexed by node
+// (Infinity = further than maxCost, or unreachable). One bounded search outward, with the
+// same edge cost the router uses (weighted length + climb) but no turn cost, so it is a
+// lower-bound-ish yardstick, not a route. The loop generator uses it to skip corners
+// that only a long way round can reach (the far side of a harbour) before spending a
+// search on them.
+PackedGraph.prototype.costFrom = function (key, maxCost) {
+    var s = this.indexOf(key);
+    if (s < 0) return null;
+    var N = this.nNodes, dist = new Float64Array(N).fill(Infinity), done = new Uint8Array(N);
+    var first = this.first, eTo = this.eTo, eNext = this.eNext, eCost = this.eCost, eUp = this.eUp, cw = CLIMB_WEIGHT;
+    this.hn = 0; dist[s] = 0; this.hpush(0, s);
+    while (this.hn > 0) {
+        var u = this.hpop();
+        if (done[u]) continue;
+        done[u] = 1;
+        var du = dist[u];
+        if (du > maxCost) break;
+        for (var e = first[u]; e >= 0; e = eNext[e]) {
+            var v = eTo[e];
+            if (v >= N || done[v]) continue;
+            var nd = du + eCost[e] + cw * eUp[e];
+            if (nd < dist[v] && nd <= maxCost) { dist[v] = nd; this.hpush(nd, v); }
+        }
+    }
+    return dist;
 };
 
 // ── binary heap on two typed arrays ──
@@ -738,6 +829,442 @@ PackedGraph.prototype.edgesFrom = function (key) {
     }
     return out;
 };
+
+// ── Target-distance loops ─────────────────────────────
+// "Give me a 5 km loop from here" (docs/design/target-distance-loops.md). Each
+// candidate is a polygon of corners around a circle that passes through the start S,
+// its centre r out along the candidate's bearing (with LOOP_CORNERS = 2, the original
+// fat triangle S → A → B → S instead: A and B at radius r, LOOP_SPREAD degrees either
+// side of the bearing). Each leg is routed with dijkstra() on the live graph, so the
+// waypoints [S, corners…] fed back through the normal loop-mode pipeline draw exactly
+// the route measured here: same router, same weights, same climb and turn costs, and
+// no penalty that exists only in the generator. r is then rescaled until the loop lands
+// in the aim window.
+//
+// Aim slightly over (decision 6): a loop ends at the start, so a runner can stop the
+// watch at the target and walk the rest, while a short loop means inventing distance.
+//
+// Lengths are pathGeomLength (metres on the ground), never result.dist (the weighted
+// cost), because the target is a distance the runner will cover.
+var LOOP_SPREAD = 35;          // degrees each side of the bearing for A and B
+var LOOP_DETOUR = 1.3;         // typical routed length / straight-line length; first guess only
+var LOOP_ITERATIONS = 4;       // routed attempts per bearing
+var LOOP_AIM_LO = 0;           // aim window, as a fraction of the target: 0 to +5% over;
+var LOOP_AIM_HI = 0.05;        //   rescaling stops once a loop lands in it
+var LOOP_UNDER = 0.03;         // accept window −3% to +10%; outside it a loop is only
+var LOOP_OVER = 0.10;          //   a near miss, shown with its true length (decision 5)
+var LOOP_EARLY_STOP = 1;       // stop after the first spread of headings if it gave k good loops
+var LOOP_SPLIT = 1;            // split a leg the app would gap-fill with an extra pin (routeLegs)
+var LOOP_REACH = 1;            // corners only on ground reachable from the start and back
+var LOOP_CORNER_DETOUR = 3;    // ...and whose route cost from the start is at most this × the
+var LOOP_CORNER_SLACK = 300;   //   straight line + this many metres (0 = off): no corners
+                               //   that only the long way round (across water) can reach
+var LOOP_TURN_RANK = 1;        // among equally good loops, prefer fewer turns per km
+var LOOP_TURN_MARGIN = 0.5;    // turns per km: smaller differences don't count
+var LOOP_TURN_STRETCH = 15;    // metres: a turn is a heading change of TURN_ANGLE+ between stretches this long
+var LOOP_OVERLAP_MAX = 0.15;   // share of the length on ground covered twice
+var LOOP_JITTER = 20;          // degrees; one retry when a bearing overlaps too much
+var LOOP_CORNER_DEGREE = 3;    // corners snap to junctions only (see closestNode)
+var LOOP_CORNERS = 4;          // corners besides the start: 2 = triangle, 3–4 = polygon on a circle
+var LOOP_HEADINGS = 6;         // headings tried; the best k that are LOOP_MIN_SEP apart are kept
+var LOOP_MIN_SEP = 90;         // degrees between the headings of the loops returned
+
+// Point `metres` from (lat, lon) heading `bearing` degrees (0 = north). Flat-earth
+// offset: well under 1% error at loop radii, and r is corrected by measurement anyway.
+function offsetPoint(lat, lon, bearing, metres) {
+    var b = bearing * Math.PI / 180;
+    var dLat = metres * Math.cos(b) / METRES_PER_DEGREE;
+    var dLon = metres * Math.sin(b) / (METRES_PER_DEGREE * Math.cos(lat * Math.PI / 180));
+    return [lat + dLat, lon + dLon];
+}
+
+// Share of a loop's length that runs on ground it covers more than once: an
+// out-and-back spur, a lollipop stick, or a leg that doubles back over another. Edges
+// are undirected (A-B is B-A), so running a street both ways counts. 0 = every metre
+// is new; 1 = a pure out-and-back.
+function loopOverlap(paths) {
+    var uses = new Map(), segs = [], total = 0, i, j;
+    for (i = 0; i < paths.length; i++) {
+        var p = paths[i];
+        for (j = 1; j < p.length; j++) {
+            var a = p[j - 1], b = p[j];
+            var k = a < b ? a + "|" + b : b + "|" + a;
+            var d = pathGeomLength([a, b]);
+            uses.set(k, (uses.get(k) || 0) + 1);
+            segs.push({ k: k, d: d });
+            total += d;
+        }
+    }
+    if (!total) return 0;
+    var twice = 0;
+    for (i = 0; i < segs.length; i++) if (uses.get(segs[i].k) > 1) twice += segs[i].d;
+    return twice / total;
+}
+
+function keyDistance(a, b) {
+    var p = a.split(","), q = b.split(",");
+    return haversine(parseFloat(p[0]), parseFloat(p[1]), parseFloat(q[0]), parseFloat(q[1]));
+}
+
+// The node halfway along a path by ground distance. For a leg that runs round an inlet,
+// that's near the inlet's head, where an extra pin splits it into two direct legs.
+function pathMidpointKey(path) {
+    var half = pathGeomLength(path) / 2, run = 0;
+    for (var i = 1; i < path.length - 1; i++) {
+        run += keyDistance(path[i - 1], path[i]);
+        if (run >= half) return path[i];
+    }
+    return null;
+}
+
+// Route the legs between consecutive keys (the last key closes the loop). Returns
+// { paths, length, keys, vias }, or null if a leg has no path.
+//
+// A leg the app would gap-fill (legNeedsGapFill: more than 3x its straight line) would
+// be re-fetched by the pipeline and could be drawn differently from what's measured
+// here. With LOOP_SPLIT, such a leg gets an extra pin at its halfway point (pathMidpointKey)
+// and both halves are routed afresh, so the pins the pipeline gets are exactly the legs
+// measured. If a half still trips the rule, or LOOP_SPLIT is off, there's no loop and r
+// shrinks. keys comes back with the extra pins in place, minus the closing key.
+function routeLegs(graph, keys) {
+    var paths = [], length = 0, out = [keys[0]], vias = 0;
+    function leg(from, to) {
+        var res = dijkstra(graph, from, to);
+        if (!res) return null;
+        return legNeedsGapFill(res.path, keyDistance(from, to)) ? { tripped: true, path: res.path } : res;
+    }
+    for (var i = 1; i < keys.length; i++) {
+        var from = keys[i - 1], to = keys[i], res = leg(from, to);
+        if (!res) return null;
+        if (res.tripped) {
+            var via = LOOP_SPLIT ? pathMidpointKey(res.path) : null;
+            if (!via) return null;
+            var h1 = leg(from, via), h2 = h1 && !h1.tripped ? leg(via, to) : null;
+            if (!h1 || !h2 || h1.tripped || h2.tripped) return null;
+            paths.push(h1.path, h2.path);
+            length += pathGeomLength(h1.path) + pathGeomLength(h2.path);
+            out.push(via);
+            vias++;
+        } else {
+            paths.push(res.path);
+            length += pathGeomLength(res.path);
+        }
+        if (i < keys.length - 1) out.push(to);
+    }
+    return { paths: paths, length: length, keys: out, vias: vias };
+}
+
+// Corner points for one loop at scale r, as [lat, lon]. Triangle (LOOP_CORNERS 2): A
+// and B at distance r from S. Polygon (3+): n corners evenly spaced round a circle of
+// radius r through S, whose centre is r out along the bearing, so together with S they
+// make a regular (n + 1)-gon.
+function loopCornerPoints(sLat, sLon, bearing, r) {
+    var n = LOOP_CORNERS, pts = [], i;
+    if (n <= 2) {
+        pts.push(offsetPoint(sLat, sLon, bearing - LOOP_SPREAD, r));
+        pts.push(offsetPoint(sLat, sLon, bearing + LOOP_SPREAD, r));
+        return pts;
+    }
+    var c = offsetPoint(sLat, sLon, bearing, r);
+    // Seen from the centre, S is at bearing + 180; walk round from there.
+    for (i = 1; i <= n; i++) pts.push(offsetPoint(c[0], c[1], bearing + 180 + i * 360 / (n + 1), r));
+    return pts;
+}
+
+// Ideal loop length per metre of r (before streets add their detour).
+function loopPerimeter() {
+    var n = LOOP_CORNERS;
+    if (n <= 2) return 2 + 2 * Math.sin(LOOP_SPREAD * Math.PI / 180);   // two spokes + the chord
+    return (n + 1) * 2 * Math.sin(Math.PI / (n + 1));                    // regular (n + 1)-gon
+}
+
+// One loop at scale r. Returns the measured loop; null if a leg has no path (a corner
+// landed in a disconnected piece of the graph); or { degenerate: true } if fewer than
+// two distinct corners are left once corners that snapped onto the start or onto the
+// previous corner are dropped (sparse ground, or r small against the block size),
+// which is not a loop at all.
+function routePolygon(graph, startKey, sLat, sLon, bearing, r, accept) {
+    var pts = loopCornerPoints(sLat, sLon, bearing, r), corners = [];
+    for (var i = 0; i < pts.length; i++) {
+        // No junction within reach (a lone track): any node will do, and the overlap shows it.
+        var key = closestNode(graph, pts[i][0], pts[i][1], LOOP_CORNER_DEGREE, accept) || closestNode(graph, pts[i][0], pts[i][1], 0, accept);
+        if (!key) return null;
+        if (key === startKey || key === corners[corners.length - 1] || corners.indexOf(key) >= 0) continue;
+        corners.push(key);
+    }
+    if (corners.length < 2) return { degenerate: true };
+    var keys = [startKey].concat(corners);
+    var legs = routeLegs(graph, keys.concat([startKey]));
+    if (!legs) return null;
+    return { waypoints: legs.keys, paths: legs.paths, length: legs.length, radius: r, vias: legs.vias };
+}
+
+// How easy a loop is to follow: heading changes of TURN_ANGLE (35°) or more between
+// stretches at least LOOP_TURN_STRETCH (15 m) long, the "kink" measure from
+// docs/design/climb-aware-routing.md. Short wiggles inside 15 m (a kerb ramp, a
+// footpath jog) don't count. The legs are taken end to end, so the turn at each corner
+// counts; the join from the last leg back onto the first does not (that's the finish).
+function loopTurns(paths) {
+    var pts = [], i, j;
+    for (i = 0; i < paths.length; i++) {
+        for (j = (i === 0 ? 0 : 1); j < paths[i].length; j++) {
+            var p = paths[i][j].split(",");
+            pts.push([parseFloat(p[0]), parseFloat(p[1])]);
+        }
+    }
+    var turns = 0, prev = null, anchor = pts[0];
+    for (i = 1; i < pts.length; i++) {
+        if (haversine(anchor[0], anchor[1], pts[i][0], pts[i][1]) < LOOP_TURN_STRETCH) continue;
+        var b = bearingDeg(anchor[0], anchor[1], pts[i][0], pts[i][1]);
+        if (prev !== null) {
+            var d = Math.abs(b - prev);
+            if (d > 180) d = 360 - d;
+            if (d >= TURN_ANGLE) turns++;
+        }
+        prev = b; anchor = pts[i];
+    }
+    return turns;
+}
+
+// Mark how a measured loop sits against target L: deviation is signed (+ = long);
+// error is the distance from the middle of the aim window, which is what ranks loops;
+// ok = inside the accept window; onAim = inside the aim window.
+function loopFit(loop, targetM) {
+    var dev = (loop.length - targetM) / targetM;
+    loop.deviation = dev;
+    loop.error = Math.abs(dev - (LOOP_AIM_LO + LOOP_AIM_HI) / 2);
+    loop.ok = dev >= -LOOP_UNDER && dev <= LOOP_OVER;
+    loop.onAim = dev >= LOOP_AIM_LO && dev <= LOOP_AIM_HI;
+    if (loop.paths) {
+        loop.turns = loopTurns(loop.paths);
+        loop.turnsPerKm = loop.length > 0 ? loop.turns / (loop.length / 1000) : 0;
+    }
+    return loop;
+}
+
+// Order of two attempts at the same target, best first (<0 = a first): a loop inside the
+// accept window beats one outside it. Two near misses: the closer one to the aim
+// (decision 5 shows it with its length). Two inside: one under the overlap cap beats one
+// over it (between two over the cap, less overlap wins). Then, if LOOP_TURN_RANK: on aim
+// beats off aim, and fewer turns per km wins when the difference is more than
+// LOOP_TURN_MARGIN. Then closer to the aim.
+function compareLoops(a, b) {
+    var aIn = a.ok, bIn = b.ok;
+    if (aIn !== bIn) return aIn ? -1 : 1;
+    if (aIn) {
+        var aOver = a.overlap > LOOP_OVERLAP_MAX, bOver = b.overlap > LOOP_OVERLAP_MAX;
+        if (aOver !== bOver) return aOver ? 1 : -1;
+        if (aOver && a.overlap !== b.overlap) return a.overlap - b.overlap;
+        if (LOOP_TURN_RANK) {
+            if (a.onAim !== b.onAim) return a.onAim ? -1 : 1;
+            var dt = (a.turnsPerKm || 0) - (b.turnsPerKm || 0);
+            if (Math.abs(dt) > LOOP_TURN_MARGIN) return dt;
+        }
+    }
+    return a.error - b.error;
+}
+function betterLoop(a, b) {
+    if (!a) return b;
+    if (!b) return a;
+    return compareLoops(a, b) <= 0 ? a : b;
+}
+
+// Returned by the async steps below when opts.isStale() turned true at an await.
+var LOOP_STALE = { stale: true };
+
+// Scale r on one bearing until the loop lands in the aim window, at most LOOP_ITERATIONS
+// routed attempts. Resolves to the best attempt (see betterLoop), null, or LOOP_STALE.
+// ctl = { pause, isStale }: it pauses after every routed attempt so the map stays
+// responsive (each attempt is one route per leg, tens of ms on a Mac, more on a phone).
+//
+// Routed length is a step function of r (corners jump from one street to the next), so
+// plain r × aim / length can bounce between a loop just short and one just long and
+// never land between them. Once there is an attempt on each side of the aim, the next
+// r is interpolated between the closest two instead.
+async function scaleLoop(graph, startKey, targetM, bearing, ctl) {
+    var s = startKey.split(","), sLat = parseFloat(s[0]), sLon = parseFloat(s[1]);
+    var aimM = targetM * (1 + (LOOP_AIM_LO + LOOP_AIM_HI) / 2);   // the middle of the aim window
+    var r = aimM / (loopPerimeter() * LOOP_DETOUR), best = null, under = null, over = null, tries = [];
+    for (var it = 1; it <= LOOP_ITERATIONS; it++) {
+        if (it > 1 && ctl) { await ctl.pause(); if (ctl.isStale()) return LOOP_STALE; }
+        var loop = routePolygon(graph, startKey, sLat, sLon, bearing, r, ctl && ctl.accept);
+        tries.push({ radius: r, length: loop && !loop.degenerate ? loop.length : null });
+        if (!loop) { r *= 0.8; continue; }   // pull the corners back toward connected ground
+        if (loop.degenerate) { r *= 1.5; continue; } // reach past the start to other paths
+        loopFit(loop, targetM);
+        loop.overlap = loopOverlap(loop.paths);
+        loop.bearing = bearing;
+        loop.iterations = it;
+        best = betterLoop(best, loop);
+        if (loop.onAim) break;
+        // Closest on each side; on a tie keep the r nearer the other side, which narrows
+        // the bracket toward the step where the length crosses the aim.
+        if (loop.length < aimM) { if (!under || loop.length > under.length || (loop.length === under.length && r > under.radius)) under = loop; }
+        else if (!over || loop.length < over.length || (loop.length === over.length && r < over.radius)) over = loop;
+        if (under && over && over.radius !== under.radius) {
+            var next = under.radius + (aimM - under.length) * (over.radius - under.radius) / (over.length - under.length);
+            // Same r again would route the same loop: nudge it toward the side nearer the aim.
+            r = Math.abs(next - r) > 1 ? next : (under.radius + over.radius) / 2;
+        } else {
+            // Corners snapped onto the start (tiny r, sparse graph): grow instead of dividing by ~0.
+            r = loop.length > 1 ? r * aimM / loop.length : r * 2;
+        }
+    }
+    // Every attempt, kept for the harness and tests: the best is not always the closest,
+    // because a loop that doubles back loses to a slightly longer clean one.
+    if (best) best.tries = tries;
+    return best;
+}
+
+// One candidate on one bearing, with a single ±LOOP_JITTER retry if it overlaps too much
+// or no attempt landed in the accept window (a river or a park edge on that heading).
+// Resolves like scaleLoop.
+async function loopCandidate(graph, startKey, targetM, bearing, jitterSign, ctl) {
+    var best = await scaleLoop(graph, startKey, targetM, bearing, ctl);
+    if (best === LOOP_STALE) return best;
+    if (!best || best.overlap > LOOP_OVERLAP_MAX || !best.ok) {
+        if (ctl) { await ctl.pause(); if (ctl.isStale()) return LOOP_STALE; }
+        var retry = await scaleLoop(graph, startKey, targetM, bearing + (jitterSign < 0 ? -1 : 1) * LOOP_JITTER, ctl);
+        if (retry === LOOP_STALE) return retry;
+        if (retry) retry.jittered = true;
+        best = betterLoop(best, retry);
+    }
+    if (best) best.heading = bearing;
+    return best;
+}
+
+// Smallest angle between two headings, 0..180.
+function headingGap(a, b) {
+    return Math.abs((((a - b) % 360) + 540) % 360 - 180);
+}
+
+// The best k of a pool of candidates whose nominal headings are all at least
+// LOOP_MIN_SEP apart, so the options head off in different directions. Measured on the
+// heading, not the ±LOOP_JITTER bearing a retry may have used, so two headings 120°
+// apart still count as apart after each jitters 20° toward the other.
+//
+// Every such set is scored, not picked greedily: with 6 headings 60° apart, taking the
+// single best first can lock in a pair that no third heading is 90° from. A set scores
+// on how many of its loops are in the accept window and under the overlap cap, then how
+// many are in the accept window, then (see score) aim and turns, then total distance
+// from the aim. If no set of k is far enough apart (a
+// pool thinned by headings that found nothing), the best loops fill in by
+// compareLoops order instead: three loops that overlap in direction beat fewer.
+function pickLoops(pool, k) {
+    var ranked = pool.slice().sort(compareLoops);
+    if (ranked.length <= k) return ranked;
+    var best = null, bestScore = null;
+    // With LOOP_TURN_RANK, then how many are on aim, then turns per km (in
+    // LOOP_TURN_MARGIN steps, so a trivial difference falls through to total error).
+    function score(set) {
+        var clean = 0, inBand = 0, onAim = 0, turns = 0, err = 0;
+        for (var i = 0; i < set.length; i++) {
+            if (set[i].ok) { inBand++; if (set[i].overlap <= LOOP_OVERLAP_MAX) clean++; }
+            if (set[i].onAim) onAim++;
+            turns += set[i].turnsPerKm || 0;
+            err += set[i].error;
+        }
+        if (!LOOP_TURN_RANK) return [clean, inBand, -err];
+        return [clean, inBand, onAim, -Math.round(turns / set.length / LOOP_TURN_MARGIN), -err];
+    }
+    function beats(a, b) {
+        for (var i = 0; i < a.length; i++) if (a[i] !== b[i]) return a[i] > b[i];
+        return false;
+    }
+    (function walk(from, set) {
+        if (set.length === k) {
+            var sc = score(set);
+            if (!best || beats(sc, bestScore)) { best = set.slice(); bestScore = sc; }
+            return;
+        }
+        for (var i = from; i < ranked.length; i++) {
+            var far = true;
+            for (var j = 0; j < set.length; j++) if (headingGap(ranked[i].heading, set[j].heading) < LOOP_MIN_SEP) far = false;
+            if (far) { set.push(ranked[i]); walk(i + 1, set); set.pop(); }
+        }
+    })(0, []);
+    return best || ranked.slice(0, k);
+}
+
+// Same corner nodes, in any order (a loop and its reverse run the same streets).
+function sameCorners(a, b) {
+    return a.waypoints.slice().sort().join(";") === b.waypoints.slice().sort().join(";");
+}
+
+// Up to k loops of about targetM metres from startKey. LOOP_HEADINGS evenly spaced
+// headings from opts.theta0 (random by default, so asking again gives new loops) are
+// tried, and the best k that head off in different directions are kept (pickLoops).
+// Sorted closest to the aim first. Each has { waypoints: [S, corners…] node keys, paths,
+// length, deviation (signed), error, ok, onAim, overlap, turns, turnsPerKm, heading,
+// bearing (heading ± a
+// jitter), radius, tries, jittered? }; ok = false is a near miss to be shown with its
+// true length. Headings that found no loop at all are left out, so the list can be
+// short or empty.
+//
+// Early stop: every other heading is tried first (with 6, that is three 120° apart). If
+// that spread already gives k loops in the accept window and under the overlap cap, the
+// rest are skipped, which roughly halves the work where the ground is easy.
+//
+// It pauses after every routed attempt so the map stays responsive. opts.isStale() is
+// checked after every pause, like the gen checks in updateRoute: if the start pin moved
+// or the user pressed Undo meanwhile, it resolves to null and the caller drops
+// everything. opts.pause overrides the pause (tests).
+//
+// For PR 2: isStale must also be true if state.graph is no longer this graph (a city
+// change nulls it; the run/bike toggle rebuilds it) or the profile or mode changed,
+// or the lengths measured here won't match what the pipeline draws. Tiles that stream
+// in meanwhile add edges to this same graph and may shorten a later route slightly, so
+// take the shown length from the pipeline once a candidate is drawn.
+async function generateLoops(graph, startKey, targetM, opts) {
+    opts = opts || {};
+    var k = opts.k || 3;
+    var headings = Math.max(k, LOOP_HEADINGS);
+    var theta0 = typeof opts.theta0 === "number" ? opts.theta0 : Math.random() * 360;
+    var ctl = {
+        isStale: opts.isStale || function () { return false; },
+        pause: opts.pause || function () { return new Promise(function (res) { setTimeout(res, 0); }); },
+    };
+    if (!startKey || !(targetM > 0) || !dijkstra(graph, startKey, startKey)) return [];
+    // One pass from the start, shared by every heading: corners only snap to nodes you
+    // can reach and get back from, so no leg's search ever fails (see reachBothWays).
+    if (LOOP_REACH && graph instanceof PackedGraph) {
+        var reach = graph.reachBothWays(startKey);
+        // The same pass also bounds how far round a corner may be: a corner's leg is part
+        // of the loop, so nothing costing more than the whole target is any use.
+        var cost = LOOP_CORNER_DETOUR ? graph.costFrom(startKey, targetM * LOOP_CORNER_DETOUR) : null;
+        var sp = startKey.split(","), sLat0 = parseFloat(sp[0]), sLon0 = parseFloat(sp[1]);
+        if (reach) {
+            // Decided once per node here, not on every snap (snapping looks at hundreds).
+            if (cost) for (var m = 0; m < reach.length; m++) {
+                if (reach[m] && (cost[m] === Infinity || !(cost[m] <= LOOP_CORNER_DETOUR * haversine(sLat0, sLon0, graph.latQ[m] / 1e6, graph.lonQ[m] / 1e6) + LOOP_CORNER_SLACK))) reach[m] = 0;
+            }
+            ctl.accept = function (n) { return n < reach.length && reach[n] === 1; };
+        }
+    }
+    var order = [], i;
+    for (i = 0; i < headings; i += 2) order.push(i);
+    for (i = 1; i < headings; i += 2) order.push(i);
+    var pool = [], firstSpread = Math.ceil(headings / 2);
+    for (var n = 0; n < order.length; n++) {
+        if (ctl.isStale()) return null;
+        var c = await loopCandidate(graph, startKey, targetM, theta0 + order[n] * 360 / headings, order[n] % 2 ? -1 : 1, ctl);
+        if (c === LOOP_STALE) return null;
+        // Two headings can snap to the same corners on sparse ground, in the same or the
+        // reverse order: the same streets either way. Offering that twice as "1 of 3" and
+        // "2 of 3" is a dud option, so keep the first only.
+        if (c && !pool.some(function (p) { return sameCorners(p, c); })) pool.push(c);
+        await ctl.pause();
+        if (ctl.isStale()) return null;
+        if (LOOP_EARLY_STOP && n + 1 === firstSpread && firstSpread >= k && firstSpread < order.length) {
+            var good = pickLoops(pool, k);
+            if (good.length === k && good.every(function (l) { return l.ok && l.overlap <= LOOP_OVERLAP_MAX; })) break;
+        }
+    }
+    var out = pickLoops(pool, k);
+    out.sort(function (a, b) { return a.error - b.error; });
+    out.headingsTried = Math.min(n + 1, order.length);   // for the harness: how often early stop fires
+    return out;
+}
 
 // ── OSM / tile format converters ──────────────────────
 function osmToGeoJSON(data) {
@@ -1130,5 +1657,23 @@ if (typeof module !== "undefined" && module.exports) {
         decodeElevations: decodeElevations,
         ONEWAY_PUSH_MULTIPLIER: ONEWAY_PUSH_MULTIPLIER,
         osmToGeoJSON: osmToGeoJSON,
+        offsetPoint: offsetPoint,
+        loopOverlap: loopOverlap,
+        scaleLoop: scaleLoop,
+        loopCandidate: loopCandidate,
+        generateLoops: generateLoops,
+        pickLoops: pickLoops,
+        headingGap: headingGap,
+        loopCornerPoints: loopCornerPoints,
+        loopFit: loopFit,
+        loopTurns: loopTurns,
+        legNeedsGapFill: legNeedsGapFill,
+        compareLoops: compareLoops,
+        LOOP_AIM_LO: LOOP_AIM_LO,
+        LOOP_AIM_HI: LOOP_AIM_HI,
+        LOOP_UNDER: LOOP_UNDER,
+        LOOP_OVER: LOOP_OVER,
+        LOOP_STALE: LOOP_STALE,
+        LOOP_OVERLAP_MAX: LOOP_OVERLAP_MAX,
     };
 }
