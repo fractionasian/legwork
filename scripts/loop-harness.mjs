@@ -15,7 +15,9 @@
 // <dir> holds a legwork-tiles checkout's manifest.json and tiles/<city>/*.json, e.g.
 //   git -C ~/legwork-tiles archive origin/master manifest.json tiles/perth | tar -x -C /tmp/t
 //
-// Gate (spec, success metrics): at least 18 of 20 starts per city give 3 loops within 10%.
+// Gate (spec, success metrics, changed by Peter 2026-11-18): at least 18 of 20 starts per
+// city and target give 3 loops, at least 2 of them within 10% (the third may be a
+// labelled near miss).
 import fs from "node:fs";
 import path from "node:path";
 import vm from "node:vm";
@@ -33,6 +35,9 @@ const TARGETS = (args.targets || "5000,10000").split(",").map(Number);
 const STARTS = Number(args.starts || 20);
 const SEED = Number(args.seed || 1);
 const PROFILE = args.profile || "run";
+// Tiles a first pin loads: the app's tilesInRadius(…, 5). --tile-km widens it, to measure
+// what loading more ground before generating (a PR 2 choice) would buy.
+const TILE_KM = Number(args["tile-km"] || 5);
 const GATE_MIN = Math.ceil(STARTS * 0.9);
 // --set "LOOP_SPREAD=50;LOOP_DETOUR=1.4": override generator constants for a tuning run.
 // Recorded in the report header so a tuned run is never mistaken for the shipped one.
@@ -58,7 +63,7 @@ function tileData(city, file) {
 }
 function loadStart(cityId, lat, lon) {
   const ctx = appScope();
-  const tiles = ctx.tilesInRadius(manifest.cities[cityId], lat, lon, 5);
+  const tiles = ctx.tilesInRadius(manifest.cities[cityId], lat, lon, TILE_KM);
   for (const t of tiles) ctx.applyPaths(ctx.compactToGeoJSON(tileData(cityId, t.file)), { skipRender: true });
   return { ctx, nTiles: tiles.length };
 }
@@ -118,11 +123,13 @@ for (const cityId of CITIES) for (const target of TARGETS) {
   const ov = loops.reduce((a, l) => a + l.overlap, 0) / (loops.length || 1);
   const ovOver = loops.filter((l) => l.overlap > 0.15).length;
   const ms = rs.map((r) => r.ms).sort((a, b) => a - b);
-  const pass = three10 >= GATE_MIN;
+  const gate = rs.filter((r) => r.loops.length === 3 && r.loops.filter((l) => l.error <= 0.10).length >= 2).length;
+  const pass = gate >= GATE_MIN;
   if (!pass) gatePass = false;
   rows.push({
     city: cityId, km: target / 1000, starts: rs.length,
-    "3 loops ≤10%": `${three10}/${rs.length}${pass ? "" : " ✗"}`,
+    "gate: 2+ of 3 ≤10%": `${gate}/${rs.length}${pass ? "" : " ✗"}`,
+    "3 loops ≤10%": `${three10}/${rs.length}`,
     "3 loops ≤5%": `${three5}/${rs.length}`,
     "loops ≤5%": `${in5}/${loops.length} (${pct(in5 / (loops.length || 1))})`,
     "loops ≤10%": `${in10}/${loops.length} (${pct(in10 / (loops.length || 1))})`,
@@ -131,19 +138,19 @@ for (const cityId of CITIES) for (const target of TARGETS) {
   });
 }
 console.log(`tiles ${manifest.version} (built ${manifest.built}), profile ${PROFILE}, seed ${SEED}, ${STARTS} starts per city` +
-  (SET ? `, OVERRIDES: ${SET}` : ", shipped constants"));
+  (SET ? `, OVERRIDES: ${SET}` : ", shipped constants") + (TILE_KM !== 5 ? `, TILES WITHIN ${TILE_KM} km (app: 5)` : ""));
 console.table(rows);
 const all = results.flatMap((r) => r.loops);
 console.log(`all: ${all.filter((l) => l.error <= 0.05).length}/${all.length} loops within 5%, ` +
   `${all.filter((l) => l.error <= 0.10).length}/${all.length} within 10%, ` +
   `mean overlap ${pct(all.reduce((a, l) => a + l.overlap, 0) / all.length)}, ` +
   `jitter retries ${all.filter((l) => l.jittered).length}, wall ${wall.toFixed(1)} s (includes tile loading)`);
-const misses = results.filter((r) => r.loops.length < 3 || r.loops.some((l) => l.error > 0.10));
+const misses = results.filter((r) => r.loops.length < 3 || r.loops.filter((l) => l.error <= 0.10).length < 2);
 if (misses.length) {
-  console.log("\nstarts short of 3 loops within 10%:");
+  console.log("\nstarts that miss the gate (fewer than 3 loops, or fewer than 2 within 10%):");
   for (const r of misses) console.log(`  ${r.city} #${r.start} (${r.lat.toFixed(4)}, ${r.lon.toFixed(4)}) ${r.target / 1000} km: ` +
     r.loops.map((l) => `${(l.length / 1000).toFixed(2)} km ov ${pct(l.overlap)}`).join(" | ") + (r.loops.length < 3 ? ` (${r.loops.length} found)` : ""));
 }
 if (args.json) fs.writeFileSync(args.json, JSON.stringify(results, null, 1));
-console.log(`\ngate (≥${GATE_MIN}/${STARTS} starts per city and target give 3 loops within 10%): ${gatePass ? "PASS" : "MISS"}`);
+console.log(`\ngate (≥${GATE_MIN}/${STARTS} starts per city and target give 3 loops, 2+ within 10%): ${gatePass ? "PASS" : "MISS"}`);
 process.exit(gatePass ? 0 : 1);

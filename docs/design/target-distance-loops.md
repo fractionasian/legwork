@@ -1,6 +1,6 @@
 ---
 status: approved — Peter accepted all five Layer-1 defaults and the Assumed list, 2026-11-18
-next: PR 1 on branch claude/loop-generator-engine-e71d07; tuning round 2 (6 headings + 5-point polygon) still MISSES the gate, your call before PR 2
+next: PR 1 on branch claude/loop-generator-engine-e71d07; on the changed metric 7/8 rows pass, Sydney 5 km misses (16/20); your call before the PR
 created: 2026-11-18
 trigger: Three Routes (iOS) OzBargain freebie, ozbargain.com.au/node/983771, 2026-11-17
 ---
@@ -28,9 +28,13 @@ loop will sometimes be a dud.
 - Learned or popular routes. Still on the not-built list.
 - A new routing engine. The loops come from the same router as hand-drawn ones.
 
-**Success metrics:** on 20 test starts across 4 cities, at least 18 give three
-loops within 10% of target, with no loop that runs the same street out and back
-for more than a short stretch. You try it from home and would actually run one.
+**Success metrics:** on 20 test starts in each of 4 cities, at each distance, at
+least 18 give three loops, at least two of them within 10% of target. The third
+may be a near miss shown with its true length (decision 5). No loop should run the
+same street out and back for more than a short stretch. You try it from home and
+would actually run one. *(Changed 2026-11-18 from "three loops within 10%", after
+two tuning rounds showed the third heading is the one that misses: Peter, "Yes,
+change metric". The 15% overlap measure is unchanged.)*
 
 **Decisions for you:**
 
@@ -271,6 +275,26 @@ Speed is now the larger concern for PR 2. A median of about 2 s on a Mac for 10 
 with a tail to 16 s, means roughly 5–10 s and worse on a phone. Ten headings'
 worth of A* calls are the cost.
 
+**Changed metric (2026-11-18): 3 loops, at least 2 within 10%.** Same shipped run,
+re-run with the new gate, and it gave identical loops:
+
+| | Per 5 | Per 10 | Mel 5 | Mel 10 | Syd 5 | Syd 10 | Bri 5 | Bri 10 |
+|---|---|---|---|---|---|---|---|---|
+| Starts out of 20 (≥ 18 needed) | 19 | 18 | 19 | 20 | **16 ✗** | 18 | 18 | 18 |
+
+**Gate: MISSED in one row, Sydney 5 km.** Five of the passing rows sit at exactly
+18. The four Sydney 5 km misses are real geography: two on the edge of Lane Cove
+National Park (#3, #10), Vaucluse/Watsons Bay on its harbour peninsula (#13), and
+#6, a start that snapped onto a 2-node path fragment joined to nothing. A hand-drawn
+route from that pin fails too, and "No loop found from here" is the right answer.
+
+Ruled out: **tiles truncating the graph.** A first pin loads tiles whose *centres*
+are within 5 km. That's 2.9 tiles on average and as few as 1, so about 5 × 10 km of
+ground, not the "loop of ~25 km" assumed under Fit with existing code. Loading
+within 8 km (7.4 tiles on average) left Sydney 5 km at 16/20 and 10 km at 18/20, so
+it isn't behind the misses. It still matters for PR 2 at 15–21 km
+(`--tile-km` in the harness measures it).
+
 What would move the gate next (not done; each changes the spec, so it's your call):
 
 1. **Let a near-miss heading try a different radius direction.** A heading whose
@@ -293,11 +317,12 @@ What would move the gate next (not done; each changes the spec, so it's your cal
 ### Handover (PR 1, 2026-11-18)
 
 Generator, unit tests and harness are on branch `claude/loop-generator-engine-e71d07`,
-not pushed and with no PR. Two tuning rounds missed the gate (Harness results). The
-shipped constants are round 2's best (6 headings, 5-point polygon). Next session:
-choose from "What would move the gate next", re-run the harness with the same seed
-and tiles, then open PR 1 if the gate passes or if you change the metric. To
-reproduce: export the tiles with `git -C ~/legwork-tiles archive origin/master
-manifest.json tiles/perth tiles/melbourne tiles/sydney tiles/brisbane | tar -x -C
-<dir>`. `--set "NAME=value"` overrides a generator constant for a tuning run, and the
-report header says so.
+not pushed and with no PR. Shipped constants are tuning round 2's best (6 headings,
+5-point polygon). On the changed metric (3 loops, 2+ within 10%), 7 of 8 rows pass and
+Sydney 5 km misses at 16/20 (Harness results). Next: you decide whether that one row
+blocks PR 1. If not, open it and run `/review-pass`. If it does, pick from "What would
+move the gate next". To reproduce: export the tiles with `git -C ~/legwork-tiles
+archive origin/master manifest.json tiles/perth tiles/melbourne tiles/sydney
+tiles/brisbane | tar -x -C <dir>`, then `node scripts/loop-harness.mjs --tiles <dir>`.
+`--set "NAME=value"` and `--tile-km` are for tuning runs, and the report header says
+when either is in use.
