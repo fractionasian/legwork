@@ -1638,7 +1638,12 @@ kbd {
     flex-direction: column;
     align-items: flex-end;
 }
-.map-area .leaflet-top.leaflet-right { top: var(--loop-ui-h, 0px); }
+/* Eased, so the switcher's drop on a first pin reads as a slide, not a jump. */
+.map-area .leaflet-top.leaflet-right { top: var(--loop-ui-h, 0px); transition: top 150ms ease-out; }
+.info-banner { transition: top 150ms ease-out; }
+@media (prefers-reduced-motion: reduce) {
+    .map-area .leaflet-top.leaflet-right, .info-banner { transition: none; }
+}
 
 .controls .loop-ui button {
     font-size: 15px;
@@ -1674,7 +1679,7 @@ kbd {
     border-radius: 8px;
     box-shadow: 0 4px 16px rgba(0,0,0,0.4);
     padding: 10px;
-    width: 240px;
+    width: 264px;
     box-sizing: border-box;
 }
 .loop-chip.hidden, .loop-panel.hidden, .loop-other.hidden { display: none; }
@@ -1732,6 +1737,8 @@ kbd {
     gap: 6px;
 }
 .controls .loop-actions #loop-next { flex: 1; font-variant-numeric: tabular-nums; }
+.controls .loop-actions #loop-next[hidden] { display: none; }
+.controls .loop-actions #loop-next[hidden] ~ .loop-keep { flex: 1; }
 .controls .loop-actions .loop-keep {
     background: #6ee7b7;
     border-color: #6ee7b7;

@@ -1316,11 +1316,10 @@ function loopGroundKm(km) {
 }
 
 // Live (Overpass/Worker) fetch radius in metres for an untiled start: the loop's
-// diameter × 1.5, in whole km as the Worker's cache key expects. 0 when the
-// 2 km a first pin usually loads is already enough.
+// diameter × 1.5, in whole km as the Worker's cache key expects, and never under
+// 2 km. Always fetched: a first pin dropped at zoom 16 loads only 1 km.
 function loopLiveRadiusM(km) {
-    var m = Math.ceil(km * 1000 / 3.8 * 1.5 / 1000) * 1000;
-    return m > 2000 ? m : 0;
+    return Math.max(2000, Math.ceil(km * 1000 / 3.8 * 1.5 / 1000) * 1000);
 }
 
 // Stale guard for a generation in flight: a and b are snapshots of what it started

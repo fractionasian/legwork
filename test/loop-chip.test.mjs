@@ -57,9 +57,10 @@ test("loopGroundKm — never below a first pin's 5 km, grows for long loops", ()
   assert.ok(R.loopGroundKm(42) > R.loopGroundKm(21));
 });
 
-test("loopLiveRadiusM — whole km, 0 when a first pin's 2 km is enough", () => {
-  assert.equal(R.loopLiveRadiusM(3), 0);
-  assert.equal(R.loopLiveRadiusM(5), 0);
+test("loopLiveRadiusM — whole km, never under 2 km (a zoom-16 first pin loads only 1 km)", () => {
+  assert.equal(R.loopLiveRadiusM(1), 2000);
+  assert.equal(R.loopLiveRadiusM(3), 2000);
+  assert.equal(R.loopLiveRadiusM(5), 2000);
   assert.equal(R.loopLiveRadiusM(10), 4000);
   assert.ok(/^\d{4,5}$/.test(String(R.loopLiveRadiusM(10))), "the Worker's radius format");
 });
