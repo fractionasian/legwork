@@ -384,8 +384,11 @@ function resetSpatialGrid() {
     spatialGrid = {};
 }
 
-function closestNode(graph, lat, lon) {
-    if (graph instanceof PackedGraph) return graph.closest(lat, lon);
+// minDegree (optional): only consider nodes with at least that many edges out. The loop
+// generator passes 3 so a loop's corners land on junctions, not on the end of a
+// cul-de-sac it would have to run into and back out of. Pins never pass it.
+function closestNode(graph, lat, lon, minDegree) {
+    if (graph instanceof PackedGraph) return graph.closest(lat, lon, minDegree);
     var bestKey = null, bestDist = Infinity;
     var cLat = Math.floor(lat / GRID_CELL) * GRID_CELL;
     var cLon = Math.floor(lon / GRID_CELL) * GRID_CELL;
@@ -399,6 +402,7 @@ function closestNode(graph, lat, lon) {
                 var bucket = spatialGrid[gk];
                 if (!bucket) continue;
                 for (var i = 0; i < bucket.length; i++) {
+                    if (minDegree && (graph[bucket[i].key] || []).length < minDegree) continue;
                     var d = haversine(lat, lon, bucket[i].lat, bucket[i].lon);
                     if (d < bestDist) { bestDist = d; bestKey = bucket[i].key; }
                 }
@@ -583,7 +587,8 @@ PackedGraph.prototype.hasNode = function (key) { return this.indexOf(key) >= 0; 
 
 // Nearest node to a point, as a key. Same search as the plain-object closestNode: rings of
 // cells outward from the point's cell, one ring past the first hit, capped at 7 (~3.5 km).
-PackedGraph.prototype.closest = function (lat, lon) {
+// minDegree (optional): skip nodes with fewer edges out (see closestNode).
+PackedGraph.prototype.closest = function (lat, lon, minDegree) {
     var ci = Math.floor((lat + 90) / PG_CELL), cj = Math.floor((lon + 180) / PG_CELL);
     var best = -1, bestD = Infinity, self = this;
     function ring(r) {
@@ -593,7 +598,9 @@ PackedGraph.prototype.closest = function (lat, lon) {
                 var b = self.grid.get((ci + di) * 100000 + (cj + dj));
                 if (!b) continue;
                 for (var k = 0; k < b.length; k++) {
-                    var n = b[k], d = haversine(lat, lon, self.latQ[n] / 1e6, self.lonQ[n] / 1e6);
+                    var n = b[k];
+                    if (minDegree && self.degree(n) < minDegree) continue;
+                    var d = haversine(lat, lon, self.latQ[n] / 1e6, self.lonQ[n] / 1e6);
                     if (d < bestD) { bestD = d; best = n; }
                 }
             }
@@ -606,6 +613,13 @@ PackedGraph.prototype.closest = function (lat, lon) {
         if (foundAt >= 0 && r >= foundAt + 1) break;
     }
     return best >= 0 ? this.keyOf(best) : null;
+};
+
+// Edges out of node n (both directions of a two-way segment count once each way).
+PackedGraph.prototype.degree = function (n) {
+    var c = 0;
+    for (var e = this.first[n]; e >= 0; e = this.eNext[e]) c++;
+    return c;
 };
 
 // ── binary heap on two typed arrays ──
@@ -738,6 +752,188 @@ PackedGraph.prototype.edgesFrom = function (key) {
     }
     return out;
 };
+
+// ── Target-distance loops ─────────────────────────────
+// "Give me a 5 km loop from here" (docs/design/target-distance-loops.md). Each
+// candidate is a fat triangle S → A → B → S: A and B sit at radius r from the start,
+// LOOP_SPREAD degrees either side of the candidate's bearing. Each leg is routed with
+// dijkstra() on the live graph, so the waypoints [S, A, B] fed back through the normal
+// loop-mode pipeline draw exactly the route measured here: same router, same weights,
+// same climb and turn costs, and no penalty that exists only in the generator. r is
+// then rescaled by target / measured until the loop is within LOOP_AIM of the target.
+//
+// Lengths are pathGeomLength (metres on the ground), never result.dist (the weighted
+// cost), because the target is a distance the runner will cover.
+var LOOP_SPREAD = 35;          // degrees each side of the bearing for A and B
+var LOOP_DETOUR = 1.3;         // typical routed length / straight-line length; first guess only
+var LOOP_ITERATIONS = 4;       // routed attempts per bearing
+var LOOP_AIM = 0.05;           // stop rescaling once within 5% of the target
+var LOOP_ACCEPT = 0.10;        // beyond 10% a loop is only a labelled near miss
+var LOOP_OVERLAP_MAX = 0.15;   // share of the length on ground covered twice
+var LOOP_JITTER = 20;          // degrees; one retry when a bearing overlaps too much
+var LOOP_CORNER_DEGREE = 3;    // A and B snap to junctions only (see closestNode)
+
+// Point `metres` from (lat, lon) heading `bearing` degrees (0 = north). Flat-earth
+// offset: well under 1% error at loop radii, and r is corrected by measurement anyway.
+function offsetPoint(lat, lon, bearing, metres) {
+    var b = bearing * Math.PI / 180;
+    var dLat = metres * Math.cos(b) / METRES_PER_DEGREE;
+    var dLon = metres * Math.sin(b) / (METRES_PER_DEGREE * Math.cos(lat * Math.PI / 180));
+    return [lat + dLat, lon + dLon];
+}
+
+// Share of a loop's length that runs on ground it covers more than once: an
+// out-and-back spur, a lollipop stick, or a leg that doubles back over another. Edges
+// are undirected (A-B is B-A), so running a street both ways counts. 0 = every metre
+// is new; 1 = a pure out-and-back.
+function loopOverlap(paths) {
+    var uses = new Map(), segs = [], total = 0, i, j;
+    for (i = 0; i < paths.length; i++) {
+        var p = paths[i];
+        for (j = 1; j < p.length; j++) {
+            var a = p[j - 1], b = p[j];
+            var k = a < b ? a + "|" + b : b + "|" + a;
+            var d = pathGeomLength([a, b]);
+            uses.set(k, (uses.get(k) || 0) + 1);
+            segs.push({ k: k, d: d });
+            total += d;
+        }
+    }
+    if (!total) return 0;
+    var twice = 0;
+    for (i = 0; i < segs.length; i++) if (uses.get(segs[i].k) > 1) twice += segs[i].d;
+    return twice / total;
+}
+
+// Route S → A → B → S. Returns null if a leg has no path.
+function routeLegs(graph, keys) {
+    var paths = [], length = 0;
+    for (var i = 1; i < keys.length; i++) {
+        var res = dijkstra(graph, keys[i - 1], keys[i]);
+        if (!res) return null;
+        paths.push(res.path);
+        length += pathGeomLength(res.path);
+    }
+    return { paths: paths, length: length };
+}
+
+// One loop at radius r. Returns the measured loop; null if a leg has no path (A or B
+// landed in a disconnected piece of the graph); or { degenerate: true } if the corners
+// are not three distinct nodes (sparse ground: the nearest junction to A's point is the
+// start itself), which is not a loop at all.
+function routeTriangle(graph, startKey, sLat, sLon, bearing, r) {
+    var pa = offsetPoint(sLat, sLon, bearing - LOOP_SPREAD, r);
+    var pb = offsetPoint(sLat, sLon, bearing + LOOP_SPREAD, r);
+    // No junction within reach (a lone track): any node will do, and the overlap shows it.
+    var aKey = closestNode(graph, pa[0], pa[1], LOOP_CORNER_DEGREE) || closestNode(graph, pa[0], pa[1]);
+    var bKey = closestNode(graph, pb[0], pb[1], LOOP_CORNER_DEGREE) || closestNode(graph, pb[0], pb[1]);
+    if (!aKey || !bKey) return null;
+    if (aKey === startKey || bKey === startKey || aKey === bKey) return { degenerate: true };
+    var legs = routeLegs(graph, [startKey, aKey, bKey, startKey]);
+    if (!legs) return null;
+    return { waypoints: [startKey, aKey, bKey], paths: legs.paths, length: legs.length, radius: r };
+}
+
+// Better of two attempts at the same target: a loop inside the accept band beats one
+// outside it. Two near misses: the closer one (decision 5 shows it with its length).
+// Two inside the band: one under the overlap cap beats one over it (between two over
+// the cap, less overlap wins); then closer to the target.
+function betterLoop(a, b) {
+    if (!a) return b;
+    if (!b) return a;
+    var aIn = a.error <= LOOP_ACCEPT, bIn = b.error <= LOOP_ACCEPT;
+    if (aIn !== bIn) return aIn ? a : b;
+    if (!aIn) return a.error <= b.error ? a : b;
+    var aOver = a.overlap > LOOP_OVERLAP_MAX, bOver = b.overlap > LOOP_OVERLAP_MAX;
+    if (aOver !== bOver) return aOver ? b : a;
+    if (aOver && a.overlap !== b.overlap) return a.overlap < b.overlap ? a : b;
+    return a.error <= b.error ? a : b;
+}
+
+// Scale r on one bearing until the loop is within LOOP_AIM of target, at most
+// LOOP_ITERATIONS routed attempts. Returns the best attempt (see betterLoop) or null.
+//
+// Routed length is a step function of r (A and B jump from one street to the next), so
+// plain r × target / length can bounce between a loop just short and one just long and
+// never land between them. Once there is an attempt on each side of the target, the
+// next r is interpolated between the closest two instead.
+function scaleLoop(graph, startKey, targetM, bearing) {
+    var s = startKey.split(","), sLat = parseFloat(s[0]), sLon = parseFloat(s[1]);
+    // Perimeter of the S-A-B triangle per metre of radius: two spokes plus the chord.
+    var perimeter = 2 + 2 * Math.sin(LOOP_SPREAD * Math.PI / 180);
+    var r = targetM / (perimeter * LOOP_DETOUR), best = null, under = null, over = null, tries = [];
+    for (var it = 1; it <= LOOP_ITERATIONS; it++) {
+        var loop = routeTriangle(graph, startKey, sLat, sLon, bearing, r);
+        tries.push({ radius: r, length: loop && !loop.degenerate ? loop.length : null });
+        if (!loop) { r *= 0.8; continue; }   // pull A and B back toward connected ground
+        if (loop.degenerate) { r *= 1.5; continue; } // reach past the start to other paths
+        loop.error = Math.abs(loop.length - targetM) / targetM;
+        loop.overlap = loopOverlap(loop.paths);
+        loop.bearing = bearing;
+        loop.iterations = it;
+        best = betterLoop(best, loop);
+        if (loop.error <= LOOP_AIM) break;
+        // Closest on each side; on a tie keep the r nearer the other side, which narrows
+        // the bracket toward the step where the length crosses the target.
+        if (loop.length < targetM) { if (!under || loop.length > under.length || (loop.length === under.length && r > under.radius)) under = loop; }
+        else if (!over || loop.length < over.length || (loop.length === over.length && r < over.radius)) over = loop;
+        if (under && over && over.radius !== under.radius) {
+            var next = under.radius + (targetM - under.length) * (over.radius - under.radius) / (over.length - under.length);
+            // Same r again would route the same loop: nudge it toward the side nearer the target.
+            r = Math.abs(next - r) > 1 ? next : (under.radius + over.radius) / 2;
+        } else {
+            // A and B snapped onto the start (tiny r, sparse graph): grow instead of dividing by ~0.
+            r = loop.length > 1 ? r * targetM / loop.length : r * 2;
+        }
+    }
+    // Every attempt, kept for the harness and tests: the best is not always the closest,
+    // because a loop that doubles back loses to a slightly longer clean one.
+    if (best) best.tries = tries;
+    return best;
+}
+
+// One candidate on one bearing, with a single ±LOOP_JITTER retry if it overlaps too much
+// or no attempt landed within LOOP_ACCEPT (a river or a park edge on that heading).
+function loopCandidate(graph, startKey, targetM, bearing, jitterSign) {
+    var best = scaleLoop(graph, startKey, targetM, bearing);
+    if (!best || best.overlap > LOOP_OVERLAP_MAX || best.error > LOOP_ACCEPT) {
+        var retry = scaleLoop(graph, startKey, targetM, bearing + (jitterSign < 0 ? -1 : 1) * LOOP_JITTER);
+        if (retry) retry.jittered = true;
+        best = betterLoop(best, retry);
+    }
+    if (best) best.ok = best.error <= LOOP_ACCEPT;
+    return best;
+}
+
+// Up to k loops of about targetM metres from startKey, headed off k evenly spaced
+// bearings from opts.theta0 (random by default, so asking again gives new loops).
+// Sorted closest-to-target first. Each has { waypoints: [S, A, B] node keys, paths,
+// length, error, overlap, ok, bearing, radius, iterations, jittered? }; ok = false is a
+// near miss to be shown with its true length. Bearings that found no loop at all are
+// left out, so the list can be short or empty.
+//
+// Candidates run one at a time with an await between them so the UI stays responsive.
+// opts.isStale() is checked after every await, like the gen checks in updateRoute: if
+// the start pin moved or the user pressed Undo meanwhile, it returns null and the
+// caller drops everything. opts.pause overrides the await (tests).
+async function generateLoops(graph, startKey, targetM, opts) {
+    opts = opts || {};
+    var k = opts.k || 3;
+    var theta0 = typeof opts.theta0 === "number" ? opts.theta0 : Math.random() * 360;
+    var isStale = opts.isStale || function () { return false; };
+    var pause = opts.pause || function () { return new Promise(function (res) { setTimeout(res, 0); }); };
+    if (!startKey || !(targetM > 0) || !dijkstra(graph, startKey, startKey)) return [];
+    var out = [];
+    for (var i = 0; i < k; i++) {
+        if (isStale()) return null;
+        var c = loopCandidate(graph, startKey, targetM, theta0 + i * 360 / k, i % 2 ? -1 : 1);
+        if (c) out.push(c);
+        await pause();
+        if (isStale()) return null;
+    }
+    out.sort(function (a, b) { return a.error - b.error; });
+    return out;
+}
 
 // ── OSM / tile format converters ──────────────────────
 function osmToGeoJSON(data) {
@@ -1130,5 +1326,13 @@ if (typeof module !== "undefined" && module.exports) {
         decodeElevations: decodeElevations,
         ONEWAY_PUSH_MULTIPLIER: ONEWAY_PUSH_MULTIPLIER,
         osmToGeoJSON: osmToGeoJSON,
+        offsetPoint: offsetPoint,
+        loopOverlap: loopOverlap,
+        scaleLoop: scaleLoop,
+        loopCandidate: loopCandidate,
+        generateLoops: generateLoops,
+        LOOP_ACCEPT: LOOP_ACCEPT,
+        LOOP_AIM: LOOP_AIM,
+        LOOP_OVERLAP_MAX: LOOP_OVERLAP_MAX,
     };
 }
