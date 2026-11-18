@@ -11,6 +11,9 @@ export const EVENT_NAMES = new Set([
   "pin-drop", "route-built", "route-export", "route-save", "route-share",
   // Reverse presses answer "is the toolbar button earning its space".
   "route-reverse",
+  // "Loop ▸" chip: did a generated loop come back, and for which preset. Answers
+  // whether target-distance loops get used and how often they miss.
+  "loop-generated",
   // Moved off Umami Cloud, which was the last third-party script in the app.
   // These two answer "which city do we pre-bake next": city-resolved when the
   // user lands inside a catalogued city, city-unknown with a coarse 0.5-degree
@@ -28,6 +31,11 @@ const MODES = new Set(["loop", "outback", "oneway"]);
 const PROFILES = new Set(["run", "bike"]);
 // Which base layer the map was showing. Enum, so no new identifier is possible.
 const BASEMAPS = new Set(["street", "satellite", "terrain"]);
+// loop-generated: which preset was tapped, never the distance itself ("other" for
+// a typed one), and whether it found a loop in the accept window, only a near miss
+// shown with its true length, or nothing.
+const LOOP_BUCKETS = new Set(["3", "5", "8", "10", "15", "21", "other"]);
+const LOOP_RESULTS = new Set(["ok", "near_miss", "failed"]);
 
 // City slug for `route-built`, e.g. "perth" — or the sentinel "uncovered" when
 // the route is outside every catalogue city.
@@ -88,6 +96,10 @@ const PROP_SCHEMA = {
   "route-save": {},
   "route-share": {},
   "route-reverse": {},
+  "loop-generated": {
+    bucket: { test: (v) => LOOP_BUCKETS.has(v) },
+    result: { test: (v) => LOOP_RESULTS.has(v) },
+  },
 };
 
 // Distance -> coarse bucket. Defensive by design: this runs on client-supplied
