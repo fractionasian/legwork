@@ -1,6 +1,6 @@
 ---
 status: approved — Peter accepted all five Layer-1 defaults and the Assumed list, 2026-11-18
-next: PR 1 on branch claude/loop-generator-engine-e71d07; shared search built (round 5); Sydney 5 km 17/20, one start short of the gate; your call before the PR
+next: PR 1 open as fractionasian/legwork#57 (Peter accepted Sydney 5 km at 17/20, 2026-11-18); then PR 2 (UI)
 created: 2026-11-18
 trigger: Three Routes (iOS) OzBargain freebie, ozbargain.com.au/node/983771, 2026-11-17
 ---
@@ -30,12 +30,17 @@ loop will sometimes be a dud.
 - A new routing engine. The loops come from the same router as hand-drawn ones.
 
 **Success metrics:** on 20 test starts in each of 4 cities, at each distance, at
-least 18 give three loops, at least two of them within 10% of target. The third
-may be a near miss shown with its true length (decision 5). No loop should run the
-same street out and back for more than a short stretch. You try it from home and
-would actually run one. *(Changed 2026-11-18 from "three loops within 10%", after
-two tuning rounds showed the third heading is the one that misses: Peter, "Yes,
-change metric". The 15% overlap measure is unchanged.)*
+least 18 give three loops, at least two of them inside the accept window (−3% to
++10% of target, decision 6). The third may be a near miss shown with its true length
+(decision 5). No loop should run the same street out and back for more than a short
+stretch. You try it from home and would actually run one. *(Changed 2026-11-18 from
+"three loops within 10%", after two tuning rounds showed the third heading is the one
+that misses: Peter, "Yes, change metric". The 15% overlap measure is unchanged.)*
+*Note: the harness gate counts length only. Overlap is reported (mean, and loops
+over 15%) but doesn't gate, and it never has since round 1. In round 5, 146 of 474
+loops were over 15%. Counting only loops under 15% toward the "2+" gives 11–16 of 20
+per row, which fails every row. So whether overlap should gate is a call still open,
+not settled.*
 
 **Decisions for you:**
 
@@ -100,7 +105,10 @@ change metric". The 15% overlap measure is unchanged.)*
   climb-aware and traffic-light settings.
 - Works offline in the 12 pre-baked cities for loops up to about 25 km. Outside
   them it uses the live path download, which is slower; I'd cap it at 10 km
-  there and say so on screen.
+  there and say so on screen. *Measured in PR 1: a first pin loads only about 3
+  tiles (about 5 × 10 km of ground), not enough for a 25 km loop. Fine to 10 km;
+  PR 2 must load more ground before the 15 and 21 km presets (see Harness
+  results, "Ruled out: tiles truncating the graph").*
 - The three options head off in different directions from the start, so they
   feel different rather than three versions of the same block.
 - Analytics records only "a loop was generated" and which preset bucket
@@ -239,9 +247,10 @@ location at the existing 0.005° grid only.
   the first is kept.
 - **Fewer turns as a tie-breaker (round 4, Peter 2026-11-18).** Each loop counts its
   turns: heading changes of 35° or more between stretches of at least 15 m, the
-  "kink" from climb-aware routing, so a footpath jog doesn't count. Among loops that
-  are acceptable, clean and on aim, fewer turns per km wins when the gap is over 0.5
-  per km; otherwise closer to the aim wins. Sets of three are scored the same way. It
+  "kink" from climb-aware routing, so a footpath jog doesn't count. Between two loops
+  that are acceptable and on the same side of the overlap cap: one on aim beats one
+  off aim, then fewer turns per km wins when the gap is over 0.5 per km, and
+  otherwise closer to the aim wins. Sets of three are scored the same way. It
   only chooses between loops already routed, so the router, its turn cost of 15 and
   "what you see is what was measured" are unchanged.
 - **One shared search from the start (round 5).** Before any heading is routed, one
@@ -417,47 +426,48 @@ Gate rows, shipped: Per 19 / 18, Mel 20 / 20, **Syd 17** / 18, Bri 19 / 20.
   pass doesn't, so a reused leg could differ from what the pipeline draws. Each kept
   loop would then need re-routing to check it. Proposal only.
 
-What would move the gate next (not done; each changes the spec, so it's your call):
+What would move the gate next, as listed after round 2:
 
-1. **Let a near-miss heading try a different radius direction.** A heading whose
-   best attempt is short could retry with corners pulled inward on the water
-   side. That's speculative, and I haven't measured it.
-2. **Accept "2 good + 1 labelled near miss" for v1.** That's 146/160 runs today.
-   Decision 5 already shows a near miss with its true length, so the user sees
-   2 loops near the target and a third clearly labelled. This changes the success
-   metric, not the code.
-3. **Fix the speed independently** before PR 2: stop early once three clean loops
-   ≥ 90° apart are in hand, rather than always routing all six headings.
+1. *Open, proposal:* **let a near-miss heading try a different radius direction.** A
+   heading whose best attempt is short could retry with corners pulled inward on
+   the water side. That's speculative, and I haven't measured it.
+2. *Settled:* "2 good + 1 labelled near miss" became the success metric (Peter,
+   2026-11-18).
+3. *Settled:* stop early was built in round 3. The shared search (round 5) is what
+   actually moved the slow tail.
 
 ### Sequencing (one PR per idea)
 
 1. `routing.js` generator + unit tests + real-tile harness numbers (no UI).
-   Gate: harness hits the success metric.
+   Gate: harness hits the success metric. *Outcome:* 7 of 8 rows; Sydney 5 km at
+   17/20. Peter accepted that and opened the PR anyway (2026-11-18, "No, open the
+   PR"): fractionasian/legwork#57.
 2. Chip, preset row, candidate flipper, telemetry enum. `/review-pass`, then
    `/first-users` (public app, visible change).
 3. Out-and-back generation (decision 7) on the same chip, reusing PR 1's search.
 
-*Speed pass: approved and partly built (round 3).* Built: early stop, and a
-pause after every attempt instead of a worker (see As built). **Still open**, as a
-proposal (Claude, 2026-11-18): one search outward from the start, reused for every
-loop's first and last leg, and used to skip headings with no ground at the right
-distance (water, bush). That attacks the slow tail directly, and the Sydney misses
-too. The catch: one-way legs and climb cost make the return leg differ from the
-outward one, so a reused search has to be checked against the normal router before
-a loop is offered, or "what you see is what was measured" breaks.
+*Speed pass: approved (Peter, 2026-11-18).* Built in round 3: early stop, and a
+pause after every attempt instead of a worker. Built in round 5: the shared search
+from the start, used to keep corners on reachable ground that isn't the long way
+round. That isn't skipping headings: a heading's corners move onto good ground
+instead. **Still open, proposal only** (Claude): reusing that search for each loop's
+first and last leg. The router charges for turns and the shared pass doesn't, so a
+reused leg could differ from what the pipeline draws, and every kept loop would
+need re-routing to check it.
 
 ### Handover (PR 1, 2026-11-18)
 
-Generator, unit tests and harness are on branch `claude/loop-generator-engine-e71d07`,
-not pushed and with no PR. Shipped constants: 6 headings, 5-point polygon, aim 0 to
-+5% over (accept −3% to +10%), early stop, fewer turns as a tie-breaker, and corners
-only on ground the shared search marks as reachable and not the long way round. On
-the changed metric (3 loops, 2+ acceptable), 7 of 8 rows pass and Sydney 5 km is one
-start short at 17/20. Speed on a Mac: median about 1.1 s, p90 2.6 s, max 7.4 s,
-before phone slowdown. Next: decide whether Sydney 5 km blocks PR 1. If not, open it
-with `/review-pass`. If it does, pick from "What would move the gate next". To
-reproduce: export the tiles with `git -C ~/legwork-tiles archive origin/master
-manifest.json tiles/perth tiles/melbourne tiles/sydney tiles/brisbane | tar -x -C
-<dir>`, then `node scripts/loop-harness.mjs --tiles <dir>`. `--set "NAME=value"` and
-`--tile-km` are for tuning runs, and the report header says when either is in use.
-Unknown flags are rejected.
+PR 1 is open as fractionasian/legwork#57 (branch `claude/loop-generator-engine-e71d07`,
+`/review-pass` run). Not merged. Shipped constants: 6 headings, 5-point polygon, aim
+0 to +5% over (accept −3% to +10%), early stop, fewer turns as a tie-breaker, and
+corners only on ground the shared search marks as reachable and not the long way
+round. On the changed metric (3 loops, 2+ acceptable), 7 of 8 rows pass. Sydney 5 km
+is one start short at 17/20, and Peter accepted that for PR 1. Overlap is reported,
+not gated (see Success metrics). Speed on a Mac: median about 1.1 s, p90 2.6 s, max
+7.4 s, before phone slowdown. Next: merge #57, then PR 2 (UI). PR 2 must load more
+than a first pin's 3 tiles before offering 15 and 21 km. To reproduce: export the tiles
+with `git -C ~/legwork-tiles archive origin/master manifest.json tiles/perth
+tiles/melbourne tiles/sydney tiles/brisbane | tar -x -C <dir>`, then
+`node scripts/loop-harness.mjs --tiles <dir>`. `--set "NAME=value"` and `--tile-km`
+are for tuning runs, and the report header says when either is in use. Unknown flags
+are rejected.
