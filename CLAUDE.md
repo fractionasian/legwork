@@ -45,6 +45,8 @@ are cached. (inferred from the app and `docs/show-hn-draft.md`)
 - **No third-party analytics script.** Umami was the last one and is gone.
   [code]
 - **No account, no cookies, no device ID.** [code, menu text]
+- **`loop-generated` carries only the preset bucket and the result**, never the
+  distance asked for (a typed one is `other`). [code, `worker/src/analytics-lib.js`]
 
 ### Routing
 
@@ -69,6 +71,10 @@ are cached. (inferred from the app and `docs/show-hn-draft.md`)
 - **Bike: riding against a one-way costs 4×; run ignores one-ways.**
   [doc 2026-10-01]
 - **Reversing a loop keeps the start where it is.** [commit d5aa130]
+- **A generated loop uses the same router as hand-drawn routes, and the length
+  shown is the drawn one.** No generator-only weights. Its pins never count as a
+  `pin-drop`; Undo of a kept loop never removes the start pin. Loops cap at 42 km,
+  10 km outside the pre-baked cities. [doc, target-distance-loops]
 
 ### Offline and caching
 

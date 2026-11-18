@@ -1,6 +1,6 @@
 ---
 status: approved — Peter accepted all five Layer-1 defaults and the Assumed list, 2026-11-18
-next: PR 1 open as fractionasian/legwork#57, gate passing 8/8 after the review fix (round 6); then PR 2 (UI)
+next: PR 1 merged (#57). PR 2 (UI) open on branch claude/loop-chip-ui, not merged; then PR 3 (out-and-back)
 created: 2026-11-18
 trigger: Three Routes (iOS) OzBargain freebie, ozbargain.com.au/node/983771, 2026-11-17
 ---
@@ -173,7 +173,7 @@ pressing Undo mid-generation drops the stale results.
 
 ### Telemetry
 
-One `/v1/event` enum: `loop_generated` with `bucket ∈ {3,5,8,10,15,21,other}`
+One `/v1/event` enum: `loop-generated` (hyphen, like every other event; first written here as `loop_generated`) with `bucket ∈ {3,5,8,10,15,21,other}`
 and `result ∈ {ok, near_miss, failed}`. No raw distance (privacy invariant),
 location at the existing 0.005° grid only.
 
@@ -280,6 +280,60 @@ location at the existing 0.005° grid only.
   to candidates `{ waypoints: [S, corners…], length, deviation, error, ok, onAim,
   overlap, heading, tries, … }` sorted by error (with `.headingsTried`), or `null`
   if `isStale()` turned true at any pause.
+
+### As built in PR 2 (differences from the UI above)
+
+- **Under the pill, not beside it.** The bar is already full at 375 px, so the chip
+  hangs under the distance pill like its dropdown. While it or a panel shows, the
+  layer switcher and the info banner slide down by its height (`--loop-ui-h`, kept
+  current by a ResizeObserver). Decision 1's Done-when still holds: no menu to open.
+  *Needs Peter's nod: Layer 1 says "beside".*
+- **Shown only when the lone pin is the only pin**, not on `liveWaypoints().length
+  === 1`: with a failed pin also there, the loop would be numbered around it.
+  Disabled while that pin is still snapping.
+- **Presets in km whatever the unit setting**, and the flipper shows km too, so a
+  miles user never reads "3.2 mi — … 8 km loop". *Open: mile presets for miles users.*
+- **Outside the pre-baked cities 15 and 21 are disabled**, with the note "Up to 10 km
+  outside the cities Legwork has pre-loaded." A typed distance over the cap is clamped
+  and generated, with a banner saying so.
+- **Flipper:** "5.1 km loop", "1 of 3 ›", Keep, and **Discard** (not in the spec:
+  without it a phone user's only way out was Keep, then delete pins). "1 of 1" hides
+  the next button. The map fits every option once (and zooms in if they'd be a
+  speck), so flipping doesn't move it.
+- **Near-miss copy:** decision 5's sentence ("7.2 km — couldn't find a closer 8 km
+  loop here") only when *no* option is in the accept window. A near miss among good
+  ones reads "4.9 km loop (you asked for 5.3 km)", because the sentence would be false
+  a tap after showing a good one. Judged on the length the pipeline drew.
+- **Failure** keeps the presets open with "No loop found from here — try moving the
+  pin onto a path." in them, so a shorter distance is one tap away. (ux suggested
+  different copy, since the pin is already on a path by then; kept Peter's.)
+- **Cancelling:** tapping the busy chip ("Finding loops ✕", shown only after 300 ms so
+  fast loops don't flash a spinner), Esc, or Cmd/Ctrl+Z. The stale guard
+  (`loopSnapshotStale`) also drops results on a new or rebuilt graph, a profile or
+  mode change, a pin added, the start replaced (Clear → Undo) or moved.
+- **Undo:** Cmd/Ctrl+Z discards while choosing, and right after Keep takes the whole
+  loop off in one step. The start pin always stays. Any other edit while choosing
+  (drag, tap-delete, a map tap, mode cycle) settles the loop as kept, but not for
+  that one-step Undo.
+- **After `/first-users`:** Keep shows a toast ("Loop kept. Drag any pin to change
+  it."), the welcome card gained "Drop one pin, then tap Loop ▸ for a loop of a set
+  distance", a search dropped by a map tap says "Loop search stopped: the pins
+  changed.", and a clamped typed distance is named in the flipper label ("The longest
+  loop here is 42 km.") rather than a banner the tile loader overwrote.
+- **Generated pins skip `addWaypointAt`:** no `pin-drop` event, one redraw for all.
+  Up to 6 pins.
+- **Mode is forced to loop** on generation.
+- **More ground before long loops:** in a baked city, tiles out to `loopGroundKm`
+  (≥ 5 km; 9.1 km at 21 km, 14.7 km at 42 km); elsewhere one live fetch of
+  `loopLiveRadiusM` (≥ 2 km, since a zoom-16 first pin loads only 1 km). A failed
+  extra download isn't fatal: it generates on what loaded.
+- **Telemetry:** one `loop-generated` per finished generation (including a thrown
+  one, as `failed`), never on cancel. A typed distance is `other` even if it equals
+  a preset.
+- **Measured on a Mac only** (Chrome, Perth start near Kings Park): 5 km in 88 ms,
+  21 km in 1.1 s including the extra tiles, JS heap 64 → 163 MB with that ground
+  loaded. **Not measured on a phone**; 42 km (~26 tiles, likely 300 MB+) is the
+  worry. The Web Worker question from PR 1 stays open until a phone says it stutters.
 
 ### Harness results
 
@@ -493,6 +547,24 @@ phone slowdown. Next: merge #57, then PR 2 (UI). PR 2 must:
 - load more than a first pin's ~3 tiles before offering 15 and 21 km;
 - feed pins without counting each one as a `pin-drop`, and expect up to 6 pins;
 - take the shown length from the pipeline once a candidate is drawn.
+
+### Handover (PR 2, 2026-11-18)
+
+PR 2 is on branch `claude/loop-chip-ui` (worker enum 879a42e, client bfa4830,
+review fixes a732788, first-users fixes after it), not merged. The `verifier-legwork` drive passed at 390 and
+375 px: one pin → chip → 5 km → flip three → Keep → drag a pin (rerouted 5.2 →
+5.6 km) → export GPX (217 track points), plus cancel, stale, Undo, near-miss and
+failure paths; generated pins sent no `pin-drop`. `/review-pass`: sec clean; arch,
+ux and scope found nothing blocking, fixes in a732788. `/first-users`: all five
+personas reached the goal with no blockers; four in-PR frictions fixed, the rest
+listed as later candidates in `docs/first-users/2026-11-18-loop-chip.md`. Deploy order: Worker first (the event
+is additive; an old Worker 400s the beacon, which the client ignores), then merge.
+For Peter: the chip sits under the pill rather than beside it; Discard was added;
+"Loop ▸" next to the "↻ Loop" mode button may confuse (ux), but it's your label;
+4 of 5 first users read "1 of 3 ›" as a pager rather than "next loop" (decision 3);
+mile presets; whether to cap Other below 42 km after a phone test at 21 and 42 km;
+overlap gating is still open (see Success metrics). Next: PR 3, out-and-back
+(decision 7).
 
 To reproduce: export the tiles with `git -C ~/legwork-tiles archive origin/master
 manifest.json tiles/perth tiles/melbourne tiles/sydney tiles/brisbane | tar -x -C
