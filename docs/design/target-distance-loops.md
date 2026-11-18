@@ -1,6 +1,6 @@
 ---
 status: approved — Peter accepted all five Layer-1 defaults and the Assumed list, 2026-11-18
-next: PR 1 (routing.js generator + unit tests + real-tile harness, no UI)
+next: PR 1 built on branch claude/loop-generator-engine-e71d07; harness MISSED the gate (see Harness results), tuning is your call before PR 2
 created: 2026-11-18
 trigger: Three Routes (iOS) OzBargain freebie, ozbargain.com.au/node/983771, 2026-11-17
 ---
@@ -164,9 +164,100 @@ location at the existing 0.005° grid only.
 - `verifier-legwork` drive: one pin → chip → 5 km → flip three → Keep → drag
   a pin → export GPX.
 
+### As built in PR 1 (differences from the algorithm above)
+
+- **Corners snap to junctions.** A and B snap to the nearest node with at least 3
+  edges (`closestNode(..., 3)`), so a corner never sits at the end of a cul-de-sac
+  the loop has to run into and back out of. Pins still snap to the nearest node.
+  This places waypoints only. The router and weights are unchanged, and a node
+  key dropped back in as a pin snaps to itself, so the pipeline draws what was
+  measured (unit test: the waypoints re-route to exactly the measured length).
+- **First radius uses the triangle, not a circle.** r₀ = L / ((2 + 2 sin 35°) ×
+  1.3). The spec's L / (2π × 1.3) starts about 50% short.
+- **Bracketing, not just r × L / len.** Routed length is a step function of r, so
+  plain rescaling can bounce between a loop just short and one just long. Once
+  there's an attempt each side of L, the next r is interpolated between them.
+- **Ranking.** Inside 10%, a loop under the 15% overlap cap beats one over it,
+  then the closer one wins. Outside 10%, the closer one wins. A corner landing
+  back on the start counts as no loop, not a 0 km one.
+- **The ±20° retry also fires on a length miss**, not only on overlap.
+- **Tried and dropped: trimming spurs at corners.** Moving a corner back to the
+  junction where the two legs split, then re-routing, cut mean overlap by only
+  3–5 points on 8 Perth starts. It also lost 5% hits and doubled the time.
+- API: `generateLoops(graph, startKey, L, { k, theta0, isStale, pause })` returns
+  candidates `{ waypoints: [S, A, B], length, error, overlap, ok, tries, … }`
+  sorted by error, or `null` if `isStale()` turned true at any await.
+
+### Harness results
+
+`node scripts/loop-harness.mjs --tiles <dir>`, 2026-11-18. Tiles b6173198 (built
+2026-11-15), run profile, shipped climb 8 and turn 15, seed 1. Each city gets 20
+random starts that snap to a path within 200 m, at least 3 km inside the city
+bounds, with the tiles a first pin would load (5 km radius). Mac, Node 22.
+
+| City | km | 3 loops ≤10% | 3 loops ≤5% | Loops ≤5% | Loops ≤10% | Mean overlap | Loops >15% overlap | ms median / max |
+|---|---|---|---|---|---|---|---|---|
+| Perth | 5 | **15/20** | 4/20 | 58% | 88% | 33% | 39/60 | 271 / 1,194 |
+| Perth | 10 | **14/20** | 5/20 | 57% | 88% | 36% | 39/60 | 906 / 2,625 |
+| Melbourne | 5 | **15/20** | 3/20 | 63% | 90% | 25% | 30/60 | 401 / 1,409 |
+| Melbourne | 10 | **17/20** | 7/20 | 67% | 92% | 18% | 19/60 | 982 / 4,928 |
+| Sydney | 5 | **14/20** | 6/20 | 65% | 86% | 34% | 37/57 | 419 / 3,553 |
+| Sydney | 10 | **14/20** | 9/20 | 75% | 89% | 27% | 29/57 | 1,213 / 6,371 |
+| Brisbane | 5 | **13/20** | 5/20 | 54% | 86% | 37% | 38/59 | 408 / 2,294 |
+| Brisbane | 10 | **13/20** | 7/20 | 68% | 85% | 26% | 28/60 | 1,021 / 2,117 |
+
+All 160 runs: 300/473 loops within 5%, 417/473 within 10%, mean overlap 29%
+(median 18%). Whole run 190 s including tile loading. Median overlap is 18%: a quarter
+of loops are under 8%, and a quarter are over 43%.
+
+**Gate (≥ 18/20 per city with 3 loops within 10%): MISSED in every city and at
+both distances (13–17).** Tolerances have not been widened.
+
+What the misses are:
+
+- **Usually the third heading, not the length.** At least one loop within 10% in
+  19–20/20 starts, and at least two in 16–19/20. The miss is usually one heading
+  that comes up well short (1–3 km on a 5 km ask). Going by the coordinates that's
+  water or bush on that side (harbour, river), though I didn't trace each one.
+- **Doubling back is the bigger problem.** Only 0–8/20 starts per row give three
+  loops that are both within 10% and under the 15% overlap cap. The single
+  jitter retry does not fix it. In the loops I traced, overlap came mostly from
+  the corners: the route reaches A on a road that doesn't continue toward B, and
+  A→B retraces 0.5–1 km of it.
+- **A few starts can't loop at all:** a wetland track (Perth #0, every loop 100%
+  overlap) and a start with no loop found (Sydney #6). Both are the decision-5
+  fallback working as designed. Random starts include bush and industrial
+  fringe, which is the honest test but harder than where people drop a pin.
+- **Speed:** a 10 km generation's median is about 1 s on a Mac, max 6.4 s.
+  Expect 3–5× that on a phone, so the spinner in PR 2 is real.
+
+What I'd tune next (not done, each needs your OK because it changes the spec):
+
+1. **Try more headings, keep the best three.** Route 6 headings (60° apart),
+   then keep the three best that are ≥ 90° apart. That attacks the third-heading
+   miss directly. It roughly doubles the A* calls, so speed is the cost.
+2. **More corners.** A 4–5 point polygon around a circle through S gives shorter
+   legs between neighbouring corners, which share less ground. Each is still an
+   ordinary pin.
+3. **Count only a doubled stretch longer than about 200 m as overlap.** A
+   lollipop stick from a cul-de-sac start is unavoidable and probably acceptable,
+   but that is a change to the success metric, so it's your call.
+4. **Not recommended:** a penalty on used edges for the return leg. It fixes
+   overlap but breaks "the pipeline draws what was measured", the one rule that
+   keeps generated loops ordinary editable pins.
+
 ### Sequencing (one PR per idea)
 
 1. `routing.js` generator + unit tests + real-tile harness numbers (no UI).
    Gate: harness hits the success metric.
 2. Chip, preset row, candidate flipper, telemetry enum. `/review-pass`, then
    `/first-users` (public app, visible change).
+
+### Handover (PR 1, 2026-11-18)
+
+Generator, unit tests and harness are on branch `claude/loop-generator-engine-e71d07`.
+The gate missed (above). Next session: pick from "What I'd tune next", re-run the
+harness with the same seed and tiles, and only then start PR 2. To reproduce: export
+the tiles with `git -C ~/legwork-tiles archive origin/master manifest.json tiles/perth
+tiles/melbourne tiles/sydney tiles/brisbane | tar -x -C <dir>`. `--set "NAME=value"`
+overrides a generator constant for a tuning run, and the report header says so.
