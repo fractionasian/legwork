@@ -262,3 +262,47 @@ test("ranking — among acceptable, clean, on-aim loops, fewer turns per km wins
   assert.ok(R.compareLoops(L(0.03, 9), L(-0.02, 2)) < 0, "on aim beats off aim (still acceptable) before turns count");
   assert.ok(R.compareLoops(L(0.03, 9), L(0.03, 2, 0.4)) < 0, "a clean loop beats one that doubles back, whatever its turns");
 });
+
+test("reachBothWays — marks only nodes you can get to and back from", () => {
+  const g = new R.PackedGraph();
+  const n = (i, j) => g.node(R.quantise6(LAT0 + i * dLat), R.quantise6(LON0 + j * dLon));
+  const two = (u, v) => { g.addEdge(u, v, STEP, 0); g.addEdge(v, u, STEP, 0); };
+  const s = n(0, 0), a = n(0, 1), b = n(0, 2), island = n(5, 5), islandB = n(5, 6), oneWayEnd = n(1, 0);
+  two(s, a); two(a, b); two(island, islandB);
+  g.addEdge(s, oneWayEnd, STEP, 0); // can get there, can't get back
+  const m = g.reachBothWays(g.keyOf(s));
+  assert.deepEqual([m[s], m[a], m[b]], [1, 1, 1]);
+  assert.equal(m[island], 0, "a disconnected island");
+  assert.equal(m[oneWayEnd], 0, "a one-way dead end");
+  assert.equal(g.reachBothWays("1.000000,2.000000"), null);
+});
+
+test("costFrom — route cost outward, Infinity past the bound", () => {
+  const g = new R.PackedGraph();
+  const row = [];
+  for (let j = 0; j < 6; j++) row.push(g.node(R.quantise6(LAT0), R.quantise6(LON0 + j * dLon)));
+  for (let j = 1; j < 6; j++) { g.addEdge(row[j - 1], row[j], STEP, 0); g.addEdge(row[j], row[j - 1], STEP, 0); }
+  const c = g.costFrom(g.keyOf(row[0]), 350);
+  assert.deepEqual([c[row[0]], c[row[1]], c[row[3]]], [0, 100, 300]);
+  assert.equal(c[row[4]], Infinity, "400 is past the 350 bound");
+});
+
+test("generateLoops — a corner never lands on an island, so no leg's search fails", async () => {
+  // A 2.4 km street grid with a separate street grid (an island: plenty of junctions, no
+  // connection) just east of it, where the east corners' ideal points fall. Without the
+  // reach pass those corners snap onto the island and their legs can never be routed.
+  const { g, centre } = grid(25);
+  const id = (i, j) => g.node(R.quantise6(LAT0 + i * dLat), R.quantise6(LON0 + j * dLon));
+  const two = (u, v) => { g.addEdge(u, v, STEP, 0); g.addEdge(v, u, STEP, 0); };
+  for (let i = -20; i <= 20; i++) for (let j = 14; j <= 40; j++) {
+    if (i < 20) two(id(i, j), id(i + 1, j));
+    if (j < 40) two(id(i, j), id(i, j + 1));
+  }
+  // dijkstra() hands a PackedGraph search to graph.route(); count the ones that fail.
+  let searches = 0, failed = 0;
+  const route = g.route.bind(g);
+  g.route = (a, b) => { searches++; const r = route(a, b); if (!r) failed++; return r; };
+  const loops = await R.generateLoops(g, centre, 8000, { theta0: 90, pause: noPause });
+  assert.ok(loops.length >= 1, "still finds loops on the start's own network");
+  assert.equal(failed, 0, `${failed} of ${searches} searches failed`);
+});

@@ -1,6 +1,6 @@
 ---
 status: approved — Peter accepted all five Layer-1 defaults and the Assumed list, 2026-11-18
-next: PR 1 on branch claude/loop-generator-engine-e71d07; decision 6 + speed pass built (round 3); Sydney 5 km still 16/20 and the speed tail is unsolved; your call before the PR
+next: PR 1 on branch claude/loop-generator-engine-e71d07; shared search built (round 5); Sydney 5 km 17/20, one start short of the gate; your call before the PR
 created: 2026-11-18
 trigger: Three Routes (iOS) OzBargain freebie, ozbargain.com.au/node/983771, 2026-11-17
 ---
@@ -244,6 +244,16 @@ location at the existing 0.005° grid only.
   per km; otherwise closer to the aim wins. Sets of three are scored the same way. It
   only chooses between loops already routed, so the router, its turn cost of 15 and
   "what you see is what was measured" are unchanged.
+- **One shared search from the start (round 5).** Before any heading is routed, one
+  pass marks every node you can reach from the start *and* get back from. A second,
+  bounded pass gives each node's route cost from the start, and drops any whose cost
+  exceeds 3 × its straight-line distance + 300 m (the far side of a harbour). Corners
+  snap only to the nodes left. So no leg's search can fail: a failed search had been
+  exploring everything reachable before giving up, 75–80 ms each on dense Sydney
+  tiles, which was most of the slow tail. And a heading across water bends to
+  ground that's actually reachable instead of burning its attempts. Both passes only
+  restrict where pins go, and every leg is still routed by `dijkstra()`, so what's
+  drawn is what was measured.
 - **Not a Web Worker.** The routing graph lives on the main thread (about 40 MB
   after a first pin, up to ~300 MB for a whole city). A worker would need its own
   copy of it, either sent with every request or kept in step as tiles stream in. The
@@ -385,6 +395,28 @@ maximum of 10.1. If loops still feel fiddly on a phone, the bigger levers are gi
 turns more weight than an on-aim length, or raising the router's turn cost for
 everyone. Both are your call; the second changes hand-drawn routes too.
 
+**Round 5 (2026-11-18): the shared search.** The same 80 starts, three runs in
+parallel.
+
+| Setting | Gate rows passing | Syd 5 km | Loops acceptable | Mean overlap | ms p50 / p90 / max |
+|---|---|---|---|---|---|
+| Before (`LOOP_REACH=0`, round 4 as shipped) | 7/8 | 16 | 416/474 | 21% | 1,055 / 3,734 / 14,476 |
+| Reach pass only (`LOOP_CORNER_DETOUR=0`) | 6/8 (Bri 5 km 17) | 16 | 419/474 | 20% | 1,021 / 2,715 / 12,131 |
+| **Reach + detour bound (shipped)** | 7/8 | **17 ✗** | **434/474** | 20% | 1,083 / **2,644 / 7,400** |
+
+Gate rows, shipped: Per 19 / 18, Mel 20 / 20, **Syd 17** / 18, Bri 19 / 20.
+
+- **The slow tail halves.** The maximum fell from 14.5 s to 7.4 s and p90 from 3.7 s to
+  2.6 s (Sydney 10 km's p90 went from 13.5 s to 4.1 s). The median doesn't move: a
+  normal request is already all successful searches.
+- **Quality improves too.** Acceptable loops rose by 18, and every gate row is equal
+  or better. Sydney 5 km is now one start short (17/20).
+- What's left in the time is ordinary successful searches: about 150–200 legs per
+  request at 4–35 ms each. Reusing the outward search for every loop's first and last
+  leg would cut that by up to ~40%. But the router charges for turns, and the shared
+  pass doesn't, so a reused leg could differ from what the pipeline draws. Each kept
+  loop would then need re-routing to check it. Proposal only.
+
 What would move the gate next (not done; each changes the spec, so it's your call):
 
 1. **Let a near-miss heading try a different radius direction.** A heading whose
@@ -418,13 +450,14 @@ a loop is offered, or "what you see is what was measured" breaks.
 
 Generator, unit tests and harness are on branch `claude/loop-generator-engine-e71d07`,
 not pushed and with no PR. Shipped constants: 6 headings, 5-point polygon, aim 0 to
-+5% over (accept −3% to +10%), early stop, fewer turns as a tie-breaker. On the changed metric (3 loops, 2+
-acceptable), 7 of 8 rows pass and Sydney 5 km misses at 16/20. Speed is the open
-risk: p90 about 3.5 s and max about 14 s on a Mac, before phone slowdown. Next: either
-build the shared outward search (above), then re-run, or decide that Sydney 5 km
-doesn't block PR 1 and open it with `/review-pass`. To reproduce: export the tiles
-with `git -C ~/legwork-tiles archive origin/master manifest.json tiles/perth
-tiles/melbourne tiles/sydney tiles/brisbane | tar -x -C <dir>`, then
-`node scripts/loop-harness.mjs --tiles <dir>`. `--set "NAME=value"` and `--tile-km`
-are for tuning runs, and the report header says when either is in use. Unknown flags
-are rejected.
++5% over (accept −3% to +10%), early stop, fewer turns as a tie-breaker, and corners
+only on ground the shared search marks as reachable and not the long way round. On
+the changed metric (3 loops, 2+ acceptable), 7 of 8 rows pass and Sydney 5 km is one
+start short at 17/20. Speed on a Mac: median about 1.1 s, p90 2.6 s, max 7.4 s,
+before phone slowdown. Next: decide whether Sydney 5 km blocks PR 1. If not, open it
+with `/review-pass`. If it does, pick from "What would move the gate next". To
+reproduce: export the tiles with `git -C ~/legwork-tiles archive origin/master
+manifest.json tiles/perth tiles/melbourne tiles/sydney tiles/brisbane | tar -x -C
+<dir>`, then `node scripts/loop-harness.mjs --tiles <dir>`. `--set "NAME=value"` and
+`--tile-km` are for tuning runs, and the report header says when either is in use.
+Unknown flags are rejected.

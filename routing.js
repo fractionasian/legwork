@@ -387,8 +387,10 @@ function resetSpatialGrid() {
 // minDegree (optional): only consider nodes with at least that many edges out. The loop
 // generator passes 3 so a loop's corners land on junctions, not on the end of a
 // cul-de-sac it would have to run into and back out of. Pins never pass it.
-function closestNode(graph, lat, lon, minDegree) {
-    if (graph instanceof PackedGraph) return graph.closest(lat, lon, minDegree);
+// accept (optional, PackedGraph only): accept(nodeIndex) must be true, e.g. "can be
+// reached from the start and back" (PackedGraph.reachBothWays).
+function closestNode(graph, lat, lon, minDegree, accept) {
+    if (graph instanceof PackedGraph) return graph.closest(lat, lon, minDegree, accept);
     var bestKey = null, bestDist = Infinity;
     var cLat = Math.floor(lat / GRID_CELL) * GRID_CELL;
     var cLon = Math.floor(lon / GRID_CELL) * GRID_CELL;
@@ -587,8 +589,9 @@ PackedGraph.prototype.hasNode = function (key) { return this.indexOf(key) >= 0; 
 
 // Nearest node to a point, as a key. Same search as the plain-object closestNode: rings of
 // cells outward from the point's cell, one ring past the first hit, capped at 7 (~3.5 km).
-// minDegree (optional): skip nodes with fewer edges out (see closestNode).
-PackedGraph.prototype.closest = function (lat, lon, minDegree) {
+// minDegree, accept (optional): skip nodes with fewer edges out, or that accept(n)
+// rejects (see closestNode).
+PackedGraph.prototype.closest = function (lat, lon, minDegree, accept) {
     var ci = Math.floor((lat + 90) / PG_CELL), cj = Math.floor((lon + 180) / PG_CELL);
     var best = -1, bestD = Infinity, self = this;
     function ring(r) {
@@ -600,6 +603,7 @@ PackedGraph.prototype.closest = function (lat, lon, minDegree) {
                 for (var k = 0; k < b.length; k++) {
                     var n = b[k];
                     if (minDegree && self.degree(n) < minDegree) continue;
+                    if (accept && !accept(n)) continue;
                     var d = haversine(lat, lon, self.latQ[n] / 1e6, self.lonQ[n] / 1e6);
                     if (d < bestD) { bestD = d; best = n; }
                 }
@@ -620,6 +624,68 @@ PackedGraph.prototype.degree = function (n) {
     var c = 0;
     for (var e = this.first[n]; e >= 0; e = this.eNext[e]) c++;
     return c;
+};
+
+// Nodes you can get to from `key` AND get back to it from, as a Uint8Array indexed by
+// node (1 = yes), or null if key isn't a node. Two breadth-first passes, along the edges
+// and against them, so one-way bike edges are honoured. Every route between two marked
+// nodes exists (a → key → b), so a corner snapped to a marked node never makes a search
+// fail. That matters for speed: a failed search explores everything reachable before
+// giving up (75–80 ms each on dense Sydney tiles, against 5–25 ms for one that
+// succeeds). Nodes added after the call (tiles streaming in) are unmarked.
+PackedGraph.prototype.reachBothWays = function (key) {
+    var s = this.indexOf(key);
+    if (s < 0) return null;
+    var N = this.nNodes, E = this.nEdges, fwd = new Uint8Array(N), out = new Uint8Array(N);
+    var queue = new Int32Array(N), head, tail, u, e;
+    fwd[s] = 1; queue[0] = s; head = 0; tail = 1;
+    while (head < tail) {
+        u = queue[head++];
+        for (e = this.first[u]; e >= 0; e = this.eNext[e]) {
+            var v = this.eTo[e];
+            if (!fwd[v]) { fwd[v] = 1; queue[tail++] = v; }
+        }
+    }
+    // Reverse adjacency (edges by head), built once for this pass.
+    var rFirst = new Int32Array(N).fill(-1), rNext = new Int32Array(E);
+    for (e = 0; e < E; e++) { var h = this.eTo[e]; rNext[e] = rFirst[h]; rFirst[h] = e; }
+    out[s] = 1; queue[0] = s; head = 0; tail = 1;
+    while (head < tail) {
+        u = queue[head++];
+        for (e = rFirst[u]; e >= 0; e = rNext[e]) {
+            var w = this.eFrom[e];
+            if (!out[w] && fwd[w]) { out[w] = 1; queue[tail++] = w; }
+        }
+    }
+    return out;
+};
+
+// Route cost from `key` to every node within maxCost, as a Float64Array indexed by node
+// (Infinity = further than maxCost, or unreachable). One bounded search outward, with the
+// same edge cost the router uses (weighted length + climb) but no turn cost, so it is a
+// lower-bound-ish yardstick, not a route. The loop generator uses it to skip corners
+// that only a long way round can reach (the far side of a harbour) before spending a
+// search on them.
+PackedGraph.prototype.costFrom = function (key, maxCost) {
+    var s = this.indexOf(key);
+    if (s < 0) return null;
+    var N = this.nNodes, dist = new Float64Array(N).fill(Infinity), done = new Uint8Array(N);
+    var first = this.first, eTo = this.eTo, eNext = this.eNext, eCost = this.eCost, eUp = this.eUp, cw = CLIMB_WEIGHT;
+    this.hn = 0; dist[s] = 0; this.hpush(0, s);
+    while (this.hn > 0) {
+        var u = this.hpop();
+        if (done[u]) continue;
+        done[u] = 1;
+        var du = dist[u];
+        if (du > maxCost) break;
+        for (var e = first[u]; e >= 0; e = eNext[e]) {
+            var v = eTo[e];
+            if (v >= N || done[v]) continue;
+            var nd = du + eCost[e] + cw * eUp[e];
+            if (nd < dist[v] && nd <= maxCost) { dist[v] = nd; this.hpush(nd, v); }
+        }
+    }
+    return dist;
 };
 
 // ── binary heap on two typed arrays ──
@@ -777,6 +843,10 @@ var LOOP_AIM_HI = 0.05;        //   rescaling stops once a loop lands in it
 var LOOP_UNDER = 0.03;         // accept window −3% to +10%; outside it a loop is only
 var LOOP_OVER = 0.10;          //   a near miss, shown with its true length (decision 5)
 var LOOP_EARLY_STOP = 1;       // stop after the first spread of headings if it gave k good loops
+var LOOP_REACH = 1;            // corners only on ground reachable from the start and back
+var LOOP_CORNER_DETOUR = 3;    // ...and whose route cost from the start is at most this × the
+var LOOP_CORNER_SLACK = 300;   //   straight line + this many metres (0 = off): no corners
+                               //   that only the long way round (across water) can reach
 var LOOP_TURN_RANK = 1;        // among equally good loops, prefer fewer turns per km
 var LOOP_TURN_MARGIN = 0.5;    // turns per km: smaller differences don't count
 var LOOP_TURN_STRETCH = 15;    // metres: a turn is a heading change of TURN_ANGLE+ between stretches this long
@@ -860,11 +930,11 @@ function loopPerimeter() {
 // two distinct corners are left once corners that snapped onto the start or onto the
 // previous corner are dropped (sparse ground, or r small against the block size),
 // which is not a loop at all.
-function routePolygon(graph, startKey, sLat, sLon, bearing, r) {
+function routePolygon(graph, startKey, sLat, sLon, bearing, r, accept) {
     var pts = loopCornerPoints(sLat, sLon, bearing, r), corners = [];
     for (var i = 0; i < pts.length; i++) {
         // No junction within reach (a lone track): any node will do, and the overlap shows it.
-        var key = closestNode(graph, pts[i][0], pts[i][1], LOOP_CORNER_DEGREE) || closestNode(graph, pts[i][0], pts[i][1]);
+        var key = closestNode(graph, pts[i][0], pts[i][1], LOOP_CORNER_DEGREE, accept) || closestNode(graph, pts[i][0], pts[i][1], 0, accept);
         if (!key) return null;
         if (key === startKey || key === corners[corners.length - 1] || corners.indexOf(key) >= 0) continue;
         corners.push(key);
@@ -964,7 +1034,7 @@ async function scaleLoop(graph, startKey, targetM, bearing, ctl) {
     var r = aimM / (loopPerimeter() * LOOP_DETOUR), best = null, under = null, over = null, tries = [];
     for (var it = 1; it <= LOOP_ITERATIONS; it++) {
         if (it > 1 && ctl) { await ctl.pause(); if (ctl.isStale()) return LOOP_STALE; }
-        var loop = routePolygon(graph, startKey, sLat, sLon, bearing, r);
+        var loop = routePolygon(graph, startKey, sLat, sLon, bearing, r, ctl && ctl.accept);
         tries.push({ radius: r, length: loop && !loop.degenerate ? loop.length : null });
         if (!loop) { r *= 0.8; continue; }   // pull the corners back toward connected ground
         if (loop.degenerate) { r *= 1.5; continue; } // reach past the start to other paths
@@ -1096,6 +1166,22 @@ async function generateLoops(graph, startKey, targetM, opts) {
         pause: opts.pause || function () { return new Promise(function (res) { setTimeout(res, 0); }); },
     };
     if (!startKey || !(targetM > 0) || !dijkstra(graph, startKey, startKey)) return [];
+    // One pass from the start, shared by every heading: corners only snap to nodes you
+    // can reach and get back from, so no leg's search ever fails (see reachBothWays).
+    if (LOOP_REACH && graph instanceof PackedGraph) {
+        var reach = graph.reachBothWays(startKey);
+        // The same pass also bounds how far round a corner may be: a corner's leg is part
+        // of the loop, so nothing costing more than the whole target is any use.
+        var cost = LOOP_CORNER_DETOUR ? graph.costFrom(startKey, targetM * LOOP_CORNER_DETOUR) : null;
+        var sp = startKey.split(","), sLat0 = parseFloat(sp[0]), sLon0 = parseFloat(sp[1]);
+        if (reach) {
+            // Decided once per node here, not on every snap (snapping looks at hundreds).
+            if (cost) for (var m = 0; m < reach.length; m++) {
+                if (reach[m] && !(cost[m] <= LOOP_CORNER_DETOUR * haversine(sLat0, sLon0, graph.latQ[m] / 1e6, graph.lonQ[m] / 1e6) + LOOP_CORNER_SLACK)) reach[m] = 0;
+            }
+            ctl.accept = function (n) { return n < reach.length && reach[n] === 1; };
+        }
+    }
     var order = [], i;
     for (i = 0; i < headings; i += 2) order.push(i);
     for (i = 1; i < headings; i += 2) order.push(i);
