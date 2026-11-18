@@ -23,7 +23,8 @@ usually within 5%. Offer more than one option, because any single generated
 loop will sometimes be a dud.
 
 **Non-goals (v1):**
-- Out-and-back or one-way of N km. Loop only. Out-and-back is a cheap follow-up.
+- One-way of N km (it needs a destination you choose). Out-and-back was a non-goal
+  and is now decision 7, as its own PR after the loop UI.
 - Time-based ("30 minutes"). Needs a pace, and Legwork stores nothing per user.
 - Learned or popular routes. Still on the not-built list.
 - A new routing engine. The loops come from the same router as hand-drawn ones.
@@ -70,6 +71,30 @@ change metric". The 15% overlap measure is unchanged.)*
    usually still runnable, and the label keeps it honest.
    Done when: a start on a peninsula or a dead-end suburb still shows a loop
    with its true distance, never a silently wrong one.
+
+**Decisions added 2026-11-18** (Peter, "yes", after the PR 1 harness rounds):
+
+6. **Aim slightly over, not either side.** A loop finishes at the start, so a
+   runner can stop the watch at the target and walk the rest; running short means
+   inventing extra distance. **Aim 0 to +5% over; accept −3% to +10%.** Outside
+   that it's a near miss shown with its true length (decision 5). GPS usually reads
+   a few percent off the map, so aiming over also leaves a margin.
+   Done when: the harness reports hits against −3%/+10% and the 2-of-3 gate is
+   re-measured on that window. *Not built yet:* PR 1's numbers above use ±10%.
+   The narrower under-side may lower the hit rate, so it needs measuring, not
+   assuming.
+
+7. **Out-and-back of N km, following the mode.** The chip generates whatever
+   mode is selected: loop mode gives loops, out-and-back gives out-and-backs.
+   One-way isn't offered. An out-and-back is two ordinary pins, the start and a
+   turnaround. One search from the start gives the true route distance to every
+   node, so the turnaround sits at N/2 exactly, with no radius guessing. "Nice"
+   needs no new data: rank turnarounds by the router's own cost per metre (paths
+   and parks over roads, fewer lights, gentler climbs), prefer a junction or park
+   to a dead end, and keep three heading in different directions. The overlap
+   rule doesn't apply, since retracing is the point.
+   Done when: in out-and-back mode, one pin plus 5 km gives three options whose
+   true length is within the decision-6 window, and each drags like any other pin.
 
 **Assumed (say if wrong):**
 - Run or bike follows whatever mode is already selected, and so do scenic,
@@ -313,6 +338,15 @@ What would move the gate next (not done; each changes the spec, so it's your cal
    Gate: harness hits the success metric.
 2. Chip, preset row, candidate flipper, telemetry enum. `/review-pass`, then
    `/first-users` (public app, visible change).
+3. Out-and-back generation (decision 7) on the same chip, reusing PR 1's search.
+
+*Proposed, not yet decided* (Claude, 2026-11-18): before PR 2, a speed pass on
+the engine. Run it in a Web Worker so the map never freezes; stop once three
+good loops ≥ 90° apart are found; reuse one search from the start for every
+loop's first and last leg; and use that same search to skip headings with no
+ground at the right distance (water, bush). The phone tail of 5–10 s+ matters
+more to users than the Sydney 5 km row. Decision 6's window would be built in
+the same pass.
 
 ### Handover (PR 1, 2026-11-18)
 
