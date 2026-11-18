@@ -622,6 +622,7 @@ function applyPaths(geojson, opts) {
         var hw = props.highway || "";
         // Combine base road weight + way-level preferences (P1 named trails, P5 soft surfaces).
         var baseWeight = (profile.roadWeight[hw] || profile.defaultWeight) * profile.wayPref(hw, props.surface || "", props.name || "");
+        var main = MAIN_ROADS[hw] ? 1 : 0; // for the loop crossing check; never weighs the route
         var elev = props.elev; // metres per vertex — only on tiles baked with elevation
         for (var c = 1; c < coords.length; c++) {
             var lat1 = coords[c-1][1], lon1 = coords[c-1][0];
@@ -640,8 +641,8 @@ function applyPaths(geojson, opts) {
             // ends of a vertex get the same height from every way and tile, so a
             // junction never disagrees with itself.
             var rise = elev ? elev[c] - elev[c-1] : 0;
-            g.addEdge(u, v, cost.fwd, rise > 0 ? rise : 0);
-            if (cost.rev !== null) g.addEdge(v, u, cost.rev, rise < 0 ? -rise : 0);
+            g.addEdge(u, v, cost.fwd, rise > 0 ? rise : 0, main);
+            if (cost.rev !== null) g.addEdge(v, u, cost.rev, rise < 0 ? -rise : 0, main);
         }
     }
 

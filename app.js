@@ -2463,10 +2463,13 @@ function renderLoopFlipper() {
     // "Couldn't find a closer one" is only true when no option is in the window; a
     // near miss flipped to past a good one just says what was asked for.
     var anyOk = loopUi.candidates.some(function (o) { return loopInWindow(o.length, targetM); });
-    label.classList.toggle("near-miss", near);
+    // Only when every loop found had one (generateLoops drops them otherwise): say so.
+    var crosses = !!(c.crossings && c.crossings.length);
+    label.classList.toggle("near-miss", near || crosses);
     label.appendChild(document.createTextNode(!near ? " loop"
         : anyOk ? " loop (you asked for " + loopUi.targetKm + " km)"
         : " — couldn’t find a closer " + loopUi.targetKm + " km loop here"));
+    if (crosses) label.appendChild(document.createTextNode(". It crosses a main road with no lights or marked crossing"));
     // Here, not a banner: tile-loading banners replaced one before it could be read.
     if (loopUi.clampNote) label.appendChild(document.createTextNode(". " + loopUi.clampNote));
     var next = document.getElementById("loop-next");

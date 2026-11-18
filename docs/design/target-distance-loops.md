@@ -335,6 +335,56 @@ location at the existing 0.005° grid only.
   loaded. **Not measured on a phone**; 42 km (~26 tiles, likely 300 MB+) is the
   worry. The Web Worker question from PR 1 stays open until a phone says it stutters.
 
+### Main-road crossings (PR 2, Peter 2026-11-19)
+
+**Decision (Peter, "No lights"):** a generated loop never crosses a primary or trunk
+road (or its `_link`) except at traffic lights or a marked crossing.
+
+- **Filter, not a weight.** `loopUnprotectedCrossings` (routing.js) checks each
+  candidate. The router and its costs are unchanged, so drawn = measured still holds.
+  A loop with a crossing ranks behind every clean one, and is dropped while any
+  clean loop is left, even if fewer than 3 remain. If none is clean, the best one
+  alone is shown with "It crosses a main road with no lights or marked crossing".
+- **Road class is real, not inferred.** Each edge carries `eMain` (1 byte),
+  set from the way's `highway` in `applyPaths`. That needs no tile format change and
+  no tile rebuild, because tiles already carry `highway`. It is never read by the
+  router.
+- **What counts as a crossing:**
+  - Straight over: the loop passes through a node with two or more main-road edges,
+    arriving and leaving off the road, on different sides.
+  - Along and off: the loop joins the road on one side, follows it, and leaves on
+    the other. The brief said "passes through" only. This second shape closes the
+    gap where a loop steps onto a centre-line road and off the far side.
+- **What counts as protected:** `trafficSignal` or `crossingMarked` (zebra, marked,
+  signals, uncontrolled) on the node, within 30 m along the main road, or within
+  30 m along the loop. An unmarked crossing tag does not protect.
+- **Known misses:** only out-edges are read, so a bike-closed roundabout direction
+  can hide a heading. A crossing tagged only on a `footway=crossing` way, not on a
+  node, reads as unprotected. Baked tiles carry node attrs (Perth: 3,172 signals and
+  10,332 marked crossings in 92 tiles), so this is not a cold-cache problem.
+- **Extra round** (`LOOP_CROSSING_EXTRA`): if the clean loops can't fill 3, or give
+  fewer than 2 in the accept window, 6 more headings are tried halfway between the
+  first 6.
+- **Real case:** at Nedlands (start -31.98438, 115.80272, 5 km, run), the Stirling
+  Highway node -31.98083, 115.79371 is flagged with the check off and never offered
+  with it on. All 5 nodes flagged there were checked by hand. Each had only unmarked
+  crossings nearby; the nearest lights or marked crossing was 83 m or more away.
+
+**Harness** (tiles b6173198, seed 1, 20 starts × 4 cities × 5 and 10 km, run):
+
+| | check off | on, no extra round | on (shipped) |
+|---|---|---|---|
+| loops offered with an unprotected crossing | 188/474 (40%) | 4 | 2 |
+| loops within ±5% | 74% | 67% | 68% |
+| loops within ±10% | 93% | 86% | 88% |
+| starts with fewer than 3 loops | 2/160 | 26/160 | 9/160 |
+| gate (18/20 per city and target) | 8/8 | 4/8 | 5/8 (misses Perth 5 and 10 km, Melbourne 10 km) |
+| ms p50 / p90 | 1108 / 2752 | 1301 / 3011 | 1377 / 4097 |
+
+Perth 10 km is the worst case: gate 10/20, 5 starts with fewer than 3 loops, p90
+8.0 s on a Mac. Stirling Highway, Canning Highway and the freeway cut its 10 km
+rings. Whether to relax the gate for this rule, or loosen the rule, is Peter's call.
+
 ### Harness results
 
 `node scripts/loop-harness.mjs --tiles <dir> --set "…"`, 2026-11-18. Tiles

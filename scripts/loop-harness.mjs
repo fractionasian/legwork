@@ -109,7 +109,7 @@ for (const cityId of CITIES) {
       const ms = performance.now() - w0;
       results.push({
         city: cityId, start: si, lat, lon, nTiles, target, ms, headingsTried: loops.headingsTried,
-        loops: loops.map((l) => ({ length: l.length, deviation: l.deviation, error: l.error, overlap: l.overlap, ok: l.ok, onAim: l.onAim, turnsPerKm: l.turnsPerKm, vias: l.vias || 0, pins: l.waypoints.length, jittered: !!l.jittered, tries: l.tries.length })),
+        loops: loops.map((l) => ({ length: l.length, deviation: l.deviation, error: l.error, overlap: l.overlap, ok: l.ok, onAim: l.onAim, turnsPerKm: l.turnsPerKm, vias: l.vias || 0, pins: l.waypoints.length, jittered: !!l.jittered, tries: l.tries.length, crossings: (l.crossings || []).length })),
       });
     }
   }
@@ -141,6 +141,12 @@ for (const cityId of CITIES) for (const target of TARGETS) {
     "gate: 3, 2+ ok": `${gate}/${rs.length}${pass ? "" : " ✗"}`,
     "3 ok": `${threeOk}/${rs.length}`,
     "on aim": pct(onAim / n), ok: pct(ok / n), "short of L": pct(short / n),
+    "±5%": pct(loops.filter((l) => Math.abs(l.deviation) <= 0.05).length / n),
+    "±10%": pct(loops.filter((l) => Math.abs(l.deviation) <= 0.10).length / n),
+    "<3 loops": `${rs.filter((r) => r.loops.length < 3).length}/${rs.length}`,
+    // Unprotected main-road crossings (routing.js loopUnprotectedCrossings): loops offered
+    // that have one. 0 with the check on, unless every loop at a start had one.
+    "x-ing": loops.filter((l) => l.crossings > 0).length,
     "mean ov": pct(ov), "ov >15%": loops.filter((l) => l.overlap > 0.15).length,
     "turns/km p50": tpk.length ? at(tpk, 0.5).toFixed(1) : "-",
     "stopped early": `${early}/${rs.length}`,
@@ -158,6 +164,10 @@ console.log(`all: ${all.filter((l) => l.onAim).length}/${all.length} loops on ai
   `turns/km p50 ${at(all.map((l) => l.turnsPerKm).sort((a, b) => a - b), 0.5).toFixed(1)} ` +
   `p90 ${at(all.map((l) => l.turnsPerKm).sort((a, b) => a - b), 0.9).toFixed(1)}, ` +
   `loops with an extra pin ${all.filter((l) => l.vias > 0).length}, ` +
+  `within ±5% ${pct(all.filter((l) => Math.abs(l.deviation) <= 0.05).length / all.length)}, ` +
+  `±10% ${pct(all.filter((l) => Math.abs(l.deviation) <= 0.10).length / all.length)}, ` +
+  `starts with fewer than 3 loops ${results.filter((r) => r.loops.length < 3).length}/${results.length}, ` +
+  `loops with an unprotected main-road crossing ${all.filter((l) => l.crossings > 0).length}, ` +
   `jitter retries ${all.filter((l) => l.jittered).length}, ` +
   `ms p50 ${Math.round(at(allMs, 0.5))} p90 ${Math.round(at(allMs, 0.9))} max ${Math.round(allMs[allMs.length - 1])}, ` +
   `wall ${wall.toFixed(1)} s (includes tile loading)`);
