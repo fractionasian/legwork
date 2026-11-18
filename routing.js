@@ -1039,9 +1039,6 @@ function loopTurns(paths) {
     return turns;
 }
 
-// Mark how a measured loop sits against target L: deviation is signed (+ = long);
-// error is the distance from the middle of the aim window, which is what ranks loops;
-// ok = inside the accept window; onAim = inside the aim window.
 // ── Main-road crossings (Peter, 2026-11-19) ──
 // A generated loop never crosses a primary or trunk road except at traffic lights or a
 // marked crossing. Travelling along one is not crossing it. This is a filter on the
@@ -1176,6 +1173,9 @@ function loopCrosses(loop) {
     return !!(LOOP_CROSSING_CHECK && loop.crossings && loop.crossings.length);
 }
 
+// Mark how a measured loop sits against target L: deviation is signed (+ = long);
+// error is the distance from the middle of the aim window, which is what ranks loops;
+// ok = inside the accept window; onAim = inside the aim window.
 function loopFit(loop, targetM) {
     var dev = (loop.length - targetM) / targetM;
     loop.deviation = dev;
