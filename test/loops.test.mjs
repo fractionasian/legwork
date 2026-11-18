@@ -68,9 +68,10 @@ test("a generated loop's waypoints re-route to exactly the length that was measu
   // routes S→A, A→B and B→S with the same dijkstra(), so the drawn loop is the measured one.
   const { g, centre } = grid(81);
   const loop = R.loopCandidate(g, centre, 5000, 75, 1);
-  const [s, a, b] = loop.waypoints;
-  const legs = [[s, a], [a, b], [b, s]].map(([u, v]) => R.pathGeomLength(R.dijkstra(g, u, v).path));
-  assert.equal(legs.reduce((x, y) => x + y, 0), loop.length);
+  const pins = loop.waypoints.concat([loop.waypoints[0]]); // loop mode closes back to the first pin
+  let total = 0;
+  for (let i = 1; i < pins.length; i++) total += R.pathGeomLength(R.dijkstra(g, pins[i - 1], pins[i]).path);
+  assert.equal(total, loop.length);
 });
 
 test("overlap — a pure out-and-back is 1, a clean loop is 0, a lollipop is in between", () => {
@@ -85,7 +86,7 @@ test("overlap — a pure out-and-back is 1, a clean loop is 0, a lollipop is in 
   assert.ok(R.loopOverlap(lolly) > R.LOOP_OVERLAP_MAX, "and the 15% cap flags it");
 });
 
-test("generateLoops — three loops on three headings, sorted closest first, all within 10%", async () => {
+test("generateLoops — three loops on well-separated headings, sorted closest first, all within 10%", async () => {
   const { g, centre } = grid(81);
   const loops = await R.generateLoops(g, centre, 5000, { theta0: 10, pause: noPause });
   assert.equal(loops.length, 3);
@@ -95,8 +96,10 @@ test("generateLoops — three loops on three headings, sorted closest first, all
     assert.ok(l.overlap <= R.LOOP_OVERLAP_MAX, `overlap ${l.overlap}`);
     assert.equal(l.waypoints[0], centre, "starts (and so finishes) at the start pin");
   }
-  const heads = loops.map((l) => Math.round(l.bearing - 10) % 360).sort((a, b) => a - b);
-  assert.deepEqual(heads, [0, 120, 240]);
+  for (let i = 0; i < loops.length; i++) for (let j = i + 1; j < loops.length; j++) {
+    const gap = R.headingGap(loops[i].heading, loops[j].heading);
+    assert.ok(gap >= 90, `headings ${loops[i].heading} and ${loops[j].heading} only ${gap}° apart`);
+  }
 });
 
 test("generateLoops — a dead-end start still returns its best loop, flagged with the overlap", async () => {
@@ -151,4 +154,34 @@ test("closestNode minDegree — loop corners skip a cul-de-sac end for the junct
   const tip = R.nodeKey(LAT0 + 3 * dLat, LON0), mouth = R.nodeKey(LAT0, LON0);
   assert.equal(R.closestNode(g, LAT0 + 3.2 * dLat, LON0), tip, "a pin still snaps to the nearest node");
   assert.equal(R.closestNode(g, LAT0 + 3.2 * dLat, LON0, 3), mouth, "a corner snaps to the junction");
+});
+
+test("polygon corners sit on a circle through the start, evenly spaced", () => {
+  // Default polygon: LOOP_CORNERS corners + S make a regular polygon on a circle of radius r
+  // whose centre is r out along the bearing.
+  const r = 1000, bearing = 40, pts = R.loopCornerPoints(LAT0, LON0, bearing, r);
+  assert.ok(pts.length >= 3);
+  const [cLat, cLon] = R.offsetPoint(LAT0, LON0, bearing, r);
+  const ring = [[LAT0, LON0], ...pts, [LAT0, LON0]];
+  const side = R.haversine(ring[0][0], ring[0][1], ring[1][0], ring[1][1]);
+  for (let i = 1; i < ring.length; i++) {
+    assert.ok(Math.abs(R.haversine(cLat, cLon, ring[i][0], ring[i][1]) - r) < 10, "on the circle");
+    assert.ok(Math.abs(R.haversine(ring[i - 1][0], ring[i - 1][1], ring[i][0], ring[i][1]) - side) < 15, "equal sides");
+  }
+});
+
+test("pickLoops — keeps the best loops that are 90° apart, then fills from the rest", () => {
+  const L = (heading, error, overlap = 0) => ({ heading, bearing: heading, error, overlap });
+  const pool = [L(0, 0.01), L(60, 0.02), L(120, 0.03), L(180, 0.20), L(240, 0.04), L(300, 0.05)];
+  // 60 and 300 are too close to 0; 120 and 240 are 120° from 0 and each other.
+  assert.deepEqual(R.pickLoops(pool, 3).map((l) => l.heading), [0, 120, 240]);
+  // A clean loop outranks a closer one that doubles back.
+  const dirty = [L(0, 0.01, 0.5), L(120, 0.04), L(240, 0.06)];
+  assert.equal(R.pickLoops(dirty, 3)[0].heading, 120);
+  // Separation is on the nominal heading: 120 and 240 jittered 20° toward each other still count.
+  const jit = [L(0, 0.01), { heading: 120, bearing: 140, error: 0.02, overlap: 0 }, { heading: 240, bearing: 220, error: 0.03, overlap: 0 }];
+  assert.deepEqual(R.pickLoops(jit, 3).map((l) => l.heading), [0, 120, 240]);
+  // Too few far apart: the best of the rest fill in rather than returning fewer.
+  assert.equal(R.pickLoops([L(0, 0.01), L(30, 0.02), L(60, 0.03)], 3).length, 3);
+  assert.equal(R.headingGap(350, 10), 20);
 });
