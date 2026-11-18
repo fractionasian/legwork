@@ -845,6 +845,7 @@ async function addWaypointAt(lat, lon, opts) {
 
     var wp = { lat: lat, lon: lon, marker: marker, nodeKey: null, pending: true, resolveId: 1 };
     state.waypoints.push(wp);
+    loopOnRouteChange();   // a lone pending pin shows the loop chip disabled until it snaps
     var rid = wp.resolveId;
 
     try {
@@ -928,6 +929,7 @@ function markWaypointFailed(wp, reason) {
     wp.failReason = reason ? "geo" : "net";
     setMarkerState(wp.marker, idx + 1, failedMarkerState(wp));
     showBanner(failedPinMessage());
+    renderLoopUi();   // a failed lone pin hides the loop chip
 }
 
 // A failed pin is skipped by the route, so the route can look fine while the
@@ -958,6 +960,7 @@ async function retryFailedWaypoint(wp) {
     wp.failReason = null;
     wp.pending = true;
     setMarkerState(wp.marker, idx + 1, "pending");
+    renderLoopUi();
     var rid = wp.resolveId = (wp.resolveId || 0) + 1;
 
     try {
@@ -1076,6 +1079,7 @@ function finalizeRoute(allRouteCoords, routeOk) {
 }
 
 async function updateRoute() {
+    loopOnRouteChange();   // the "Loop ▸" chip follows the pins (and may settle a loop)
     var gen = ++_routeGen;
     clearTimeout(_elevationTimer); // the previous route's pending elevation fetch is moot
     // The old route's samples no longer describe the map: the km/mi toggle and
@@ -2350,6 +2354,376 @@ document.getElementById("dm-share").addEventListener("click", function (e) {
 document.getElementById("dm-shorten").addEventListener("click", function (e) {
     e.stopPropagation(); closeDistMenu(); shortenCurrentRoute();
 });
+// ── Target-distance loops ("Loop ▸" chip) ─────────────
+// docs/design/target-distance-loops.md. One pin → the chip → a distance → up to three
+// loops from generateLoops (routing.js), shown one at a time → Keep leaves them as
+// ordinary pins. The loops are routed by the same router as hand-drawn routes, and
+// each one shown is drawn by updateRoute, so the length on screen is the pipeline's.
+var loopUi = {
+    phase: "idle",      // idle | presets | generating | choosing
+    run: 0,             // bumped to cancel a generation in flight (loopSnapshotStale)
+    targetKm: 0,
+    candidates: null,   // generateLoops' result while choosing; dropped on Keep/discard
+    index: 0,
+    drawnM: 0,          // pipeline length of the loop on screen; 0 until it has drawn
+    pins: [],           // the generated waypoints on the map now
+    kept: null,         // { start, pins } after Keep, so Undo can take the loop off in one step
+    applying: false,    // true while this code redraws, so updateRoute's hook ignores it
+};
+var LOOP_FAIL_MSG = "No loop found from here — try moving the pin onto a path.";
+var loopChip = document.getElementById("loop-chip");
+var loopPresets = document.getElementById("loop-presets");
+var loopFlipper = document.getElementById("loop-flipper");
+var loopOtherForm = document.getElementById("loop-other-form");
+var loopOtherInput = document.getElementById("loop-other");
+var loopOtherBtn = document.getElementById("loop-other-btn");
+var loopNote = document.getElementById("loop-note");
+
+function loopSnapshotNow() {
+    var w = state.waypoints;
+    return { run: loopUi.run, graph: state.graph, profile: state.profile, mode: state.mode,
+        count: w.length, start: w[0] || null, key: w[0] ? w[0].nodeKey : null };
+}
+
+// Pre-baked cities take loops to 42 km; anywhere else is a live path download, so 10.
+// Reads the already-fetched manifest; a pin that has snapped has fetched it.
+function loopMaxKm() {
+    var w = state.waypoints[0];
+    return w && graphPointIsCovered(w.lat, w.lon) ? LOOP_MAX_KM : LOOP_MAX_KM_LIVE;
+}
+
+// hidden: not exactly one pin (or it failed). disabled: the pin is still snapping.
+function loopChipState() {
+    if (loopUi.phase === "generating") return "busy";
+    if (loopUi.phase === "choosing") return "hidden";
+    var w = state.waypoints;
+    if (w.length !== 1 || w[0].failed) return "hidden";
+    return w[0].pending || !w[0].nodeKey || !state.graph ? "disabled" : "ready";
+}
+
+function fmtLoopLength(m) {
+    return state.useMiles ? (m / 1609.344).toFixed(1) + " mi" : (m / 1000).toFixed(1) + " km";
+}
+
+function renderLoopUi() {
+    var chip = loopChipState();
+    if (loopUi.phase === "presets" && chip !== "ready") loopUi.phase = "idle";
+    loopChip.classList.toggle("hidden", chip === "hidden");
+    loopChip.disabled = chip === "disabled";
+    loopChip.classList.toggle("busy", chip === "busy");
+    loopChip.textContent = chip === "busy" ? "Finding loops" : "Loop ▸";
+    loopChip.setAttribute("aria-label", chip === "busy" ? "Finding loops. Tap to cancel."
+        : chip === "disabled" ? "Loop of a chosen length (waiting for the pin to snap to a path)"
+        : "Loop of a chosen length from this pin");
+    loopChip.setAttribute("aria-expanded", loopUi.phase === "presets" ? "true" : "false");
+
+    loopPresets.classList.toggle("hidden", loopUi.phase !== "presets");
+    if (loopUi.phase === "presets") {
+        var max = loopMaxKm();
+        var btns = loopPresets.querySelectorAll("[data-km]");
+        for (var i = 0; i < btns.length; i++) btns[i].disabled = Number(btns[i].dataset.km) > max;
+        loopNote.textContent = max < LOOP_MAX_KM
+            ? "Up to " + max + " km outside the cities Legwork has pre-loaded."
+            : (loopOtherForm.classList.contains("hidden") ? "" : "From 1 to " + max + " km.");
+    }
+
+    loopFlipper.classList.toggle("hidden", loopUi.phase !== "choosing");
+    if (loopUi.phase === "choosing") renderLoopFlipper();
+
+    // Move the layer switcher and the banner down by whatever hangs under the bar.
+    var h = 0, ui = document.getElementById("loop-ui");
+    if (chip !== "hidden" || loopUi.phase === "choosing") {
+        var nav = document.querySelector(".controls");
+        h = Math.max(0, Math.ceil(ui.getBoundingClientRect().bottom - nav.getBoundingClientRect().bottom) + 4);
+    }
+    document.querySelector(".map-area").style.setProperty("--loop-ui-h", h + "px");
+}
+
+function renderLoopFlipper() {
+    var c = loopUi.candidates[loopUi.index];
+    var n = loopUi.candidates.length;
+    var targetM = loopUi.targetKm * 1000;
+    // The pipeline's length once it has drawn; the generator's until then.
+    var len = loopUi.drawnM || c.length;
+    var label = document.getElementById("loop-label");
+    label.textContent = "";
+    var strong = document.createElement("strong");
+    strong.textContent = fmtLoopLength(len);
+    label.appendChild(strong);
+    var near = !loopInWindow(len, targetM);
+    label.classList.toggle("near-miss", near);
+    label.appendChild(document.createTextNode(near
+        ? " — couldn’t find a closer " + loopUi.targetKm + " km loop here"
+        : " loop"));
+    var next = document.getElementById("loop-next");
+    next.textContent = (loopUi.index + 1) + " of " + n + (n > 1 ? " ›" : "");
+    next.disabled = n < 2;
+    next.setAttribute("aria-label", "Loop " + (loopUi.index + 1) + " of " + n + (n > 1 ? ". Show the next one." : ""));
+}
+
+// updateRoute calls this first, on every change to the pins, mode or profile. An edit
+// the loop code didn't make cancels a generation, or settles the loop on screen as
+// kept (dragging a pin of it is the same as Keep, then a drag), and makes the one-step
+// Undo of a kept loop no longer apply.
+function loopOnRouteChange() {
+    if (loopUi.applying) return;
+    loopUi.kept = null;
+    if (loopUi.phase === "generating" && loopSnapshotStale(loopUi.snap, loopSnapshotNow())) cancelLoopGeneration();
+    else if (loopUi.phase === "choosing") finishLoopChoice(false);
+    else renderLoopUi();
+}
+
+function cancelLoopGeneration() {
+    loopUi.run++;
+    loopUi.phase = "idle";
+    renderLoopUi();
+}
+
+// Redraw from code here, without the hook above taking it for a user edit.
+// updateRoute runs synchronously up to its first await, which is where the hook is.
+function loopRedraw() {
+    loopUi.applying = true;
+    try { return updateRoute(); } finally { loopUi.applying = false; }
+}
+
+function removeLoopPins() {
+    for (var i = 0; i < loopUi.pins.length; i++) {
+        var idx = state.waypoints.indexOf(loopUi.pins[i]);
+        if (idx < 0) continue;
+        state.map.removeLayer(loopUi.pins[i].marker);
+        state.waypoints.splice(idx, 1);
+    }
+    loopUi.pins = [];
+}
+
+// Generated corners go straight onto the map as ready pins on their node keys, the
+// same as addWaypointAt's fast path but without its pin-drop event (they aren't the
+// user's drops) or an updateRoute per pin.
+function placeLoopPins(keys) {
+    for (var i = 0; i < keys.length; i++) {
+        var p = parseNodeKey(keys[i]);
+        var marker = createNumberedMarker(p.lat, p.lon, state.waypoints.length + 1);
+        wireMarkerEvents(marker);
+        var wp = { lat: p.lat, lon: p.lon, marker: marker, nodeKey: keys[i] };
+        state.waypoints.push(wp);
+        loopUi.pins.push(wp);
+    }
+}
+
+function showLoopCandidate(i) {
+    loopUi.index = i;
+    loopUi.drawnM = 0;
+    removeLoopPins();
+    placeLoopPins(loopUi.candidates[i].waypoints.slice(1));
+    var drawing = loopRedraw();
+    var gen = _routeGen;
+    renderLoopUi();
+    drawing.then(function () {
+        if (gen !== _routeGen || loopUi.phase !== "choosing" || loopUi.index !== i) return;
+        loopUi.drawnM = state.totalDistMetres;
+        renderLoopUi();
+    });
+}
+
+// Fit every option on screen once, so flipping doesn't move the map. Corners stand in
+// for the loops' extent: legs bow out a little past them, hence the 24 px margins.
+function fitLoopCandidates() {
+    var pts = [];
+    for (var c = 0; c < loopUi.candidates.length; c++) {
+        var keys = loopUi.candidates[c].waypoints;
+        for (var k = 0; k < keys.length; k++) { var p = parseNodeKey(keys[k]); pts.push([p.lat, p.lon]); }
+    }
+    var b = L.latLngBounds(pts);
+    // The visible part of the map: below the flipper and above the elevation panel,
+    // which both sit over it. The chart slides up only once the loop's heights arrive,
+    // so use its full height (offsetHeight ignores the slide) unless the user keeps it down.
+    var mapBox = state.map.getContainer().getBoundingClientRect();
+    var top = Math.max(0, document.getElementById("loop-flipper").getBoundingClientRect().bottom - mapBox.top) + 24;
+    var panel = document.getElementById("elevation-panel");
+    var panelH = !panel ? 0 : elevationCollapsed
+        ? Math.max(0, mapBox.bottom - panel.getBoundingClientRect().top) : panel.offsetHeight;
+    var bottom = panelH + 24;
+    var visible = L.latLngBounds(
+        state.map.containerPointToLatLng([24, mapBox.height - bottom]),
+        state.map.containerPointToLatLng([mapBox.width - 24, top]));
+    // Fit when an option is out of sight, or when they are all a speck in a view left
+    // zoomed out (a long loop asked for before), never just to nudge the map.
+    var tiny = b.getNorth() - b.getSouth() < (visible.getNorth() - visible.getSouth()) / 4 &&
+        b.getEast() - b.getWest() < (visible.getEast() - visible.getWest()) / 4;
+    if (!visible.contains(b) || tiny) {
+        state.map.fitBounds(b, { paddingTopLeft: [24, top], paddingBottomRight: [24, bottom], maxZoom: 16 });
+    }
+}
+
+// Keep (kept = true) leaves the loop as ordinary pins and remembers it for a one-step
+// Undo. A user edit while choosing settles it the same way, but not for that Undo.
+function finishLoopChoice(kept) {
+    loopUi.kept = kept ? { start: state.waypoints[0], pins: loopUi.pins.slice() } : null;
+    loopUi.pins = [];
+    loopUi.candidates = null;   // the candidates hold every leg's path: let them go
+    loopUi.phase = "idle";
+    renderLoopUi();
+}
+
+function discardLoops() {
+    removeLoopPins();
+    loopUi.candidates = null;
+    loopUi.phase = "idle";
+    loopRedraw();
+    renderLoopUi();
+}
+
+// More ground before a long loop: tiles further out in a pre-baked city, a wider live
+// download anywhere else. A failed download is not fatal: it generates on what loaded.
+async function ensureLoopGround(lat, lon, km, isStale) {
+    if (graphPointIsCovered(lat, lon)) {
+        var r = loopGroundKm(km);
+        if (r > 5) await loadTilesForLocation(lat, lon, r);
+        return;
+    }
+    var m = loopLiveRadiusM(km);
+    if (m) await loadPaths(lat, lon, { radius: m, isStale: isStale });
+}
+
+async function generateLoopFromChip(km, bucket) {
+    if (loopChipState() !== "ready") return;
+    var start = state.waypoints[0];
+    // A loop is what's being asked for (spec: mode is forced to loop on generation).
+    if (state.mode !== "loop") {
+        state.mode = "loop";
+        setModeButton();
+        document.getElementById("mode-btn").setAttribute("aria-label", "Route mode: loop (tap to cycle)");
+        updateReverseVisibility();
+        loopRedraw();
+    }
+    var run = ++loopUi.run;
+    loopUi.phase = "generating";
+    loopUi.targetKm = km;
+    var snap = loopUi.snap = loopSnapshotNow();
+    var isStale = function () { return loopSnapshotStale(snap, loopSnapshotNow()); };
+    renderLoopUi();
+    try {
+        await ensureLoopGround(start.lat, start.lon, km, isStale);
+        if (isStale()) return;
+        var cands = await generateLoops(state.graph, start.nodeKey, km * 1000, { k: 3, isStale: isStale });
+        if (cands === null || isStale()) return;   // dropped: the pin moved, Undo, cancel…
+        track("loop-generated", { bucket: bucket, result: loopResult(cands) });
+        if (!cands.length) {
+            loopUi.phase = "idle";
+            renderLoopUi();
+            showLoopFailure();
+            return;
+        }
+        loopUi.candidates = cands;
+        loopUi.phase = "choosing";
+        showLoopCandidate(0);
+        fitLoopCandidates();
+    } catch (e) {
+        console.warn("Loop generation failed:", e);
+        if (!isStale()) {
+            track("loop-generated", { bucket: bucket, result: "failed" });
+            loopUi.phase = "idle";
+            renderLoopUi();
+            showLoopFailure();
+        }
+    } finally {
+        if (loopUi.run === run && loopUi.phase === "generating") { loopUi.phase = "idle"; renderLoopUi(); }
+    }
+}
+
+function showLoopFailure() {
+    showBanner(LOOP_FAIL_MSG, "hint");
+    setTimeout(function () {
+        var el = document.getElementById("info-banner");
+        if (el.dataset.type === "hint" && el.textContent === LOOP_FAIL_MSG) showBanner("");
+    }, 5000);
+}
+
+// Cmd/Ctrl+Z. While choosing it discards the options; mid-generation it cancels; right
+// after Keep it takes the whole loop off in one step. The start pin always stays
+// (CLAUDE.md: Undo cannot remove the last pin). Returns true if it handled the key.
+function loopUndo() {
+    if (loopUi.phase === "generating") { cancelLoopGeneration(); return true; }
+    if (loopUi.phase === "choosing") { discardLoops(); return true; }
+    var k = loopUi.kept;
+    if (!k || state.waypoints[0] !== k.start || state.waypoints.length !== k.pins.length + 1) return false;
+    for (var i = 0; i < k.pins.length; i++) if (state.waypoints[i + 1] !== k.pins[i]) return false;
+    loopUi.pins = k.pins;
+    loopUi.kept = null;
+    removeLoopPins();
+    loopRedraw();
+    renderLoopUi();
+    return true;
+}
+
+function closeLoopPresets() {
+    if (loopUi.phase !== "presets") return;
+    loopUi.phase = "idle";
+    renderLoopUi();
+}
+
+loopChip.addEventListener("click", function (e) {
+    e.stopPropagation();
+    if (loopUi.phase === "generating") { cancelLoopGeneration(); return; }
+    if (loopUi.phase === "presets") { closeLoopPresets(); return; }
+    if (loopChipState() !== "ready") return;
+    closeDistMenu();
+    loopUi.phase = "presets";
+    loopOtherForm.classList.add("hidden");
+    loopOtherBtn.setAttribute("aria-expanded", "false");
+    renderLoopUi();
+});
+loopPresets.addEventListener("click", function (e) {
+    e.stopPropagation();   // the document handler below closes the panel on outside taps
+    var b = e.target.closest("[data-km]");
+    if (!b || b.disabled) return;
+    var km = Number(b.dataset.km);
+    generateLoopFromChip(km, loopBucket(km, false));
+});
+loopOtherBtn.addEventListener("click", function () {
+    var open = loopOtherForm.classList.toggle("hidden") === false;
+    loopOtherBtn.setAttribute("aria-expanded", open ? "true" : "false");
+    renderLoopUi();
+    if (open) loopOtherInput.focus();
+});
+loopOtherForm.addEventListener("submit", function (e) {
+    e.preventDefault();
+    var max = loopMaxKm();
+    var v = parseLoopKm(loopOtherInput.value, max);
+    if (!v) {
+        loopNote.textContent = "Type a distance in km, from 1 to " + max + ".";
+        loopOtherInput.focus();
+        return;
+    }
+    loopOtherInput.blur();
+    if (v.clamped) {
+        var msg = "Loops here go from 1 to " + max + " km, so trying " + v.km + " km";
+        showBanner(msg, "hint");
+        setTimeout(function () {
+            var el = document.getElementById("info-banner");
+            if (el.dataset.type === "hint" && el.textContent === msg) showBanner("");
+        }, 3500);
+    }
+    generateLoopFromChip(v.km, loopBucket(v.km, true));
+});
+document.getElementById("loop-next").addEventListener("click", function (e) {
+    e.stopPropagation();
+    if (loopUi.phase !== "choosing") return;
+    showLoopCandidate((loopUi.index + 1) % loopUi.candidates.length);
+});
+document.getElementById("loop-keep").addEventListener("click", function (e) {
+    e.stopPropagation();
+    if (loopUi.phase === "choosing") finishLoopChoice(true);
+});
+document.getElementById("loop-discard").addEventListener("click", function (e) {
+    e.stopPropagation();
+    if (loopUi.phase === "choosing") discardLoops();
+});
+document.addEventListener("click", function (e) {
+    if (loopUi.phase === "presets" && !document.getElementById("loop-ui").contains(e.target)) closeLoopPresets();
+});
+renderLoopUi();
+
 document.addEventListener("keydown", function (e) {
     if ((e.ctrlKey || e.metaKey) && e.key === "z") {
         // In a text field Cmd/Ctrl+Z is the field's own text undo — it used to
@@ -2357,11 +2731,16 @@ document.addEventListener("keydown", function (e) {
         var t = e.target;
         if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
         e.preventDefault();
+        if (loopUndo()) return;
         if (state.waypoints.length > 1) removeWaypoint(state.waypoints.length - 1);
     }
     // Esc closes the distance dropdown, then the side menu — previously it
     // only dismissed the welcome modal and autocomplete, which read as
     // inconsistent. Inputs keep their own Esc semantics (clear/hide).
+    // Esc also closes the loop presets (even from their km field) or cancels a
+    // generation.
+    if (e.key === "Escape" && loopUi.phase === "presets") { closeLoopPresets(); return; }
+    if (e.key === "Escape" && loopUi.phase === "generating") { cancelLoopGeneration(); return; }
     if (e.key === "Escape" && !(e.target && e.target.tagName === "INPUT")) {
         if (!distMenu.classList.contains("hidden")) { closeDistMenu(); return; }
         if (document.getElementById("side-menu").classList.contains("open")) closeMenu();

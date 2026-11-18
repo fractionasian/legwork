@@ -1267,6 +1267,73 @@ async function generateLoops(graph, startKey, targetM, opts) {
 }
 
 // ── OSM / tile format converters ──────────────────────
+// ── Loop chip helpers (app.js "Loop ▸", PR 2) ──────────────────────────────
+// Pure so they can be unit-tested; the chip, presets and flipper live in app.js.
+var LOOP_PRESETS_KM = [3, 5, 8, 10, 15, 21];
+var LOOP_MIN_KM = 1;
+var LOOP_MAX_KM = 42;          // in a pre-baked city
+var LOOP_MAX_KM_LIVE = 10;     // outside one: live path downloads are slow, so stay small
+
+// A typed distance ("12.5", "12,5", "12.5 km") → { km, clamped } inside
+// LOOP_MIN_KM..maxKm, to 0.1 km; null when it isn't a number at all.
+function parseLoopKm(text, maxKm) {
+    var s = String(text == null ? "" : text).trim().replace(",", ".").replace(/\s*km$/i, "");
+    if (!/^(\d+(\.\d*)?|\.\d+)$/.test(s)) return null;
+    var v = parseFloat(s);
+    if (!(v > 0)) return null;
+    var km = Math.min(Math.max(v, LOOP_MIN_KM), maxKm || LOOP_MAX_KM);
+    return { km: Math.round(km * 10) / 10, clamped: km !== v };
+}
+
+// Telemetry bucket: the preset tapped, or "other" for a typed distance. Never the
+// distance itself (privacy invariant, CLAUDE.md).
+function loopBucket(km, typed) {
+    return !typed && LOOP_PRESETS_KM.indexOf(km) !== -1 ? String(km) : "other";
+}
+
+// loop-generated's result: ok if any loop is in the accept window, near_miss if
+// there are only near misses, failed if nothing came back.
+function loopResult(candidates) {
+    if (!candidates || !candidates.length) return "failed";
+    return candidates.some(function (c) { return c.ok; }) ? "ok" : "near_miss";
+}
+
+// The same −3%/+10% accept window generateLoops uses, applied to the length the
+// pipeline actually drew (which can differ slightly once more tiles stream in).
+// Same arithmetic as loopFit, so the two agree at the edges.
+function loopInWindow(lengthM, targetM) {
+    var dev = (lengthM - targetM) / targetM;
+    return dev >= -LOOP_UNDER && dev <= LOOP_OVER;
+}
+
+// Tile radius to load around the start before generating, in km. The 5-point
+// polygon's corners sit on a circle through the start whose diameter is about
+// L / 3.8 (perimeter 5.88 R × the 1.3 detour), and tilesInRadius selects tiles by
+// their centres, so add a tile's half-diagonal (0.05° ≈ 5.5 × 4.7 km → 3.6 km).
+// Never less than the 5 km a first pin already loads.
+function loopGroundKm(km) {
+    return Math.max(5, km / 3.8 + 3.6);
+}
+
+// Live (Overpass/Worker) fetch radius in metres for an untiled start: the loop's
+// diameter × 1.5, in whole km as the Worker's cache key expects. 0 when the
+// 2 km a first pin usually loads is already enough.
+function loopLiveRadiusM(km) {
+    var m = Math.ceil(km * 1000 / 3.8 * 1.5 / 1000) * 1000;
+    return m > 2000 ? m : 0;
+}
+
+// Stale guard for a generation in flight: a and b are snapshots of what it started
+// from and of now (app.js loopSnapshotNow). Anything that would make the measured
+// loops differ from what the pipeline draws, or make them land on the wrong pin,
+// drops the result: a cancel (run), a new or rebuilt graph (city change, run/bike
+// toggle), the profile, the mode, a pin added or removed, the start pin replaced
+// (Clear → Undo) or moved.
+function loopSnapshotStale(a, b) {
+    return a.run !== b.run || a.graph !== b.graph || a.profile !== b.profile ||
+        a.mode !== b.mode || a.count !== b.count || a.start !== b.start || a.key !== b.key;
+}
+
 function osmToGeoJSON(data) {
     // Overpass returns nodes before ways (out body; >; out body qt;), so one
     // pass is enough. When the query emits `out body qt` for nodes (vs skel),
@@ -1675,5 +1742,15 @@ if (typeof module !== "undefined" && module.exports) {
         LOOP_OVER: LOOP_OVER,
         LOOP_STALE: LOOP_STALE,
         LOOP_OVERLAP_MAX: LOOP_OVERLAP_MAX,
+        LOOP_PRESETS_KM: LOOP_PRESETS_KM,
+        LOOP_MAX_KM: LOOP_MAX_KM,
+        LOOP_MAX_KM_LIVE: LOOP_MAX_KM_LIVE,
+        parseLoopKm: parseLoopKm,
+        loopBucket: loopBucket,
+        loopResult: loopResult,
+        loopInWindow: loopInWindow,
+        loopGroundKm: loopGroundKm,
+        loopLiveRadiusM: loopLiveRadiusM,
+        loopSnapshotStale: loopSnapshotStale,
     };
 }

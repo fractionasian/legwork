@@ -154,14 +154,16 @@ async function loadTilesFromList(cityId, manifestVersion, tiles, opts) {
     return { fetched: loaded, cached: cachedCount };
 }
 
-async function loadTilesForLocation(lat, lon) {
+// radiusKm (optional, default 5): the loop chip asks for more ground before a long
+// loop (loopGroundKm in routing.js). Tiles already in the graph cost nothing.
+async function loadTilesForLocation(lat, lon, radiusKm) {
     var manifest = await fetchManifest();
     if (!manifest) return false;
 
     var match = findCityForLocation(manifest, lat, lon);
     if (!match) return false;
 
-    var tiles = tilesInRadius(match.city, lat, lon, 5);
+    var tiles = tilesInRadius(match.city, lat, lon, radiusKm || 5);
     if (tiles.length === 0) return false;
 
     var result = await loadTilesFromList(match.id, manifest.version, tiles, { progress: true });
@@ -422,9 +424,11 @@ async function loadGraphFromWorker(lat, lon, radius) {
 // the gap-fill passes one that trips when a newer route supersedes it. A stale
 // load stops retrying and leaves the banner to whoever owns it now; otherwise
 // its "retry N/3" lands on top of the newer, already-drawn route.
+// opts.radius (optional, metres): overrides the zoom-based radius; the loop chip
+// passes loopLiveRadiusM so a generated loop has the ground it needs.
 async function loadPaths(lat, lon, opts) {
     var isStale = (opts && opts.isStale) || function () { return false; };
-    var radius = radiusFromZoom();
+    var radius = (opts && opts.radius) || radiusFromZoom();
     // paths: → paths2: added node tags; paths2: → paths3: added
     // track/bridleway/byway to the query; paths3: → paths4: rounded
     // coordinates to the tiles' 5 dp so live and pre-baked graphs join.
