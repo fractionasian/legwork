@@ -234,3 +234,31 @@ test("generateLoops — never offers the same loop twice, even reversed", async 
   assert.ok(loops.length >= 1);
   assert.equal(new Set(routes).size, routes.length, `the same corners offered twice: ${routes.join(" / ")}`);
 });
+
+test("loopTurns — counts real turns, not footpath wiggles, and not the finish", () => {
+  const k = (i, j) => R.nodeKey(LAT0 + i * dLat, LON0 + j * dLon);   // 100 m grid
+  const straight = [[k(0, 0), k(1, 0), k(2, 0), k(3, 0)]];
+  assert.equal(R.loopTurns(straight), 0, "a straight line");
+  // A 200 m square walked as four legs: turns at the three corners after the start;
+  // arriving back at the start is the finish, not a turn.
+  const square = [[k(0, 0), k(0, 1), k(0, 2)], [k(0, 2), k(1, 2), k(2, 2)], [k(2, 2), k(2, 1), k(2, 0)], [k(2, 0), k(1, 0), k(0, 0)]];
+  assert.equal(R.loopTurns(square), 3);
+  // A 5 m sideways jog in the middle of a straight 300 m run is under 15 m: no turn.
+  const jog = R.nodeKey(LAT0 + 1.5 * dLat, LON0 + 0.05 * dLon);
+  assert.equal(R.loopTurns([[k(0, 0), k(1, 0), jog, k(2, 0), k(3, 0)]]), 0);
+  // A staircase (100 m north, 100 m east, repeated) turns at every step.
+  assert.equal(R.loopTurns([[k(0, 0), k(1, 0), k(1, 1), k(2, 1), k(2, 2)]]), 3);
+});
+
+test("ranking — among acceptable, clean, on-aim loops, fewer turns per km wins", () => {
+  const L = (deviation, turnsPerKm, overlap = 0) => {
+    const l = R.loopFit({ length: 5000 * (1 + deviation), overlap }, 5000);
+    l.turnsPerKm = turnsPerKm;
+    return l;
+  };
+  const easy = L(0.04, 3), fiddly = L(0.02, 8);
+  assert.ok(R.compareLoops(easy, fiddly) < 0, "both on aim: 3 turns/km beats 8, though 8's is closer to the aim");
+  assert.ok(R.compareLoops(L(0.02, 3.3), L(0.04, 3)) < 0, "within the 0.5 turns/km margin, closer to the aim wins");
+  assert.ok(R.compareLoops(L(0.03, 9), L(-0.02, 2)) < 0, "on aim beats off aim (still acceptable) before turns count");
+  assert.ok(R.compareLoops(L(0.03, 9), L(0.03, 2, 0.4)) < 0, "a clean loop beats one that doubles back, whatever its turns");
+});

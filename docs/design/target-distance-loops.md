@@ -237,6 +237,13 @@ location at the existing 0.005° grid only.
 - **No route offered twice (round 3).** On sparse ground two headings can snap to
   the same corners, in the same or the reverse order (the same streets), so only
   the first is kept.
+- **Fewer turns as a tie-breaker (round 4, Peter 2026-11-18).** Each loop counts its
+  turns: heading changes of 35° or more between stretches of at least 15 m, the
+  "kink" from climb-aware routing, so a footpath jog doesn't count. Among loops that
+  are acceptable, clean and on aim, fewer turns per km wins when the gap is over 0.5
+  per km; otherwise closer to the aim wins. Sets of three are scored the same way. It
+  only chooses between loops already routed, so the router, its turn cost of 15 and
+  "what you see is what was measured" are unchanged.
 - **Not a Web Worker.** The routing graph lives on the main thread (about 40 MB
   after a first pin, up to ~300 MB for a whole city). A worker would need its own
   copy of it, either sent with every request or kept in step as tiles stream in. The
@@ -362,6 +369,22 @@ Gate rows for the shipped setting are identical to round 2's on the changed metr
 - The slow tail is mostly Sydney 10 km (p90 12 s). My guess is starts where most
   headings use all 4 attempts plus the retry, but I haven't traced it.
 
+**Round 4 (2026-11-18): turn count as a tie-breaker.** The same 80 starts, both runs
+in parallel.
+
+| Setting | Gate rows passing | Loops acceptable | On aim | Mean overlap | Turns/km p50 / p90 |
+|---|---|---|---|---|---|
+| Turn ranking off (`LOOP_TURN_RANK=0`) | 7/8 (Syd 5 km 16) | 416/474 | 278 | 20% | 4.6 / 6.7 |
+| **Turn ranking on (shipped)** | 7/8 (Syd 5 km 16) | 416/474 | 285 | 21% | 4.5 / 6.6 |
+
+It changes the chosen loops in 18 of 160 runs, and in those turns fall 7% (4.9 → 4.6
+per km). Nothing else gets worse. The effect is small because it's a tie-breaker:
+most of the time, length and doubling back have already decided. Across all loops,
+turns per km run from 3.1 (p10) to 6.6 (p90), one turn every 150–320 m, with a
+maximum of 10.1. If loops still feel fiddly on a phone, the bigger levers are giving
+turns more weight than an on-aim length, or raising the router's turn cost for
+everyone. Both are your call; the second changes hand-drawn routes too.
+
 What would move the gate next (not done; each changes the spec, so it's your call):
 
 1. **Let a near-miss heading try a different radius direction.** A heading whose
@@ -395,7 +418,7 @@ a loop is offered, or "what you see is what was measured" breaks.
 
 Generator, unit tests and harness are on branch `claude/loop-generator-engine-e71d07`,
 not pushed and with no PR. Shipped constants: 6 headings, 5-point polygon, aim 0 to
-+5% over (accept −3% to +10%), early stop. On the changed metric (3 loops, 2+
++5% over (accept −3% to +10%), early stop, fewer turns as a tie-breaker. On the changed metric (3 loops, 2+
 acceptable), 7 of 8 rows pass and Sydney 5 km misses at 16/20. Speed is the open
 risk: p90 about 3.5 s and max about 14 s on a Mac, before phone slowdown. Next: either
 build the shared outward search (above), then re-run, or decide that Sydney 5 km

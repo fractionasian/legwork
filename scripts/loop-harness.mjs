@@ -109,7 +109,7 @@ for (const cityId of CITIES) {
       const ms = performance.now() - w0;
       results.push({
         city: cityId, start: si, lat, lon, nTiles, target, ms, headingsTried: loops.headingsTried,
-        loops: loops.map((l) => ({ length: l.length, deviation: l.deviation, error: l.error, overlap: l.overlap, ok: l.ok, onAim: l.onAim, jittered: !!l.jittered, tries: l.tries.length })),
+        loops: loops.map((l) => ({ length: l.length, deviation: l.deviation, error: l.error, overlap: l.overlap, ok: l.ok, onAim: l.onAim, turnsPerKm: l.turnsPerKm, jittered: !!l.jittered, tries: l.tries.length })),
       });
     }
   }
@@ -133,6 +133,7 @@ for (const cityId of CITIES) for (const target of TARGETS) {
   const ov = loops.reduce((a, l) => a + l.overlap, 0) / n;
   const ms = rs.map((r) => r.ms).sort((a, b) => a - b);
   const early = rs.filter((r) => r.headingsTried < 6).length;
+  const tpk = loops.map((l) => l.turnsPerKm).sort((a, b) => a - b);
   const pass = gate >= GATE_MIN;
   if (!pass) gatePass = false;
   rows.push({
@@ -141,6 +142,7 @@ for (const cityId of CITIES) for (const target of TARGETS) {
     "3 ok": `${threeOk}/${rs.length}`,
     "on aim": pct(onAim / n), ok: pct(ok / n), "short of L": pct(short / n),
     "mean ov": pct(ov), "ov >15%": loops.filter((l) => l.overlap > 0.15).length,
+    "turns/km p50": tpk.length ? at(tpk, 0.5).toFixed(1) : "-",
     "stopped early": `${early}/${rs.length}`,
     "ms p50": Math.round(at(ms, 0.5)), "ms p90": Math.round(at(ms, 0.9)), "ms max": Math.round(ms[ms.length - 1]),
   });
@@ -153,6 +155,8 @@ console.log(`all: ${all.filter((l) => l.onAim).length}/${all.length} loops on ai
   `${all.filter((l) => l.ok).length}/${all.length} acceptable, ` +
   `${all.filter((l) => l.deviation < 0).length} short of the target, ` +
   `mean overlap ${pct(all.reduce((a, l) => a + l.overlap, 0) / all.length)}, ` +
+  `turns/km p50 ${at(all.map((l) => l.turnsPerKm).sort((a, b) => a - b), 0.5).toFixed(1)} ` +
+  `p90 ${at(all.map((l) => l.turnsPerKm).sort((a, b) => a - b), 0.9).toFixed(1)}, ` +
   `jitter retries ${all.filter((l) => l.jittered).length}, ` +
   `ms p50 ${Math.round(at(allMs, 0.5))} p90 ${Math.round(at(allMs, 0.9))} max ${Math.round(allMs[allMs.length - 1])}, ` +
   `wall ${wall.toFixed(1)} s (includes tile loading)`);

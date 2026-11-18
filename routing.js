@@ -777,6 +777,9 @@ var LOOP_AIM_HI = 0.05;        //   rescaling stops once a loop lands in it
 var LOOP_UNDER = 0.03;         // accept window −3% to +10%; outside it a loop is only
 var LOOP_OVER = 0.10;          //   a near miss, shown with its true length (decision 5)
 var LOOP_EARLY_STOP = 1;       // stop after the first spread of headings if it gave k good loops
+var LOOP_TURN_RANK = 1;        // among equally good loops, prefer fewer turns per km
+var LOOP_TURN_MARGIN = 0.5;    // turns per km: smaller differences don't count
+var LOOP_TURN_STRETCH = 15;    // metres: a turn is a heading change of TURN_ANGLE+ between stretches this long
 var LOOP_OVERLAP_MAX = 0.15;   // share of the length on ground covered twice
 var LOOP_JITTER = 20;          // degrees; one retry when a bearing overlaps too much
 var LOOP_CORNER_DEGREE = 3;    // corners snap to junctions only (see closestNode)
@@ -873,6 +876,33 @@ function routePolygon(graph, startKey, sLat, sLon, bearing, r) {
     return { waypoints: keys, paths: legs.paths, length: legs.length, radius: r };
 }
 
+// How easy a loop is to follow: heading changes of TURN_ANGLE (35°) or more between
+// stretches at least LOOP_TURN_STRETCH (15 m) long, the "kink" measure from
+// docs/design/climb-aware-routing.md. Short wiggles inside 15 m (a kerb ramp, a
+// footpath jog) don't count. The legs are taken end to end, so the turn at each corner
+// counts; the join from the last leg back onto the first does not (that's the finish).
+function loopTurns(paths) {
+    var pts = [], i, j;
+    for (i = 0; i < paths.length; i++) {
+        for (j = (i === 0 ? 0 : 1); j < paths[i].length; j++) {
+            var p = paths[i][j].split(",");
+            pts.push([parseFloat(p[0]), parseFloat(p[1])]);
+        }
+    }
+    var turns = 0, prev = null, anchor = pts[0];
+    for (i = 1; i < pts.length; i++) {
+        if (haversine(anchor[0], anchor[1], pts[i][0], pts[i][1]) < LOOP_TURN_STRETCH) continue;
+        var b = bearingDeg(anchor[0], anchor[1], pts[i][0], pts[i][1]);
+        if (prev !== null) {
+            var d = Math.abs(b - prev);
+            if (d > 180) d = 360 - d;
+            if (d >= TURN_ANGLE) turns++;
+        }
+        prev = b; anchor = pts[i];
+    }
+    return turns;
+}
+
 // Mark how a measured loop sits against target L: deviation is signed (+ = long);
 // error is the distance from the middle of the aim window, which is what ranks loops;
 // ok = inside the accept window; onAim = inside the aim window.
@@ -882,13 +912,19 @@ function loopFit(loop, targetM) {
     loop.error = Math.abs(dev - (LOOP_AIM_LO + LOOP_AIM_HI) / 2);
     loop.ok = dev >= -LOOP_UNDER && dev <= LOOP_OVER;
     loop.onAim = dev >= LOOP_AIM_LO && dev <= LOOP_AIM_HI;
+    if (loop.paths) {
+        loop.turns = loopTurns(loop.paths);
+        loop.turnsPerKm = loop.length > 0 ? loop.turns / (loop.length / 1000) : 0;
+    }
     return loop;
 }
 
 // Order of two attempts at the same target, best first (<0 = a first): a loop inside the
 // accept window beats one outside it. Two near misses: the closer one to the aim
 // (decision 5 shows it with its length). Two inside: one under the overlap cap beats one
-// over it (between two over the cap, less overlap wins); then closer to the aim.
+// over it (between two over the cap, less overlap wins). Then, if LOOP_TURN_RANK: on aim
+// beats off aim, and fewer turns per km wins when the difference is more than
+// LOOP_TURN_MARGIN. Then closer to the aim.
 function compareLoops(a, b) {
     var aIn = a.ok, bIn = b.ok;
     if (aIn !== bIn) return aIn ? -1 : 1;
@@ -896,6 +932,11 @@ function compareLoops(a, b) {
         var aOver = a.overlap > LOOP_OVERLAP_MAX, bOver = b.overlap > LOOP_OVERLAP_MAX;
         if (aOver !== bOver) return aOver ? 1 : -1;
         if (aOver && a.overlap !== b.overlap) return a.overlap - b.overlap;
+        if (LOOP_TURN_RANK) {
+            if (a.onAim !== b.onAim) return a.onAim ? -1 : 1;
+            var dt = (a.turnsPerKm || 0) - (b.turnsPerKm || 0);
+            if (Math.abs(dt) > LOOP_TURN_MARGIN) return dt;
+        }
     }
     return a.error - b.error;
 }
@@ -982,20 +1023,26 @@ function headingGap(a, b) {
 // Every such set is scored, not picked greedily: with 6 headings 60° apart, taking the
 // single best first can lock in a pair that no third heading is 90° from. A set scores
 // on how many of its loops are in the accept window and under the overlap cap, then how
-// many are in the accept window, then total distance from the aim. If no set of k is far enough apart (a
+// many are in the accept window, then (see score) aim and turns, then total distance
+// from the aim. If no set of k is far enough apart (a
 // pool thinned by headings that found nothing), the best loops fill in by
 // compareLoops order instead: three loops that overlap in direction beat fewer.
 function pickLoops(pool, k) {
     var ranked = pool.slice().sort(compareLoops);
     if (ranked.length <= k) return ranked;
     var best = null, bestScore = null;
+    // With LOOP_TURN_RANK, then how many are on aim, then turns per km (in
+    // LOOP_TURN_MARGIN steps, so a trivial difference falls through to total error).
     function score(set) {
-        var clean = 0, inBand = 0, err = 0;
+        var clean = 0, inBand = 0, onAim = 0, turns = 0, err = 0;
         for (var i = 0; i < set.length; i++) {
             if (set[i].ok) { inBand++; if (set[i].overlap <= LOOP_OVERLAP_MAX) clean++; }
+            if (set[i].onAim) onAim++;
+            turns += set[i].turnsPerKm || 0;
             err += set[i].error;
         }
-        return [clean, inBand, -err];
+        if (!LOOP_TURN_RANK) return [clean, inBand, -err];
+        return [clean, inBand, onAim, -Math.round(turns / set.length / LOOP_TURN_MARGIN), -err];
     }
     function beats(a, b) {
         for (var i = 0; i < a.length; i++) if (a[i] !== b[i]) return a[i] > b[i];
@@ -1025,7 +1072,8 @@ function sameCorners(a, b) {
 // headings from opts.theta0 (random by default, so asking again gives new loops) are
 // tried, and the best k that head off in different directions are kept (pickLoops).
 // Sorted closest to the aim first. Each has { waypoints: [S, corners…] node keys, paths,
-// length, deviation (signed), error, ok, onAim, overlap, heading, bearing (heading ± a
+// length, deviation (signed), error, ok, onAim, overlap, turns, turnsPerKm, heading,
+// bearing (heading ± a
 // jitter), radius, tries, jittered? }; ok = false is a near miss to be shown with its
 // true length. Headings that found no loop at all are left out, so the list can be
 // short or empty.
@@ -1473,6 +1521,8 @@ if (typeof module !== "undefined" && module.exports) {
         headingGap: headingGap,
         loopCornerPoints: loopCornerPoints,
         loopFit: loopFit,
+        loopTurns: loopTurns,
+        compareLoops: compareLoops,
         LOOP_AIM_LO: LOOP_AIM_LO,
         LOOP_AIM_HI: LOOP_AIM_HI,
         LOOP_UNDER: LOOP_UNDER,
