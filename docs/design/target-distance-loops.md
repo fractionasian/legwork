@@ -1,5 +1,6 @@
 ---
-status: proposed — awaiting Peter's Layer-1 decisions
+status: approved — Peter accepted all five Layer-1 defaults and the Assumed list, 2026-11-18
+next: PR 1 (routing.js generator + unit tests + real-tile harness, no UI)
 created: 2026-11-18
 trigger: Three Routes (iOS) OzBargain freebie, ozbargain.com.au/node/983771, 2026-11-17
 ---
