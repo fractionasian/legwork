@@ -152,8 +152,47 @@ test("joining the road on one side, running along it and leaving on the other is
   t.n("N", 0, 100); t.n("S", 100, -100); t.n("N3", 100, 100);
   t.link("W", "X", 1); t.link("X", "Y", 1); t.link("Y", "E", 1);
   t.link("N", "X", 0); t.link("Y", "S", 0); t.link("Y", "N3", 0);
-  assert.deepEqual(R.loopUnprotectedCrossings(t.g, [["N", "X", "Y", "S"].map(t.key)]), [t.key("X")]);
+  assert.deepEqual(R.loopUnprotectedCrossings(t.g, [["N", "X", "Y", "S"].map(t.key)]), [t.key("Y")], "marked where it leaves the road");
   assert.deepEqual(R.loopUnprotectedCrossings(t.g, [["N", "X", "Y", "N3"].map(t.key)]), [], "back off the north side");
   t.g.setAttrs(t.key("Y"), { crossingMarked: true });
   assert.deepEqual(R.loopUnprotectedCrossings(t.g, [["N", "X", "Y", "S"].map(t.key)]), [], "marked crossing on the run");
+});
+
+test("lights on a side street near the crossing don't protect it", () => {
+  // N — Q — X — S, with Q 20 m north of X on the footpath and lights on Q (a side-street node).
+  const t = crossroads();
+  t.n("Q", 0, 20); t.link("N", "Q", 0); t.link("Q", "X", 0);
+  t.g.setAttrs(t.key("Q"), { trafficSignal: true });
+  assert.deepEqual(R.loopUnprotectedCrossings(t.g, loopThrough(t, ["N", "Q", "X", "S"])), [t.key("X")]);
+});
+
+test("a U-turn on the main road, back off the side it came from, is not a crossing", () => {
+  const t = graph();
+  t.n("W", -100, 0); t.n("X", 0, 0); t.n("E", 100, 0); t.n("F", 200, 0);
+  t.n("N", 0, 100); t.n("N3", -70, 70);
+  t.link("W", "X", 1); t.link("X", "E", 1); t.link("E", "F", 1);
+  t.link("N", "X", 0); t.link("N3", "X", 0);
+  assert.deepEqual(R.loopUnprotectedCrossings(t.g, [["N", "X", "E", "X", "N3"].map(t.key)]), []);
+});
+
+test("turning from one main road onto another at an unsignalled junction crosses the first", () => {
+  // A: W — J — E east–west; B: J — B1 north. Joins A from the south at W, runs east to J,
+  // turns north onto B (over A), leaves B to the east at B1.
+  const t = graph();
+  t.n("WW", -200, 0); t.n("W", -100, 0); t.n("J", 0, 0); t.n("E", 100, 0); t.n("B1", 0, 100); t.n("B2", 0, 200);
+  t.n("SW", -100, -100); t.n("NE", 100, 100);
+  t.link("WW", "W", 1); t.link("W", "J", 1); t.link("J", "E", 1); t.link("J", "B1", 1); t.link("B1", "B2", 1);
+  t.link("SW", "W", 0); t.link("B1", "NE", 0);
+  // Twice, in fact: over A at J (onto B's west side), then over B at B1 to leave east.
+  assert.deepEqual(R.loopUnprotectedCrossings(t.g, [["SW", "W", "J", "B1", "NE"].map(t.key)]), [t.key("J"), t.key("B1")]);
+  t.g.setAttrs(t.key("J"), { trafficSignal: true });
+  assert.deepEqual(R.loopUnprotectedCrossings(t.g, [["SW", "W", "J", "B1", "NE"].map(t.key)]), [], "lights at the junction");
+});
+
+test("a segment shared by a footway and a main road is marked main whichever loads first", () => {
+  const t = graph();
+  t.n("A", 0, 0); t.n("B", 100, 0);
+  t.link("A", "B", 0);
+  t.g.markMain(t.at.A, t.at.B);
+  for (let e = 0; e < t.g.nEdges; e++) assert.equal(t.g.eMain[e], 1);
 });

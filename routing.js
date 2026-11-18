@@ -562,6 +562,12 @@ PackedGraph.prototype.addEdge = function (u, v, cost, up, main) {
     if (this.eBear) this.eBear[e] = this.bearing(u, v);
     return e;
 };
+// Mark the edges between u and v (either direction) as on a main road. Cost unchanged.
+PackedGraph.prototype.markMain = function (u, v) {
+    var e;
+    for (e = this.first[u]; e >= 0; e = this.eNext[e]) if (this.eTo[e] === v) this.eMain[e] = 1;
+    for (e = this.first[v]; e >= 0; e = this.eNext[e]) if (this.eTo[e] === u) this.eMain[e] = 1;
+};
 PackedGraph.prototype.bearing = function (u, v) {
     return bearingDeg(this.latQ[u] / 1e6, this.lonQ[u] / 1e6, this.latQ[v] / 1e6, this.lonQ[v] / 1e6);
 };
@@ -1044,12 +1050,14 @@ function loopTurns(paths) {
 var MAIN_ROADS = { primary: 1, primary_link: 1, trunk: 1, trunk_link: 1 };
 
 // Lights or a marked crossing at node n, or within LOOP_CROSSING_NEAR metres of it along
-// the main road, or along the loop itself (signals are often tagged on the junction
-// node a few metres from where the footpath meets the road). seq/at: the loop's nodes
-// and n's place in them.
+// the main road (signals are often tagged on the junction node a few metres from where
+// the footpath meets the road), or on a main-road node within that distance along the
+// loop (the other carriageway of a dual road, reached over a median path). Lights on a
+// side street near the crossing never count. seq/at: the loop's nodes and n's place.
 function crossingProtected(graph, n, seq, at) {
     function safe(m) { var a = graph.attrsOf(m); return !!(a && (a.trafficSignal || a.crossingMarked)); }
     var lat = graph.latQ[n] / 1e6, lon = graph.lonQ[n] / 1e6;
+    function onRoad(m) { for (var x = graph.first[m]; x >= 0; x = graph.eNext[x]) if (graph.eMain[x]) return true; return false; }
     function near(m) { return haversine(lat, lon, graph.latQ[m] / 1e6, graph.lonQ[m] / 1e6) <= LOOP_CROSSING_NEAR; }
     var seen = new Set([n]), todo = [n];
     while (todo.length) {
@@ -1064,7 +1072,7 @@ function crossingProtected(graph, n, seq, at) {
         for (var i = 1; i < seq.length; i++) {
             var q = seq[(at + dir * i + seq.length) % seq.length];
             if (!near(q)) break;
-            if (safe(q)) return true;
+            if (safe(q) && onRoad(q)) return true;   // lights on a side street don't count
         }
     }
     return false;
@@ -1133,10 +1141,30 @@ function loopUnprotectedCrossings(graph, paths) {
             var sideOut = rel(graph.bearing(n2, at(j + 1)), graph.bearing(at(j - 1), n2));
             // Straight on, in or out (within 15 degrees of the road's line): no side to judge.
             if (Math.abs(sideIn) < 15 || Math.abs(sideIn) > 165 || Math.abs(sideOut) < 15 || Math.abs(sideOut) > 165) continue;
-            if ((sideIn < 0) === (sideOut < 0)) continue;   // back off the side it came from
+            // Carry the side (-1 left, +1 right of the way of travel) along the run. A
+            // U-turn swaps left and right without crossing. A turn of TURN_ANGLE+ at a
+            // junction of main roads onto the far side's road crosses the one it was on
+            // (east on A's north side, right onto B southward: over A; then on B's
+            // right). Lights anywhere on the run count: a runner along a main road
+            // crosses where the lights are.
+            var side = sideIn < 0 ? -1 : 1, where = [];
+            for (var k = i + 1; k < j; k++) {
+                var m = at(k), t = rel(graph.bearing(m, at(k + 1)), graph.bearing(at(k - 1), m));
+                if (Math.abs(t) > 165) { side = -side; continue; }
+                if (Math.abs(t) < TURN_ANGLE) continue;
+                var heads = 0;
+                for (e = graph.first[m]; e >= 0; e = graph.eNext[e]) if (graph.eMain[e]) heads++;
+                if (heads < 3) continue;                    // a bend in one road, not a junction
+                var turned = t < 0 ? -1 : 1;
+                if (turned !== side) where.push(m);
+                side = turned;
+            }
+            if ((sideOut < 0 ? -1 : 1) !== side) where.push(n2);   // off the far side
+            if (!where.length) continue;
             var safe = false;
-            for (var k = i; k <= j && !safe; k++) safe = crossingProtected(graph, at(k), seq, k % L);
-            if (!safe) flag(n);
+            for (k = i; k <= j && !safe; k++) safe = crossingProtected(graph, at(k), seq, k % L);
+            // Marked where it crosses, not where it joined: that's where a ring goes.
+            if (!safe) for (k = 0; k < where.length; k++) flag(where[k]);
         }
     }
     return out;
@@ -1394,7 +1422,9 @@ async function generateLoops(graph, startKey, targetM, opts) {
         var got = pickLoops(clean, k);
         return got.length >= k && got.filter(function (l) { return l.ok; }).length >= Math.min(2, k);
     }
-    if (LOOP_CROSSING_CHECK && LOOP_CROSSING_EXTRA && pool.length && !enough()) {
+    // Only when crossings dropped something: on sparse ground with no main road the
+    // shortfall isn't theirs, and another round there is pure cost.
+    if (LOOP_CROSSING_CHECK && LOOP_CROSSING_EXTRA && clean.length < pool.length && !enough()) {
         for (var x = 0; x < headings; x++) {
             var hx = theta0 + (x + 0.5) * 360 / headings;
             var cx = await loopCandidate(graph, startKey, targetM, hx, x % 2 ? -1 : 1, ctl);

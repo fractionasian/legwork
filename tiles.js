@@ -629,7 +629,12 @@ function applyPaths(geojson, opts) {
             var lat2 = coords[c][1], lon2 = coords[c][0];
             var u = g.node(quantise6(lat1), quantise6(lon1)), v = g.node(quantise6(lat2), quantise6(lon2));
             if (u === v) continue; // two coords rounding to the same node = zero-length self-edge
-            if (g.connected(u, v)) continue; // this segment is already in the graph (either direction)
+            if (g.connected(u, v)) {
+                // Already in the graph (either direction). If this way is a main road, the
+                // segment is one whichever way loaded first: mark it, cost unchanged.
+                if (main) g.markMain(u, v);
+                continue;
+            }
             // Node-level preferences (P2 traffic signals, P3 marked crossings, P4 barriers)
             // apply to both endpoints; the worst penalty / best bonus dominates via product.
             var nodeMult = profile.nodePref(g.attrsOf(u)) * profile.nodePref(g.attrsOf(v));

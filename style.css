@@ -1732,6 +1732,8 @@ kbd {
 }
 .loop-label strong { color: #6ee7b7; font-variant-numeric: tabular-nums; }
 .loop-label.near-miss strong { color: #f7c948; }
+/* A main-road crossing without lights: its own line, amber, under the length. */
+.loop-warn { display: block; margin-top: 4px; font-size: 13px; line-height: 1.35; color: #f7c948; }
 .loop-actions {
     display: flex;
     gap: 6px;

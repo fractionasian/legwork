@@ -354,36 +354,55 @@ road (or its `_link`) except at traffic lights or a marked crossing.
     arriving and leaving off the road, on different sides.
   - Along and off: the loop joins the road on one side, follows it, and leaves on
     the other. The brief said "passes through" only. This second shape closes the
-    gap where a loop steps onto a centre-line road and off the far side.
+    gap where a loop steps onto a centre-line road and off the far side. The side is
+    carried along the run: a U-turn swaps left and right without crossing, and a
+    turn of 35°+ at a junction of main roads toward the far side crosses the road it
+    was on. Each is marked where it crosses, not where the loop joined. Lights
+    anywhere on the run protect it.
 - **What counts as protected:** `trafficSignal` or `crossingMarked` (zebra, marked,
-  signals, uncontrolled) on the node, within 30 m along the main road, or within
-  30 m along the loop. An unmarked crossing tag does not protect.
-- **Known misses:** only out-edges are read, so a bike-closed roundabout direction
+  signals, uncontrolled) on the node, within 30 m along the main road, or on a
+  main-road node within 30 m along the loop (the other half of a dual carriageway).
+  Lights on a nearby side street, or an unmarked crossing tag, do not protect.
+- **On screen** (only when every loop found crosses): an amber line under the length,
+  "Crosses a main road without lights. Shown on the map.", and a ring at each
+  crossing (non-interactive, cleared on Keep, Discard and flip). The km number stays
+  amber for length only.
+- **A shared segment** (a footway and a trunk on the same two nodes) is marked main
+  whichever way loaded first (`markMain`).
+- **Known misses** (the CLAUDE.md invariant points here): only out-edges are read, so a bike-closed roundabout direction
   can hide a heading. A crossing tagged only on a `footway=crossing` way, not on a
-  node, reads as unprotected. Baked tiles carry node attrs (Perth: 3,172 signals and
+  node, reads as unprotected. `crossing=uncontrolled` counts as marked
+  (`nodeAttrsFromTags`), though some mappers use it for refuges with no markings:
+  Peter to confirm. A crossing is judged on the loop the generator measured; tiles
+  that stream in before the redraw could change the drawn route (as for length).
+  Baked tiles carry node attrs (Perth: 3,172 signals and
   10,332 marked crossings in 92 tiles), so this is not a cold-cache problem.
-- **Extra round** (`LOOP_CROSSING_EXTRA`): if the clean loops can't fill 3, or give
-  fewer than 2 in the accept window, 6 more headings are tried halfway between the
-  first 6.
+- **Extra round** (`LOOP_CROSSING_EXTRA`): if crossings dropped a loop and the clean
+  ones can't fill 3, or give fewer than 2 in the accept window, 6 more headings are
+  tried halfway between the first 6. A crossing loop also triggers the ±20° jitter
+  retry that overlap and length already did. Neither was in the brief.
 - **Real case:** at Nedlands (start -31.98438, 115.80272, 5 km, run), the Stirling
   Highway node -31.98083, 115.79371 is flagged with the check off and never offered
   with it on. All 5 nodes flagged there were checked by hand. Each had only unmarked
   crossings nearby; the nearest lights or marked crossing was 83 m or more away.
 
-**Harness** (tiles b6173198, seed 1, 20 starts × 4 cities × 5 and 10 km, run):
+**Harness** (tiles b6173198, seed 1, 20 starts × 4 cities × 5 and 10 km, run;
+final detector):
 
-| | check off | on, no extra round | on (shipped) |
+| | check off | on, no extra round* | on (shipped) |
 |---|---|---|---|
-| loops offered with an unprotected crossing | 188/474 (40%) | 4 | 2 |
-| loops within ±5% | 74% | 67% | 68% |
-| loops within ±10% | 93% | 86% | 88% |
-| starts with fewer than 3 loops | 2/160 | 26/160 | 9/160 |
+| loops offered with an unprotected crossing | 202/474 (43%) | 4 | 2 |
+| loops within ±5% | 74% | 67% | 67% |
+| loops within ±10% | 93% | 86% | 86% |
+| starts with fewer than 3 loops | 2/160 | 26/160 | 10/160 |
 | gate (18/20 per city and target) | 8/8 | 4/8 | 5/8 (misses Perth 5 and 10 km, Melbourne 10 km) |
-| ms p50 / p90 | 1108 / 2752 | 1301 / 3011 | 1377 / 4097 |
+| ms p50 / p90 (Mac) | 1111 / 2749 | 1301 / 3011 | 1458 / 4107 |
 
-Perth 10 km is the worst case: gate 10/20, 5 starts with fewer than 3 loops, p90
-8.0 s on a Mac. Stirling Highway, Canning Highway and the freeway cut its 10 km
-rings. Whether to relax the gate for this rule, or loosen the rule, is Peter's call.
+\* measured with the first detector (pass-through and plain along-and-off only).
+
+Perth 10 km is the worst case: gate 10/20, 5 starts with fewer than 3 loops, max
+8.5 s on a Mac (phones slower, not measured).
+Whether to relax the gate for this rule, or loosen the rule, is Peter's call.
 
 ### Harness results
 

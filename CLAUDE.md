@@ -75,10 +75,12 @@ are cached. (inferred from the app and `docs/show-hn-draft.md`)
   shown is the drawn one.** No generator-only weights. Its pins never count as a
   `pin-drop`; Undo of a kept loop never removes the start pin. Loops cap at 42 km,
   10 km outside the pre-baked cities. [doc, target-distance-loops]
-- **A generated loop never crosses a primary or trunk road except at lights or a
-  marked crossing** (within 30 m). It is a filter on the loops offered, never a
+- **The generator drops loops that cross a primary or trunk road except at lights
+  or a marked crossing** (within 30 m). It is a filter on the loops offered, never a
   routing weight, and `eMain` on graph edges is read by nothing else. If every loop
-  found crosses, the best one is shown with a note saying so. [Peter 2026-11-19]
+  found crosses, the best one is shown with a note and a ring at each crossing. Not
+  a guarantee: the known misses are listed in target-distance-loops.md, "Main-road
+  crossings". [Peter 2026-11-19]
 
 ### Offline and caching
 

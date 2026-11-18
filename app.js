@@ -2463,15 +2463,23 @@ function renderLoopFlipper() {
     // "Couldn't find a closer one" is only true when no option is in the window; a
     // near miss flipped to past a good one just says what was asked for.
     var anyOk = loopUi.candidates.some(function (o) { return loopInWindow(o.length, targetM); });
-    // Only when every loop found had one (generateLoops drops them otherwise): say so.
-    var crosses = !!(c.crossings && c.crossings.length);
-    label.classList.toggle("near-miss", near || crosses);
+    label.classList.toggle("near-miss", near);   // amber on the number means the length only
     label.appendChild(document.createTextNode(!near ? " loop"
         : anyOk ? " loop (you asked for " + loopUi.targetKm + " km)"
         : " — couldn’t find a closer " + loopUi.targetKm + " km loop here"));
-    if (crosses) label.appendChild(document.createTextNode(". It crosses a main road with no lights or marked crossing"));
     // Here, not a banner: tile-loading banners replaced one before it could be read.
     if (loopUi.clampNote) label.appendChild(document.createTextNode(". " + loopUi.clampNote));
+    // Only when every loop found had one (generateLoops drops them otherwise). Its own
+    // line, so the safety note doesn't read as part of the length. "Without lights" is
+    // true of every one flagged: a marked crossing within 30 m is never flagged.
+    var nx = c.crossings ? c.crossings.length : 0;
+    if (nx) {
+        var warn = document.createElement("span");
+        warn.className = "loop-warn";
+        warn.textContent = (nx === 1 ? "Crosses a main road without lights"
+            : "Crosses main roads without lights in " + nx + " places") + ". Shown on the map.";
+        label.appendChild(warn);
+    }
     var next = document.getElementById("loop-next");
     next.textContent = (loopUi.index + 1) + " of " + n + " ›";
     next.hidden = n < 2;   // "1 of 1" greyed out reads as broken in sunlight
@@ -2525,6 +2533,23 @@ function removeLoopPins() {
         state.waypoints.splice(idx, 1);
     }
     loopUi.pins = [];
+    showLoopCrossings(null);
+}
+
+// Rings where the loop on show crosses a main road without lights (only ever when every
+// loop found does). Not pins: non-interactive, so a tap on one still lands on the map,
+// and a dark halo under the amber so it shows on the gradient line's yellow.
+var loopCrossingLayer = null;
+function showLoopCrossings(keys) {
+    if (loopCrossingLayer) { loopCrossingLayer.remove(); loopCrossingLayer = null; }
+    if (!keys || !keys.length) return;
+    var marks = [];
+    keys.forEach(function (k) {
+        var p = parseNodeKey(k);
+        marks.push(L.circleMarker([p.lat, p.lon], { radius: 10, color: "#10231b", weight: 6, fill: false, interactive: false }));
+        marks.push(L.circleMarker([p.lat, p.lon], { radius: 10, color: "#f7c948", weight: 3, fill: false, interactive: false }));
+    });
+    loopCrossingLayer = L.layerGroup(marks).addTo(state.map);
 }
 
 // Generated corners go straight onto the map as ready pins on their node keys, the
@@ -2546,6 +2571,7 @@ function showLoopCandidate(i) {
     loopUi.drawnM = 0;
     removeLoopPins();
     placeLoopPins(loopUi.candidates[i].waypoints.slice(1));
+    showLoopCrossings(loopUi.candidates[i].crossings);
     var drawing = loopRedraw();
     var gen = _routeGen;
     renderLoopUi();
@@ -2561,7 +2587,8 @@ function showLoopCandidate(i) {
 function fitLoopCandidates() {
     var pts = [];
     for (var c = 0; c < loopUi.candidates.length; c++) {
-        var keys = loopUi.candidates[c].waypoints;
+        // Crossing rings too: one on a leg that bows out must not sit under a panel.
+        var keys = loopUi.candidates[c].waypoints.concat(loopUi.candidates[c].crossings || []);
         for (var k = 0; k < keys.length; k++) { var p = parseNodeKey(keys[k]); pts.push([p.lat, p.lon]); }
     }
     var b = L.latLngBounds(pts);
@@ -2589,6 +2616,7 @@ function fitLoopCandidates() {
 // Keep (kept = true) leaves the loop as ordinary pins and remembers it for a one-step
 // Undo. A user edit while choosing settles it the same way, but not for that Undo.
 function finishLoopChoice(kept) {
+    showLoopCrossings(null);   // after Keep the route is the user's: a ring would go stale on the first drag
     loopUi.kept = kept ? { start: state.waypoints[0], pins: loopUi.pins.slice() } : null;
     loopUi.pins = [];
     loopUi.candidates = null;   // the candidates hold every leg's path: let them go
