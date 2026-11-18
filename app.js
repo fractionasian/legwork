@@ -2366,6 +2366,7 @@ var loopUi = {
     run: 0,             // bumped to cancel a generation in flight (loopSnapshotStale)
     snap: null,         // loopSnapshotNow() when the generation in flight started
     busyShown: false,   // the spinner shows only once a generation has run 300 ms
+    clampNote: null,    // "The longest loop here is 42 km." when a typed distance was clamped
     targetKm: 0,
     candidates: null,   // generateLoops' result while choosing; dropped on Keep/discard
     index: 0,
@@ -2466,6 +2467,8 @@ function renderLoopFlipper() {
     label.appendChild(document.createTextNode(!near ? " loop"
         : anyOk ? " loop (you asked for " + loopUi.targetKm + " km)"
         : " — couldn’t find a closer " + loopUi.targetKm + " km loop here"));
+    // Here, not a banner: tile-loading banners replaced one before it could be read.
+    if (loopUi.clampNote) label.appendChild(document.createTextNode(". " + loopUi.clampNote));
     var next = document.getElementById("loop-next");
     next.textContent = (loopUi.index + 1) + " of " + n + " ›";
     next.hidden = n < 2;   // "1 of 1" greyed out reads as broken in sunlight
@@ -2479,7 +2482,21 @@ function renderLoopFlipper() {
 function loopOnRouteChange() {
     if (loopUi.applying) return;
     loopUi.kept = null;
-    if (loopUi.phase === "generating" && loopSnapshotStale(loopUi.snap, loopSnapshotNow())) cancelLoopGeneration();
+    if (loopUi.phase === "generating" && loopSnapshotStale(loopUi.snap, loopSnapshotNow())) {
+        cancelLoopGeneration();
+        // Say so: a map tap mid-search otherwise just leaves a 2-pin route and no loop.
+        // After the redraw this edit started, whose finalizeRoute clears the banner;
+        // and only onto an empty banner, never over a real warning.
+        var msg = "Loop search stopped: the pins changed.";
+        setTimeout(function () {
+            var el = document.getElementById("info-banner");
+            if (el.style.display !== "none" && el.textContent) return;
+            showBanner(msg, "hint");
+            setTimeout(function () {
+                if (el.dataset.type === "hint" && el.textContent === msg) showBanner("");
+            }, 2500);
+        }, 600);
+    }
     else if (loopUi.phase === "choosing") finishLoopChoice(false);
     else renderLoopUi();
 }
@@ -2574,7 +2591,12 @@ function finishLoopChoice(kept) {
     loopUi.candidates = null;   // the candidates hold every leg's path: let them go
     loopUi.phase = "idle";
     renderLoopUi();
-    if (kept) loopRefocus();
+    if (kept) {
+        loopRefocus();
+        // Keep closed the panel with no sign anything happened (3 of 5 first users).
+        showBanner("Loop kept. Drag any pin to change it.", "success");
+        clearBannerAfter(2500);
+    }
 }
 
 // After the flipper closes, keep keyboard focus near it instead of losing it to <body>.
@@ -2700,6 +2722,7 @@ loopPresets.addEventListener("click", function (e) {
     var b = e.target.closest("[data-km]");
     if (!b || b.disabled) return;
     var km = Number(b.dataset.km);
+    loopUi.clampNote = null;
     generateLoopFromChip(km, loopBucket(km, false));
 });
 loopOtherBtn.addEventListener("click", function () {
@@ -2718,14 +2741,8 @@ loopOtherForm.addEventListener("submit", function (e) {
         return;
     }
     loopOtherInput.blur();
-    if (v.clamped) {
-        var msg = "Loops here go from 1 to " + max + " km, so trying " + v.km + " km.";
-        showBanner(msg, "hint");
-        setTimeout(function () {
-            var el = document.getElementById("info-banner");
-            if (el.dataset.type === "hint" && el.textContent === msg) showBanner("");
-        }, 3500);
-    }
+    loopUi.clampNote = !v.clamped ? null
+        : v.km >= max ? "The longest loop here is " + max + " km." : "The shortest loop is 1 km.";
     generateLoopFromChip(v.km, loopBucket(v.km, true));
 });
 document.getElementById("loop-next").addEventListener("click", function (e) {

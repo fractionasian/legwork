@@ -193,12 +193,14 @@
     <div class="modal-overlay" id="welcome-modal">
         <div class="modal">
             <h2><svg class="mark" viewBox="64 40 380 420" aria-hidden="true"><path d="M168 110 L168 352 Q168 394 210 394 L384 394" fill="none" stroke="#3ddc97" stroke-width="56" stroke-linecap="round" stroke-linejoin="round"/><circle cx="168" cy="110" r="46" fill="#4aa3ff"/><circle cx="384" cy="394" r="46" fill="#3ddc97"/></svg> Welcome to Legwork</h2>
-            <!-- Only the two things you can't discover by poking the map.
+            <!-- Only the things you can't discover by poking the map (the loop
+                 chip appears only once a pin is down, so first users missed it).
                  Everything else (mode cycling, undo, gradient colours) is
                  visible in the UI or under Tips & shortcuts in the menu. -->
             <ul>
                 <li><strong>Tap the map</strong> to add waypoints — routes follow footpaths automatically</li>
                 <li><strong>Drag the green circles</strong> between waypoints to insert a new one</li>
+                <li><strong>Drop one pin, then tap Loop &#9656;</strong> for a loop of a set distance</li>
             </ul>
             <button id="welcome-dismiss">Start planning</button>
         </div>
