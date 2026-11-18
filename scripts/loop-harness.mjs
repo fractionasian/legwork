@@ -16,8 +16,9 @@
 //   git -C ~/legwork-tiles archive origin/master manifest.json tiles/perth | tar -x -C /tmp/t
 //
 // Gate (spec, success metrics, changed by Peter 2026-11-18): at least 18 of 20 starts per
-// city and target give 3 loops, at least 2 of them within 10% (the third may be a
-// labelled near miss).
+// city and target give 3 loops, at least 2 of them acceptable (the third may be a
+// labelled near miss). Acceptable = the generator's accept window: −3% to +10%
+// (decision 6), or ±10% with --set "LOOP_UNDER=0.10;LOOP_AIM_LO=-0.05".
 import fs from "node:fs";
 import path from "node:path";
 import vm from "node:vm";
@@ -28,6 +29,10 @@ const args = Object.fromEntries(process.argv.slice(2).reduce((acc, a, i, all) =>
   if (a.startsWith("--")) acc.push([a.slice(2), all[i + 1]]);
   return acc;
 }, []));
+// Fail loudly on a flag it doesn't know: a mistyped --set would otherwise run the shipped
+// constants and print numbers that look like the tuned run.
+const KNOWN = ["tiles", "cities", "targets", "starts", "seed", "profile", "set", "tile-km", "json"];
+for (const k of Object.keys(args)) if (!KNOWN.includes(k)) { console.error(`unknown flag --${k} (known: ${KNOWN.map((x) => "--" + x).join(" ")})`); process.exit(2); }
 if (!args.tiles) { console.error("--tiles <dir> is required (see the header of this file)"); process.exit(2); }
 const TILES = args.tiles;
 const CITIES = (args.cities || "perth,melbourne,sydney,brisbane").split(",");
@@ -103,8 +108,8 @@ for (const cityId of CITIES) {
       const loops = await ctx.generateLoops(ctx.state.graph, startKey, target, { theta0 });
       const ms = performance.now() - w0;
       results.push({
-        city: cityId, start: si, lat, lon, nTiles, target, ms,
-        loops: loops.map((l) => ({ length: l.length, error: l.error, overlap: l.overlap, ok: l.ok, jittered: !!l.jittered, tries: l.tries.length })),
+        city: cityId, start: si, lat, lon, nTiles, target, ms, headingsTried: loops.headingsTried,
+        loops: loops.map((l) => ({ length: l.length, deviation: l.deviation, error: l.error, overlap: l.overlap, ok: l.ok, onAim: l.onAim, jittered: !!l.jittered, tries: l.tries.length })),
       });
     }
   }
@@ -112,45 +117,51 @@ for (const cityId of CITIES) {
 const wall = (Date.now() - t0) / 1000;
 
 // ── report ──
+// ok / onAim are the generator's own windows (routing.js LOOP_UNDER/OVER, LOOP_AIM_LO/HI),
+// so a --set run that moves them is reported on its own terms.
+const at = (xs, q) => xs[Math.min(xs.length - 1, Math.floor(xs.length * q))];
 const rows = [];
 let gatePass = true;
 for (const cityId of CITIES) for (const target of TARGETS) {
   const rs = results.filter((r) => r.city === cityId && r.target === target);
   const loops = rs.flatMap((r) => r.loops);
-  const three10 = rs.filter((r) => r.loops.length === 3 && r.loops.every((l) => l.error <= 0.10)).length;
-  const three5 = rs.filter((r) => r.loops.length === 3 && r.loops.every((l) => l.error <= 0.05)).length;
-  const in5 = loops.filter((l) => l.error <= 0.05).length, in10 = loops.filter((l) => l.error <= 0.10).length;
-  const ov = loops.reduce((a, l) => a + l.overlap, 0) / (loops.length || 1);
-  const ovOver = loops.filter((l) => l.overlap > 0.15).length;
+  const n = loops.length || 1;
+  const gate = rs.filter((r) => r.loops.length === 3 && r.loops.filter((l) => l.ok).length >= 2).length;
+  const threeOk = rs.filter((r) => r.loops.length === 3 && r.loops.every((l) => l.ok)).length;
+  const onAim = loops.filter((l) => l.onAim).length, ok = loops.filter((l) => l.ok).length;
+  const short = loops.filter((l) => l.deviation < 0).length;
+  const ov = loops.reduce((a, l) => a + l.overlap, 0) / n;
   const ms = rs.map((r) => r.ms).sort((a, b) => a - b);
-  const gate = rs.filter((r) => r.loops.length === 3 && r.loops.filter((l) => l.error <= 0.10).length >= 2).length;
+  const early = rs.filter((r) => r.headingsTried < 6).length;
   const pass = gate >= GATE_MIN;
   if (!pass) gatePass = false;
   rows.push({
-    city: cityId, km: target / 1000, starts: rs.length,
-    "gate: 2+ of 3 ≤10%": `${gate}/${rs.length}${pass ? "" : " ✗"}`,
-    "3 loops ≤10%": `${three10}/${rs.length}`,
-    "3 loops ≤5%": `${three5}/${rs.length}`,
-    "loops ≤5%": `${in5}/${loops.length} (${pct(in5 / (loops.length || 1))})`,
-    "loops ≤10%": `${in10}/${loops.length} (${pct(in10 / (loops.length || 1))})`,
-    "mean overlap": pct(ov), "overlap >15%": ovOver,
-    "ms median": Math.round(ms[Math.floor(ms.length / 2)]), "ms max": Math.round(ms[ms.length - 1]),
+    city: cityId, km: target / 1000,
+    "gate: 3, 2+ ok": `${gate}/${rs.length}${pass ? "" : " ✗"}`,
+    "3 ok": `${threeOk}/${rs.length}`,
+    "on aim": pct(onAim / n), ok: pct(ok / n), "short of L": pct(short / n),
+    "mean ov": pct(ov), "ov >15%": loops.filter((l) => l.overlap > 0.15).length,
+    "stopped early": `${early}/${rs.length}`,
+    "ms p50": Math.round(at(ms, 0.5)), "ms p90": Math.round(at(ms, 0.9)), "ms max": Math.round(ms[ms.length - 1]),
   });
 }
 console.log(`tiles ${manifest.version} (built ${manifest.built}), profile ${PROFILE}, seed ${SEED}, ${STARTS} starts per city` +
   (SET ? `, OVERRIDES: ${SET}` : ", shipped constants") + (TILE_KM !== 5 ? `, TILES WITHIN ${TILE_KM} km (app: 5)` : ""));
 console.table(rows);
-const all = results.flatMap((r) => r.loops);
-console.log(`all: ${all.filter((l) => l.error <= 0.05).length}/${all.length} loops within 5%, ` +
-  `${all.filter((l) => l.error <= 0.10).length}/${all.length} within 10%, ` +
+const all = results.flatMap((r) => r.loops), allMs = results.map((r) => r.ms).sort((a, b) => a - b);
+console.log(`all: ${all.filter((l) => l.onAim).length}/${all.length} loops on aim, ` +
+  `${all.filter((l) => l.ok).length}/${all.length} acceptable, ` +
+  `${all.filter((l) => l.deviation < 0).length} short of the target, ` +
   `mean overlap ${pct(all.reduce((a, l) => a + l.overlap, 0) / all.length)}, ` +
-  `jitter retries ${all.filter((l) => l.jittered).length}, wall ${wall.toFixed(1)} s (includes tile loading)`);
-const misses = results.filter((r) => r.loops.length < 3 || r.loops.filter((l) => l.error <= 0.10).length < 2);
+  `jitter retries ${all.filter((l) => l.jittered).length}, ` +
+  `ms p50 ${Math.round(at(allMs, 0.5))} p90 ${Math.round(at(allMs, 0.9))} max ${Math.round(allMs[allMs.length - 1])}, ` +
+  `wall ${wall.toFixed(1)} s (includes tile loading)`);
+const misses = results.filter((r) => r.loops.length < 3 || r.loops.filter((l) => l.ok).length < 2);
 if (misses.length) {
-  console.log("\nstarts that miss the gate (fewer than 3 loops, or fewer than 2 within 10%):");
+  console.log("\nstarts that miss the gate (fewer than 3 loops, or fewer than 2 acceptable):");
   for (const r of misses) console.log(`  ${r.city} #${r.start} (${r.lat.toFixed(4)}, ${r.lon.toFixed(4)}) ${r.target / 1000} km: ` +
     r.loops.map((l) => `${(l.length / 1000).toFixed(2)} km ov ${pct(l.overlap)}`).join(" | ") + (r.loops.length < 3 ? ` (${r.loops.length} found)` : ""));
 }
 if (args.json) fs.writeFileSync(args.json, JSON.stringify(results, null, 1));
-console.log(`\ngate (≥${GATE_MIN}/${STARTS} starts per city and target give 3 loops, 2+ within 10%): ${gatePass ? "PASS" : "MISS"}`);
+console.log(`\ngate (≥${GATE_MIN}/${STARTS} starts per city and target give 3 loops, 2+ acceptable): ${gatePass ? "PASS" : "MISS"}`);
 process.exit(gatePass ? 0 : 1);

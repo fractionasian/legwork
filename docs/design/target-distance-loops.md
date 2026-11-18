@@ -1,6 +1,6 @@
 ---
 status: approved — Peter accepted all five Layer-1 defaults and the Assumed list, 2026-11-18
-next: PR 1 on branch claude/loop-generator-engine-e71d07; on the changed metric 7/8 rows pass, Sydney 5 km misses (16/20); your call before the PR
+next: PR 1 on branch claude/loop-generator-engine-e71d07; decision 6 + speed pass built (round 3); Sydney 5 km still 16/20 and the speed tail is unsolved; your call before the PR
 created: 2026-11-18
 trigger: Three Routes (iOS) OzBargain freebie, ozbargain.com.au/node/983771, 2026-11-17
 ---
@@ -80,9 +80,8 @@ change metric". The 15% overlap measure is unchanged.)*
    that it's a near miss shown with its true length (decision 5). GPS usually reads
    a few percent off the map, so aiming over also leaves a margin.
    Done when: the harness reports hits against −3%/+10% and the 2-of-3 gate is
-   re-measured on that window. *Not built yet:* PR 1's numbers above use ±10%.
-   The narrower under-side may lower the hit rate, so it needs measuring, not
-   assuming.
+   re-measured on that window. *Built in round 3:* the gate count didn't change in
+   any row, and loops shorter than asked fell from 46% to 18% (Harness results).
 
 7. **Out-and-back of N km, following the mode.** The chip generates whatever
    mode is selected: loop mode gives loops, out-and-back gives out-and-backs.
@@ -227,9 +226,26 @@ location at the existing 0.005° grid only.
 - **Tried and dropped: trimming spurs at corners.** Moving a corner back to the
   junction where the two legs split, then re-routing, cut mean overlap by only
   3–5 points on 8 Perth starts. It also lost 5% hits and doubled the time.
-- API: `generateLoops(graph, startKey, L, { k, theta0, isStale, pause })` returns
-  candidates `{ waypoints: [S, corners…], length, error, overlap, ok, heading,
-  tries, … }` sorted by error, or `null` if `isStale()` turned true at any await.
+- **Aims slightly over (round 3, decision 6).** The scaler aims at L × 1.025, the
+  middle of the 0 to +5% aim window, and stops once a loop lands in it. `ok` means
+  inside −3% to +10%. Ranking is by distance from the +2.5% middle.
+- **Pauses after every routed attempt (round 3)**, not only between headings, so
+  the map stays usable while it works. `isStale()` is checked after each pause.
+- **Early stop (round 3).** It tries every other heading first (three, 120° apart). If
+  those already give three acceptable loops under the overlap cap, the other three
+  headings are skipped.
+- **No route offered twice (round 3).** On sparse ground two headings can snap to
+  the same corners, in the same or the reverse order (the same streets), so only
+  the first is kept.
+- **Not a Web Worker.** The routing graph lives on the main thread (about 40 MB
+  after a first pin, up to ~300 MB for a whole city). A worker would need its own
+  copy of it, either sent with every request or kept in step as tiles stream in. The
+  per-attempt pause was chosen instead, and the worker is left as a PR 2 decision
+  if phones still stutter.
+- API: `generateLoops(graph, startKey, L, { k, theta0, isStale, pause })` resolves
+  to candidates `{ waypoints: [S, corners…], length, deviation, error, ok, onAim,
+  overlap, heading, tries, … }` sorted by error (with `.headingsTried`), or `null`
+  if `isStale()` turned true at any pause.
 
 ### Harness results
 
@@ -320,6 +336,32 @@ within 8 km (7.4 tiles on average) left Sydney 5 km at 16/20 and 10 km at 18/20,
 it isn't behind the misses. It still matters for PR 2 at 15–21 km
 (`--tile-km` in the harness measures it).
 
+**Round 3 (2026-11-18): decision 6 window, early stop, per-attempt pause, no
+duplicates.** The same 80 starts, four runs in parallel. The gate counts the
+generator's own accept window, which is −3% to +10% when shipped and ±10% for the
+"old window" rows.
+
+| Setting | Gate rows passing | Syd 5 km | Loops acceptable | Loops short of L | Mean overlap | ms p50 / p90 / max |
+|---|---|---|---|---|---|---|
+| Old ±10% window, no early stop (round 2 as was) | 7/8 | 16 | 426/474 | 218 (46%) | 19% | 971 / 3,212 / 12,440 |
+| Old window + early stop | 7/8 | 16 | 426/474 | 211 (45%) | 19% | 868 / 3,240 / 12,183 |
+| New window, no early stop | 7/8 | 16 | 416/474 | 85 (18%) | 20% | 1,255 / 3,632 / 14,192 |
+| **New window + early stop (shipped)** | 7/8 | **16 ✗** | 416/474 | 84 (18%) | 20% | 994 / 3,462 / 13,839 |
+
+Gate rows for the shipped setting are identical to round 2's on the changed metric
+(19, 18, 19, 20, **16**, 18, 18, 18). **Gate: still MISSED in Sydney 5 km.**
+
+- **The over-bias does what was asked at almost no cost.** Loops shorter than asked
+  fell from 46% to 18%. Acceptable loops dropped 2% (426 → 416), and no gate row moved.
+- **Early stop barely helps.** It fires on only 4–8 of 20 starts per row, because the
+  first three headings rarely give three loops that are all acceptable *and* under
+  the overlap cap. The median drops by about 10–20%, and the slow tail (p90 about
+  3.5 s, max about 14 s on a Mac) is unchanged. **Speed is not solved.**
+- A run of the shipped settings four times over gave identical loops, and medians
+  within about 6% of each other, so the timings above are steady.
+- The slow tail is mostly Sydney 10 km (p90 12 s). My guess is starts where most
+  headings use all 4 attempts plus the retry, but I haven't traced it.
+
 What would move the gate next (not done; each changes the spec, so it's your call):
 
 1. **Let a near-miss heading try a different radius direction.** A heading whose
@@ -340,23 +382,26 @@ What would move the gate next (not done; each changes the spec, so it's your cal
    `/first-users` (public app, visible change).
 3. Out-and-back generation (decision 7) on the same chip, reusing PR 1's search.
 
-*Proposed, not yet decided* (Claude, 2026-11-18): before PR 2, a speed pass on
-the engine. Run it in a Web Worker so the map never freezes; stop once three
-good loops ≥ 90° apart are found; reuse one search from the start for every
-loop's first and last leg; and use that same search to skip headings with no
-ground at the right distance (water, bush). The phone tail of 5–10 s+ matters
-more to users than the Sydney 5 km row. Decision 6's window would be built in
-the same pass.
+*Speed pass: approved and partly built (round 3).* Built: early stop, and a
+pause after every attempt instead of a worker (see As built). **Still open**, as a
+proposal (Claude, 2026-11-18): one search outward from the start, reused for every
+loop's first and last leg, and used to skip headings with no ground at the right
+distance (water, bush). That attacks the slow tail directly, and the Sydney misses
+too. The catch: one-way legs and climb cost make the return leg differ from the
+outward one, so a reused search has to be checked against the normal router before
+a loop is offered, or "what you see is what was measured" breaks.
 
 ### Handover (PR 1, 2026-11-18)
 
 Generator, unit tests and harness are on branch `claude/loop-generator-engine-e71d07`,
-not pushed and with no PR. Shipped constants are tuning round 2's best (6 headings,
-5-point polygon). On the changed metric (3 loops, 2+ within 10%), 7 of 8 rows pass and
-Sydney 5 km misses at 16/20 (Harness results). Next: you decide whether that one row
-blocks PR 1. If not, open it and run `/review-pass`. If it does, pick from "What would
-move the gate next". To reproduce: export the tiles with `git -C ~/legwork-tiles
-archive origin/master manifest.json tiles/perth tiles/melbourne tiles/sydney
-tiles/brisbane | tar -x -C <dir>`, then `node scripts/loop-harness.mjs --tiles <dir>`.
-`--set "NAME=value"` and `--tile-km` are for tuning runs, and the report header says
-when either is in use.
+not pushed and with no PR. Shipped constants: 6 headings, 5-point polygon, aim 0 to
++5% over (accept −3% to +10%), early stop. On the changed metric (3 loops, 2+
+acceptable), 7 of 8 rows pass and Sydney 5 km misses at 16/20. Speed is the open
+risk: p90 about 3.5 s and max about 14 s on a Mac, before phone slowdown. Next: either
+build the shared outward search (above), then re-run, or decide that Sydney 5 km
+doesn't block PR 1 and open it with `/review-pass`. To reproduce: export the tiles
+with `git -C ~/legwork-tiles archive origin/master manifest.json tiles/perth
+tiles/melbourne tiles/sydney tiles/brisbane | tar -x -C <dir>`, then
+`node scripts/loop-harness.mjs --tiles <dir>`. `--set "NAME=value"` and `--tile-km`
+are for tuning runs, and the report header says when either is in use. Unknown flags
+are rejected.
