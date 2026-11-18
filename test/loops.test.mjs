@@ -43,31 +43,33 @@ test("offsetPoint — 1 km north and east land 1 km away on the right heading", 
   }
 });
 
-test("scaler converges to within 5% in at most 4 routed attempts on a regular grid", () => {
+test("scaler lands in the aim window (0 to +5% over) in at most 4 routed attempts on a regular grid", async () => {
   const { g, centre } = grid(81); // 8 km square
   for (const target of [3000, 5000, 8000, 10000]) {
     for (let bearing = 0; bearing < 360; bearing += 7) {
-      const loop = R.scaleLoop(g, centre, target, bearing);
+      const loop = await R.scaleLoop(g, centre, target, bearing);
       assert.ok(loop, `${target} m @ ${bearing}°: no loop`);
       assert.ok(loop.tries.length <= 4);
       // The returned loop can trade a little length for less doubling back (betterLoop),
       // so convergence is judged on the attempts, and the pick must still be acceptable.
-      const closest = Math.min(...loop.tries.map((t) => Math.abs(t.length - target) / target));
-      // On 100 m blocks a loop's length moves in ~200 m steps, so at 3 km only one routable
-      // length sits inside ±5% (a ~15 m window of r). Hold 3 km to the 10% accept band;
-      // from 5 km a step is under the 5% window and the aim must be reached.
-      const aim = target < 5000 ? R.LOOP_ACCEPT : R.LOOP_AIM;
-      assert.ok(closest <= aim, `${target} m @ ${bearing}°: ${loop.tries.map((t) => Math.round(t.length)).join(", ")}`);
-      assert.ok(loop.error <= R.LOOP_ACCEPT);
+      const dev = (t) => (t.length - target) / target;
+      // On 100 m blocks a loop's length moves in ~200 m steps: 6.7% of 3 km and 4% of 5 km,
+      // against a 5%-wide aim window, so only one routable length (a sliver of r) is on aim.
+      // Below 8 km the accept window (−3% to +10%) must be reached; from 8 km a step is
+      // under half the aim window and the aim itself must be.
+      const [lo, hi] = target < 8000 ? [-R.LOOP_UNDER, R.LOOP_OVER] : [R.LOOP_AIM_LO, R.LOOP_AIM_HI];
+      const hit = loop.tries.some((t) => t.length !== null && dev(t) >= lo && dev(t) <= hi);
+      assert.ok(hit, `${target} m @ ${bearing}°: ${loop.tries.map((t) => Math.round(t.length)).join(", ")}`);
+      assert.ok(loop.ok);
     }
   }
 });
 
-test("a generated loop's waypoints re-route to exactly the length that was measured", () => {
+test("a generated loop's waypoints re-route to exactly the length that was measured", async () => {
   // This is the promise that lets PR 2 hand [S, A, B] to the normal pipeline: loop mode
   // routes S→A, A→B and B→S with the same dijkstra(), so the drawn loop is the measured one.
   const { g, centre } = grid(81);
-  const loop = R.loopCandidate(g, centre, 5000, 75, 1);
+  const loop = await R.loopCandidate(g, centre, 5000, 75, 1);
   const pins = loop.waypoints.concat([loop.waypoints[0]]); // loop mode closes back to the first pin
   let total = 0;
   for (let i = 1; i < pins.length; i++) total += R.pathGeomLength(R.dijkstra(g, pins[i - 1], pins[i]).path);
@@ -86,13 +88,13 @@ test("overlap — a pure out-and-back is 1, a clean loop is 0, a lollipop is in 
   assert.ok(R.loopOverlap(lolly) > R.LOOP_OVERLAP_MAX, "and the 15% cap flags it");
 });
 
-test("generateLoops — three loops on well-separated headings, sorted closest first, all within 10%", async () => {
+test("generateLoops — three loops on well-separated headings, sorted closest to the aim, all acceptable", async () => {
   const { g, centre } = grid(81);
   const loops = await R.generateLoops(g, centre, 5000, { theta0: 10, pause: noPause });
   assert.equal(loops.length, 3);
   for (let i = 1; i < loops.length; i++) assert.ok(loops[i - 1].error <= loops[i].error);
   for (const l of loops) {
-    assert.ok(l.ok && l.error <= R.LOOP_ACCEPT);
+    assert.ok(l.ok && l.deviation >= -R.LOOP_UNDER && l.deviation <= R.LOOP_OVER);
     assert.ok(l.overlap <= R.LOOP_OVERLAP_MAX, `overlap ${l.overlap}`);
     assert.equal(l.waypoints[0], centre, "starts (and so finishes) at the start pin");
   }
@@ -118,7 +120,8 @@ test("generateLoops — a dead-end start still returns its best loop, flagged wi
   const best = loops[0];
   assert.equal(best.overlap, 1);
   assert.ok(best.length > 0 && Number.isFinite(best.length));
-  assert.equal(best.ok, Math.abs(best.length - 5000) / 5000 <= R.LOOP_ACCEPT, "ok matches the true length");
+  const dev = (best.length - 5000) / 5000;
+  assert.equal(best.ok, dev >= -R.LOOP_UNDER && dev <= R.LOOP_OVER, "ok matches the true length");
 });
 
 test("generateLoops — the stale guard drops results when the start moves mid-generation", async () => {
@@ -171,7 +174,7 @@ test("polygon corners sit on a circle through the start, evenly spaced", () => {
 });
 
 test("pickLoops — keeps the best loops that are 90° apart, then fills from the rest", () => {
-  const L = (heading, error, overlap = 0) => ({ heading, bearing: heading, error, overlap });
+  const L = (heading, error, overlap = 0) => ({ heading, bearing: heading, error, overlap, ok: error <= 0.10 });
   const pool = [L(0, 0.01), L(60, 0.02), L(120, 0.03), L(180, 0.20), L(240, 0.04), L(300, 0.05)];
   // 60 and 300 are too close to 0; 120 and 240 are 120° from 0 and each other.
   assert.deepEqual(R.pickLoops(pool, 3).map((l) => l.heading), [0, 120, 240]);
@@ -184,4 +187,50 @@ test("pickLoops — keeps the best loops that are 90° apart, then fills from th
   // Too few far apart: the best of the rest fill in rather than returning fewer.
   assert.equal(R.pickLoops([L(0, 0.01), L(30, 0.02), L(60, 0.03)], 3).length, 3);
   assert.equal(R.headingGap(350, 10), 20);
+});
+
+test("aim slightly over — 5.2 km beats 4.8 km for a 5 km ask, and 4.8 km is a near miss", () => {
+  // Decision 6: stop the watch at 5 and walk the rest, rather than invent 200 m.
+  const over = R.loopFit({ length: 5200, overlap: 0 }, 5000), under = R.loopFit({ length: 4800, overlap: 0 }, 5000);
+  assert.ok(over.ok && over.onAim, "+4% is on aim");
+  assert.ok(!under.ok, "−4% is outside the −3% accept edge");
+  assert.ok(R.loopFit({ length: 4870, overlap: 0 }, 5000).ok, "−2.6% is still acceptable");
+  assert.ok(!R.loopFit({ length: 5510, overlap: 0 }, 5000).ok, "+10.2% is a near miss");
+  // Ranking measures from the middle of the aim window (+2.5%), so +2% beats −1%.
+  const a = R.loopFit({ length: 5100, overlap: 0 }, 5000), b = R.loopFit({ length: 4950, overlap: 0 }, 5000);
+  assert.ok(a.error < b.error);
+});
+
+test("generateLoops — easy ground stops after the first spread of three headings", async () => {
+  const { g, centre } = grid(81);
+  const loops = await R.generateLoops(g, centre, 5000, { theta0: 10, pause: noPause });
+  assert.equal(loops.headingsTried, 3, "three clean loops 120° apart, so the other three headings are skipped");
+  assert.deepEqual(loops.map((l) => l.heading).sort((x, y) => x - y), [10, 130, 250]);
+});
+
+test("generateLoops — pauses between routed attempts, not only between headings", async () => {
+  const { g, centre } = grid(81);
+  let pauses = 0;
+  const loops = await R.generateLoops(g, centre, 8000, { theta0: 10, pause: () => { pauses++; return Promise.resolve(); } });
+  const attempts = loops.reduce((n, l) => n + l.tries.length, 0);
+  assert.ok(pauses >= attempts, `${pauses} pauses for at least ${attempts} routed attempts`);
+});
+
+test("generateLoops — never offers the same loop twice, even reversed", async () => {
+  // A lone 4 km ring road with only two junctions (each has a short spur). Every heading's
+  // corners snap to those two, in one order or the other: one loop, not three copies.
+  const g = new R.PackedGraph(), n = 40, rad = 640, ring = [];
+  const at = (b, m) => { const [la, lo] = R.offsetPoint(LAT0, LON0, b, m); return g.node(R.quantise6(la), R.quantise6(lo)); };
+  const link = (u, v) => {
+    const d = R.haversine(g.latQ[u] / 1e6, g.lonQ[u] / 1e6, g.latQ[v] / 1e6, g.lonQ[v] / 1e6);
+    g.addEdge(u, v, d, 0); g.addEdge(v, u, d, 0);
+  };
+  for (let i = 0; i < n; i++) ring.push(at(i * 360 / n, rad));
+  for (let i = 0; i < n; i++) link(ring[i], ring[(i + 1) % n]);
+  link(ring[13], at(13 * 360 / n, rad + 100));
+  link(ring[27], at(27 * 360 / n, rad + 100));
+  const loops = await R.generateLoops(g, g.keyOf(ring[0]), 4000, { theta0: 0, pause: noPause });
+  const routes = loops.map((l) => l.waypoints.slice().sort().join(";"));
+  assert.ok(loops.length >= 1);
+  assert.equal(new Set(routes).size, routes.length, `the same corners offered twice: ${routes.join(" / ")}`);
 });
