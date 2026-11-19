@@ -97,12 +97,25 @@ not settled.*
    One-way isn't offered. An out-and-back is two ordinary pins, the start and a
    turnaround. One search from the start gives the true route distance to every
    node, so the turnaround sits at N/2 exactly, with no radius guessing. "Nice"
-   needs no new data: rank turnarounds by the router's own cost per metre (paths
-   and parks over roads, fewer lights, gentler climbs), prefer a junction or park
-   to a dead end, and keep three heading in different directions. The overlap
-   rule doesn't apply, since retracing is the point.
+   needs no new data. *(Ranking updated by Peter, 2026-11-19: "fairly flat, with a
+   priority for scenic".)* Rank the options, flattest first:
+   1. **Least climb per km.** An out-and-back ends where it starts, so the climb
+      equals the descent and the total climb is the one number to rank on. Heights
+      are already in every pre-baked city; with no heights, skip to the next key.
+   2. **Then most of its length on paths** (footway, path, cycleway, pedestrian,
+      track, and named trails): the stand-in for scenic. Legwork has no scenery data.
+      Real scenery (water, parks, coast) would need park and water outlines in the
+      tiles, a tile-build change left for later.
+   3. **Then the router's own cost per metre**, as before.
+
+   Prefer a junction or park to a dead end, and keep three heading in different
+   directions. Same rules as loops: no unprotected main-road crossing (an
+   out-and-back crosses each one twice), shown only clean ones, and no slider or
+   setting for flat or scenic (preferences stay hidden). The overlap rule doesn't
+   apply, since retracing is the point.
    Done when: in out-and-back mode, one pin plus 5 km gives three options whose
-   true length is within the decision-6 window, and each drags like any other pin.
+   true length is within the decision-6 window, sorted as above, and each drags like
+   any other pin.
 
 **Assumed (say if wrong):**
 - Run or bike follows whatever mode is already selected, and so do scenic,
