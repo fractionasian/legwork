@@ -1785,10 +1785,11 @@ async function generateOutAndBacks(graph, startKey, targetM, opts) {
     }
     if (await round(theta0) === LOOP_STALE) return null;
     var clean = pool.filter(function (o) { return !loopCrosses(o); });
-    // Too few clean ones (a main road on some sides, or water): one more round with the
-    // directions turned half a sector, as loops do (LOOP_CROSSING_EXTRA). A sector's
-    // edge can split the one clean pocket of streets between two directions.
-    if (LOOP_CROSSING_CHECK && OAB_EXTRA && clean.length < k && clean.length < pool.length) {
+    // Fewer than k distinct clean ones (a main road on some sides, water, or two
+    // directions that found the same route): one more round with the directions turned
+    // half a sector, as loops do (LOOP_CROSSING_EXTRA). A sector's edge can split the
+    // one clean pocket of streets between two directions.
+    if (OAB_EXTRA && pickOutAndBacks(clean, k).length < k && pool.length) {
         if (await round(theta0 + 180 / OAB_SECTORS) === LOOP_STALE) return null;
         clean = pool.filter(function (o) { return !loopCrosses(o); });
     }
