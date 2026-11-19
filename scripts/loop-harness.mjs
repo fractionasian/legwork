@@ -12,6 +12,8 @@
 // Usage:
 //   node scripts/loop-harness.mjs --tiles <dir> [--cities perth,melbourne,sydney,brisbane]
 //                                 [--targets 5000,10000] [--starts 20] [--seed 1] [--profile run]
+//                                 [--kind loop|outback]
+// --kind outback runs generateOutAndBacks (decision 7) on the same starts instead.
 // <dir> holds a legwork-tiles checkout's manifest.json and tiles/<city>/*.json, e.g.
 //   git -C ~/legwork-tiles archive origin/master manifest.json tiles/perth | tar -x -C /tmp/t
 //
@@ -33,7 +35,7 @@ const args = Object.fromEntries(process.argv.slice(2).reduce((acc, a, i, all) =>
 }, []));
 // Fail loudly on a flag it doesn't know: a mistyped --set would otherwise run the shipped
 // constants and print numbers that look like the tuned run.
-const KNOWN = ["tiles", "cities", "targets", "starts", "seed", "profile", "set", "tile-km", "json"];
+const KNOWN = ["tiles", "cities", "targets", "starts", "seed", "profile", "set", "tile-km", "json", "kind"];
 for (const k of Object.keys(args)) if (!KNOWN.includes(k)) { console.error(`unknown flag --${k} (known: ${KNOWN.map((x) => "--" + x).join(" ")})`); process.exit(2); }
 if (!args.tiles) { console.error("--tiles <dir> is required (see the header of this file)"); process.exit(2); }
 const TILES = args.tiles;
@@ -42,6 +44,8 @@ const TARGETS = (args.targets || "5000,10000").split(",").map(Number);
 const STARTS = Number(args.starts || 20);
 const SEED = Number(args.seed || 1);
 const PROFILE = args.profile || "run";
+const KIND = args.kind || "loop";
+if (KIND !== "loop" && KIND !== "outback") { console.error("--kind is loop or outback"); process.exit(2); }
 // Tiles a first pin loads: the app's tilesInRadius(…, 5). --tile-km widens it, to measure
 // what loading more ground before generating (a PR 2 choice) would buy.
 const TILE_KM = Number(args["tile-km"] || 5);
@@ -107,11 +111,33 @@ for (const cityId of CITIES) {
     for (const target of TARGETS) {
       const theta0 = rnd() * 360;
       const w0 = performance.now();
-      const loops = await ctx.generateLoops(ctx.state.graph, startKey, target, { theta0 });
+      const gen = KIND === "outback" ? ctx.generateOutAndBacks : ctx.generateLoops;
+      const loops = await gen(ctx.state.graph, startKey, target, { theta0 });
       const ms = performance.now() - w0;
+      const g = ctx.state.graph;
+      // Climb per km, both kinds on one footing: total ascent over the whole route. A loop
+      // climbs along its edges; an out-and-back measures its own (up and down the one leg).
+      const climbPerKm = (l) => {
+        if (KIND === "outback") return l.climbPerKm;
+        let up = 0;
+        for (const p of l.paths) for (let j = 1; j < p.length; j++) {
+          const e = g.edgeBetween(g.indexOf(p[j - 1]), g.indexOf(p[j]));
+          if (e >= 0) up += g.eUp[e];
+        }
+        return up / (l.length / 1000);
+      };
+      const pathShare = (l) => {
+        if (KIND === "outback") return l.pathShare;
+        let on = 0;
+        for (const p of l.paths) for (let j = 1; j < p.length; j++) {
+          const e = g.edgeBetween(g.indexOf(p[j - 1]), g.indexOf(p[j]));
+          if (e >= 0 && g.ePath[e]) on += ctx.pathGeomLength([p[j - 1], p[j]]);
+        }
+        return on / l.length;
+      };
       results.push({
-        city: cityId, start: si, lat, lon, nTiles, target, ms, headingsTried: loops.headingsTried,
-        loops: loops.map((l) => ({ length: l.length, deviation: l.deviation, error: l.error, overlap: l.overlap, ok: l.ok, onAim: l.onAim, turnsPerKm: l.turnsPerKm, vias: l.vias || 0, pins: l.waypoints.length, jittered: !!l.jittered, tries: l.tries.length, crossings: (l.crossings || []).length })),
+        city: cityId, start: si, lat, lon, nTiles, target, ms, headingsTried: loops.headingsTried, routed: loops.routed,
+        loops: loops.map((l) => ({ length: l.length, deviation: l.deviation, error: l.error, overlap: l.overlap, ok: l.ok, onAim: l.onAim, turnsPerKm: l.turnsPerKm, vias: l.vias || 0, pins: l.waypoints.length, jittered: !!l.jittered, tries: Array.isArray(l.tries) ? l.tries.length : l.tries, crossings: (l.crossings || []).length, climbPerKm: climbPerKm(l), pathShare: pathShare(l) })),
       });
     }
   }
@@ -154,11 +180,13 @@ for (const cityId of CITIES) for (const target of TARGETS) {
     "x-ing": loops.filter((l) => l.crossings > 0).length,
     "mean ov": pct(ov), "ov >15%": loops.filter((l) => l.overlap > 0.15).length,
     "turns/km p50": tpk.length ? at(tpk, 0.5).toFixed(1) : "-",
+    "climb m/km": (loops.reduce((a, l) => a + l.climbPerKm, 0) / n).toFixed(1),
+    "on paths": pct(loops.reduce((a, l) => a + l.pathShare, 0) / n),
     "stopped early": `${early}/${rs.length}`,
     "ms p50": Math.round(at(ms, 0.5)), "ms p90": Math.round(at(ms, 0.9)), "ms max": Math.round(ms[ms.length - 1]),
   });
 }
-console.log(`tiles ${manifest.version} (built ${manifest.built}), profile ${PROFILE}, seed ${SEED}, ${STARTS} starts per city` +
+console.log(`${KIND === "outback" ? "OUT-AND-BACK" : "LOOP"}: tiles ${manifest.version} (built ${manifest.built}), profile ${PROFILE}, seed ${SEED}, ${STARTS} starts per city` +
   (SET ? `, OVERRIDES: ${SET}` : ", shipped constants") + (TILE_KM !== 5 ? `, TILES WITHIN ${TILE_KM} km (app: 5)` : ""));
 console.table(rows);
 const all = results.flatMap((r) => r.loops), allMs = results.map((r) => r.ms).sort((a, b) => a - b);
@@ -166,6 +194,8 @@ console.log(`all: ${all.filter((l) => l.onAim).length}/${all.length} loops on ai
   `${all.filter((l) => l.ok).length}/${all.length} acceptable, ` +
   `${all.filter((l) => l.deviation < 0).length} short of the target, ` +
   `mean overlap ${pct(all.reduce((a, l) => a + l.overlap, 0) / all.length)}, ` +
+  `climb ${(all.reduce((a, l) => a + l.climbPerKm, 0) / all.length).toFixed(2)} m/km mean, ` +
+  `on paths ${pct(all.reduce((a, l) => a + l.pathShare, 0) / all.length)} mean, ` +
   `turns/km p50 ${at(all.map((l) => l.turnsPerKm).sort((a, b) => a - b), 0.5).toFixed(1)} ` +
   `p90 ${at(all.map((l) => l.turnsPerKm).sort((a, b) => a - b), 0.9).toFixed(1)}, ` +
   `loops with an extra pin ${all.filter((l) => l.vias > 0).length}, ` +

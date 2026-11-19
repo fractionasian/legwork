@@ -68,8 +68,9 @@
                      title tooltip — tooltips are invisible on touch. -->
                 <button id="dm-shorten" role="menuitem" title="Stores this route on the server so the link can be short">Short link (saves to server)</button>
             </div>
-            <!-- "Loop ▸": a loop of a chosen length from a single pin
-                 (docs/design/target-distance-loops.md). Hangs under the distance
+            <!-- "Loop ▸" / "Out & Back ▸": a loop or out-and-back of a chosen length
+                 from a single pin, following the mode (decision 7,
+                 docs/design/target-distance-loops.md). Hangs under the distance
                  pill, never a floating button; shown only with exactly one pin. -->
             <div class="loop-ui" id="loop-ui">
                 <button class="loop-chip hidden" id="loop-chip" type="button"
@@ -153,7 +154,7 @@
             <div class="menu-divider"></div>
             <details class="menu-privacy">
                 <summary class="menu-item">What Legwork counts</summary>
-                <p>Legwork counts how often routes are built, exported, saved, shared and reversed, and how often a loop is made from one pin. For each route it notes the rough length (0–5, 5–10, 10–20 or 20+ km), the mode, run or bike, the map layer, and the city or suburb it starts in. For a loop made from one pin it notes which distance button you pressed (or "other" for a typed one, never the number) and whether a loop was found. Pins are counted in squares about 500 m wide.</p>
+                <p>Legwork counts how often routes are built, exported, saved, shared and reversed, and how often a loop or an out-and-back is made from one pin. For each route it notes the rough length (0–5, 5–10, 10–20 or 20+ km), the mode, run or bike, the map layer, and the city or suburb it starts in. For a loop or out-and-back made from one pin it notes which of the two it was, which distance button you pressed (or "other" for a typed one, never the number) and whether one was found. Pins are counted in squares about 500 m wide.</p>
                 <p>It does not use an account, cookies or a device ID. Nothing it stores includes your IP address, your route's shape or an exact location. The only place detail kept from your connection is your country.</p>
             </details>
             <div class="menu-divider"></div>

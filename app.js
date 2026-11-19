@@ -2361,7 +2361,20 @@ document.getElementById("dm-shorten").addEventListener("click", function (e) {
 // loops from generateLoops (routing.js), shown one at a time → Keep leaves them as
 // ordinary pins. The loops are routed by the same router as hand-drawn routes, and
 // each one shown is drawn by updateRoute, so the length on screen is the pipeline's.
+// The chip makes whatever the mode is (decision 7): loops in loop mode, out-and-backs
+// (generateOutAndBacks) in out-and-back mode, and isn't offered in one-way mode.
+var LOOP_KINDS = {
+    loop:    { noun: "loop", chip: "Loop", title: "Loop distance, km", busy: "Finding loops", aria: "Loop", group: "Generated loops", gen: function () { return generateLoops; } },
+    // "total km": some runners plan an out-and-back as "8 out, 8 back" (ux review).
+    outback: { noun: "out & back", chip: "Out & Back", title: "Out & back, total km", busy: "Finding routes", aria: "Out and back", group: "Generated out and backs", gen: function () { return generateOutAndBacks; } },
+};
+// What the chip would make now: "loop", "outback", or null in one-way mode.
+function loopKindNow() {
+    return state.mode === "outback" ? "outback" : state.mode === "oneway" ? null : "loop";
+}
+function loopWords() { return LOOP_KINDS[loopUi.kind || loopKindNow() || "loop"]; }
 var loopUi = {
+    kind: null,         // "loop" | "outback" for the generation in flight or on show
     phase: "idle",      // idle | presets | generating | choosing
     run: 0,             // bumped to cancel a generation in flight (loopSnapshotStale)
     snap: null,         // loopSnapshotNow() when the generation in flight started
@@ -2375,7 +2388,7 @@ var loopUi = {
     kept: null,         // { start, pins } after Keep, so Undo can take the loop off in one step
     applying: false,    // true while this code redraws, so updateRoute's hook ignores it
 };
-var LOOP_FAIL_MSG = "No loop found from here — try moving the pin onto a path.";
+function loopFailMsg() { return "No " + loopWords().noun + " found from here — try moving the pin onto a path."; }
 var loopChip = document.getElementById("loop-chip");
 var loopPresets = document.getElementById("loop-presets");
 var loopFlipper = document.getElementById("loop-flipper");
@@ -2402,7 +2415,7 @@ function loopChipState() {
     if (loopUi.phase === "generating") return "busy";
     if (loopUi.phase === "choosing") return "hidden";
     var w = state.waypoints;
-    if (w.length !== 1 || w[0].failed) return "hidden";
+    if (w.length !== 1 || w[0].failed || !loopKindNow()) return "hidden";
     return w[0].pending || !w[0].nodeKey || !state.graph ? "disabled" : "ready";
 }
 
@@ -2414,14 +2427,18 @@ function renderLoopUi() {
     // Most loops in a baked city come back in well under a second: no spinner flash.
     var busy = chip === "busy" && loopUi.busyShown;
     loopChip.classList.toggle("busy", busy);
-    loopChip.textContent = busy ? "Finding loops ✕" : "Loop ▸";
-    loopChip.setAttribute("aria-label", chip === "busy" ? "Finding loops. Cancel"
-        : chip === "disabled" ? "Loop of a chosen length (waiting for the pin to snap to a path)"
-        : "Loop of a chosen length from this pin");
+    if (loopUi.phase === "idle" || loopUi.phase === "presets") loopUi.kind = null;
+    var words = loopWords();
+    loopChip.textContent = busy ? words.busy + " ✕" : words.chip + " ▸";
+    loopChip.setAttribute("aria-label", chip === "busy" ? words.busy + ". Cancel"
+        : chip === "disabled" ? words.aria + " of a chosen length (waiting for the pin to snap to a path)"
+        : words.aria + " of a chosen length from this pin");
     loopChip.setAttribute("aria-expanded", loopUi.phase === "presets" ? "true" : "false");
 
     loopPresets.classList.toggle("hidden", loopUi.phase !== "presets");
     if (loopUi.phase === "presets") {
+        document.getElementById("loop-presets-title").textContent = words.title;
+        loopOtherInput.setAttribute("aria-label", words.aria + " distance in km");
         var max = loopMaxKm();
         var btns = loopPresets.querySelectorAll("[data-km]");
         for (var i = 0; i < btns.length; i++) btns[i].disabled = Number(btns[i].dataset.km) > max;
@@ -2431,7 +2448,7 @@ function renderLoopUi() {
     }
 
     loopFlipper.classList.toggle("hidden", loopUi.phase !== "choosing");
-    if (loopUi.phase === "choosing") renderLoopFlipper();
+    if (loopUi.phase === "choosing") { loopFlipper.setAttribute("aria-label", words.group); renderLoopFlipper(); }
 
     syncLoopUiHeight();
 }
@@ -2464,9 +2481,10 @@ function renderLoopFlipper() {
     // near miss flipped to past a good one just says what was asked for.
     var anyOk = loopUi.candidates.some(function (o) { return loopInWindow(o.length, targetM); });
     label.classList.toggle("near-miss", near);   // amber on the number means the length only
-    label.appendChild(document.createTextNode(!near ? " loop"
-        : anyOk ? " loop (you asked for " + loopUi.targetKm + " km)"
-        : " — couldn’t find a closer " + loopUi.targetKm + " km loop here"));
+    var noun = loopWords().noun;
+    label.appendChild(document.createTextNode(!near ? " " + noun
+        : anyOk ? " " + noun + " (you asked for " + loopUi.targetKm + " km)"
+        : " — couldn’t find a closer " + loopUi.targetKm + " km " + noun + " here"));
     // Here, not a banner: tile-loading banners replaced one before it could be read.
     if (loopUi.clampNote) label.appendChild(document.createTextNode(". " + loopUi.clampNote));
     // Only when every loop found had one (generateLoops drops them otherwise). Its own
@@ -2483,7 +2501,7 @@ function renderLoopFlipper() {
     var next = document.getElementById("loop-next");
     next.textContent = (loopUi.index + 1) + " of " + n + " ›";
     next.hidden = n < 2;   // "1 of 1" greyed out reads as broken in sunlight
-    next.setAttribute("aria-label", "Loop " + (loopUi.index + 1) + " of " + n + (n > 1 ? ". Show the next one." : ""));
+    next.setAttribute("aria-label", loopWords().aria + " " + (loopUi.index + 1) + " of " + n + (n > 1 ? ". Show the next one." : ""));
 }
 
 // updateRoute calls this first, on every change to the pins, mode or profile. An edit
@@ -2494,11 +2512,12 @@ function loopOnRouteChange() {
     if (loopUi.applying) return;
     loopUi.kept = null;
     if (loopUi.phase === "generating" && loopSnapshotStale(loopUi.snap, loopSnapshotNow())) {
+        var stoppedKind = loopUi.kind, modeChanged = loopUi.snap.mode !== state.mode;
         cancelLoopGeneration();
         // Say so: a map tap mid-search otherwise just leaves a 2-pin route and no loop.
         // After the redraw this edit started, whose finalizeRoute clears the banner;
         // and only onto an empty banner, never over a real warning.
-        var msg = "Loop search stopped: the pins changed.";
+        var msg = (stoppedKind === "outback" ? "Out & back" : "Loop") + " search stopped: the " + (modeChanged ? "mode" : "pins") + " changed.";
         setTimeout(function () {
             var el = document.getElementById("info-banner");
             if (el.style.display !== "none" && el.textContent) return;
@@ -2616,6 +2635,7 @@ function fitLoopCandidates() {
 // Keep (kept = true) leaves the loop as ordinary pins and remembers it for a one-step
 // Undo. A user edit while choosing settles it the same way, but not for that Undo.
 function finishLoopChoice(kept) {
+    var keptKind = loopUi.kind;
     showLoopCrossings(null);   // after Keep the route is the user's: a ring would go stale on the first drag
     loopUi.kept = kept ? { start: state.waypoints[0], pins: loopUi.pins.slice() } : null;
     loopUi.pins = [];
@@ -2625,7 +2645,7 @@ function finishLoopChoice(kept) {
     if (kept) {
         loopRefocus();
         // Keep closed the panel with no sign anything happened (3 of 5 first users).
-        showBanner("Loop kept. Drag any pin to change it.", "success");
+        showBanner((keptKind === "outback" ? "Out & back" : "Loop") + " kept. Drag any pin to change it.", "success");
         clearBannerAfter(2500);
     }
 }
@@ -2659,14 +2679,11 @@ async function ensureLoopGround(lat, lon, km, isStale) {
 async function generateLoopFromChip(km, bucket) {
     if (loopChipState() !== "ready") return;
     var start = state.waypoints[0];
-    // A loop is what's being asked for (spec: mode is forced to loop on generation).
-    if (state.mode !== "loop") {
-        state.mode = "loop";
-        setModeButton();
-        document.getElementById("mode-btn").setAttribute("aria-label", "Route mode: loop (tap to cycle)");
-        updateReverseVisibility();
-        loopRedraw();
-    }
+    // The mode decides what's made (decision 7); it is never forced. Changing it mid-search
+    // cancels (loopSnapshotStale), so the kind holds until the options are settled.
+    var kind = loopKindNow();
+    if (!kind) return;
+    loopUi.kind = kind;
     var run = ++loopUi.run;
     loopUi.phase = "generating";
     loopUi.busyShown = false;
@@ -2680,9 +2697,9 @@ async function generateLoopFromChip(km, bucket) {
     try {
         await ensureLoopGround(start.lat, start.lon, km, isStale);
         if (isStale()) return;
-        var cands = await generateLoops(state.graph, start.nodeKey, km * 1000, { k: 3, isStale: isStale });
+        var cands = await LOOP_KINDS[kind].gen()(state.graph, start.nodeKey, km * 1000, { k: 3, isStale: isStale });
         if (cands === null || isStale()) return;   // dropped: the pin moved, Undo, cancel…
-        track("loop-generated", { bucket: bucket, result: loopResult(cands) });
+        track("loop-generated", { bucket: bucket, result: loopResult(cands), mode: kind });
         if (!cands.length) { showLoopFailure(); return; }
         loopUi.candidates = cands;
         loopUi.phase = "choosing";
@@ -2699,7 +2716,7 @@ async function generateLoopFromChip(km, bucket) {
             loopRedraw();
             renderLoopUi();
         } else if (!isStale()) {
-            track("loop-generated", { bucket: bucket, result: "failed" });
+            track("loop-generated", { bucket: bucket, result: "failed", mode: kind });
             showLoopFailure();
         }
     } finally {
@@ -2711,7 +2728,7 @@ async function generateLoopFromChip(km, bucket) {
 function showLoopFailure() {
     loopUi.phase = "presets";
     renderLoopUi();
-    loopNote.textContent = LOOP_FAIL_MSG;
+    loopNote.textContent = loopFailMsg();
 }
 
 // Cmd/Ctrl+Z. While choosing it discards the options; mid-generation it cancels; right
@@ -2772,8 +2789,9 @@ loopOtherForm.addEventListener("submit", function (e) {
         return;
     }
     loopOtherInput.blur();
+    var noun = loopWords().noun;
     loopUi.clampNote = !v.clamped ? null
-        : v.km >= max ? "The longest loop here is " + max + " km." : "The shortest loop is 1 km.";
+        : v.km >= max ? "The longest " + noun + " here is " + max + " km." : "The shortest " + noun + " is 1 km.";
     generateLoopFromChip(v.km, loopBucket(v.km, true));
 });
 document.getElementById("loop-next").addEventListener("click", function (e) {

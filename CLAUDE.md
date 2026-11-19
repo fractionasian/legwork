@@ -45,8 +45,9 @@ are cached. (inferred from the app and `docs/show-hn-draft.md`)
 - **No third-party analytics script.** Umami was the last one and is gone.
   [code]
 - **No account, no cookies, no device ID.** [code, menu text]
-- **`loop-generated` carries only the preset bucket and the result**, never the
-  distance asked for (a typed one is `other`). [code, `worker/src/analytics-lib.js`]
+- **`loop-generated` carries only the preset bucket, the result and the mode**
+  (`loop` or `outback`), never the distance asked for (a typed one is `other`).
+  [code, `worker/src/analytics-lib.js`]
 
 ### Routing
 
@@ -71,13 +72,17 @@ are cached. (inferred from the app and `docs/show-hn-draft.md`)
 - **Bike: riding against a one-way costs 4×; run ignores one-ways.**
   [doc 2026-10-01]
 - **Reversing a loop keeps the start where it is.** [commit d5aa130]
-- **A generated loop uses the same router as hand-drawn routes, and the length
-  shown is the drawn one.** No generator-only weights. Its pins never count as a
-  `pin-drop`; Undo of a kept loop never removes the start pin. Loops cap at 32 km,
-  10 km outside the pre-baked cities. [doc, target-distance-loops]
-- **The generator drops loops that cross a primary or trunk road except at lights
-  or a marked crossing** (within 30 m). It is a filter on the loops offered, never a
-  routing weight, and `eMain` on graph edges is read by nothing else. If every loop
+- **The chip makes what the mode is:** loops in loop mode, out-and-backs in
+  out-and-back mode, nothing in one-way. The mode is never forced. [doc,
+  target-distance-loops decision 7]
+- **A generated loop or out-and-back uses the same router as hand-drawn routes,
+  and the length shown is the drawn one.** No generator-only weights. Its pins
+  never count as a `pin-drop`; Undo of a kept one never removes the start pin. Both
+  cap at 32 km, 10 km outside the pre-baked cities. [doc, target-distance-loops]
+- **The generators drop loops and out-and-backs that cross a primary or trunk road
+  except at lights or a marked crossing** (within 30 m; an out-and-back crosses each
+  one both ways). It is a filter on the options offered, never a routing weight, and
+  `eMain` and `ePath` on graph edges are read by nothing but the generators. If every loop
   found crosses, the best one is shown with a note and a ring at each crossing. Not
   a guarantee: the known misses are listed in target-distance-loops.md, "Main-road
   crossings". [Peter 2026-11-19]

@@ -11,8 +11,8 @@ export const EVENT_NAMES = new Set([
   "pin-drop", "route-built", "route-export", "route-save", "route-share",
   // Reverse presses answer "is the toolbar button earning its space".
   "route-reverse",
-  // "Loop ▸" chip: did a generated loop come back, and for which preset. Answers
-  // whether target-distance loops get used and how often they miss.
+  // "Loop ▸" chip: did a generated loop (or out-and-back) come back, and for which
+  // preset. Answers whether target-distance loops get used and how often they miss.
   "loop-generated",
   // Moved off Umami Cloud, which was the last third-party script in the app.
   // These two answer "which city do we pre-bake next": city-resolved when the
@@ -36,6 +36,9 @@ const BASEMAPS = new Set(["street", "satellite", "terrain"]);
 // shown with its true length, or nothing.
 const LOOP_BUCKETS = new Set(["3", "5", "8", "10", "15", "21", "other"]);
 const LOOP_RESULTS = new Set(["ok", "near_miss", "failed"]);
+// Which the chip made: it follows the route mode (one-way gets no chip). Added with
+// out-and-backs (PR 3); an older client never sends it, so absent means loop.
+const LOOP_KINDS = new Set(["loop", "outback"]);
 
 // City slug for `route-built`, e.g. "perth" — or the sentinel "uncovered" when
 // the route is outside every catalogue city.
@@ -99,6 +102,7 @@ const PROP_SCHEMA = {
   "loop-generated": {
     bucket: { test: (v) => LOOP_BUCKETS.has(v) },
     result: { test: (v) => LOOP_RESULTS.has(v) },
+    mode: { test: (v) => LOOP_KINDS.has(v) },
   },
 };
 

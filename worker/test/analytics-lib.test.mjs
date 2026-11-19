@@ -219,6 +219,20 @@ test("loop-generated takes a preset bucket and a result, both enums", () => {
   assert.deepEqual(extra.props, { bucket: "5", result: "ok" });
 });
 
+test("loop-generated mode says loop or out-and-back, and is optional", () => {
+  for (const mode of ["loop", "outback"]) {
+    const r = validateEvent({ name: "loop-generated", props: { bucket: "5", result: "ok", mode } });
+    assert.equal(r.ok, true, mode);
+    assert.deepEqual(r.props, { bucket: "5", result: "ok", mode });
+  }
+  // Older clients never send it.
+  assert.deepEqual(validateEvent({ name: "loop-generated", props: { bucket: "5", result: "ok" } }).props, { bucket: "5", result: "ok" });
+  // One-way gets no chip, and anything else is a bug.
+  for (const mode of ["oneway", "Loop", 1]) {
+    assert.equal(validateEvent({ name: "loop-generated", props: { bucket: "5", result: "ok", mode } }).ok, false, String(mode));
+  }
+});
+
 test("route-built basemap is an enum and soft", () => {
   const base = { km_bucket: "5-10", mode: "loop", profile: "run" };
   assert.equal(validateEvent({ name: "route-built", props: { ...base, basemap: "satellite" } }).props.basemap, "satellite");
