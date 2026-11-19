@@ -623,6 +623,7 @@ function applyPaths(geojson, opts) {
         // Combine base road weight + way-level preferences (P1 named trails, P5 soft surfaces).
         var baseWeight = (profile.roadWeight[hw] || profile.defaultWeight) * profile.wayPref(hw, props.surface || "", props.name || "");
         var main = MAIN_ROADS[hw] ? 1 : 0; // for the loop crossing check; never weighs the route
+        var pathy = PATHLIKE_HIGHWAYS[hw] ? 1 : 0; // for ranking out-and-backs; never weighs the route
         var elev = props.elev; // metres per vertex — only on tiles baked with elevation
         for (var c = 1; c < coords.length; c++) {
             var lat1 = coords[c-1][1], lon1 = coords[c-1][0];
@@ -633,6 +634,7 @@ function applyPaths(geojson, opts) {
                 // Already in the graph (either direction). If this way is a main road, the
                 // segment is one whichever way loaded first: mark it, cost unchanged.
                 if (main) g.markMain(u, v);
+                if (pathy) g.markPath(u, v);
                 continue;
             }
             // Node-level preferences (P2 traffic signals, P3 marked crossings, P4 barriers)
@@ -646,8 +648,8 @@ function applyPaths(geojson, opts) {
             // ends of a vertex get the same height from every way and tile, so a
             // junction never disagrees with itself.
             var rise = elev ? elev[c] - elev[c-1] : 0;
-            g.addEdge(u, v, cost.fwd, rise > 0 ? rise : 0, main);
-            if (cost.rev !== null) g.addEdge(v, u, cost.rev, rise < 0 ? -rise : 0, main);
+            g.addEdge(u, v, cost.fwd, rise > 0 ? rise : 0, main, pathy);
+            if (cost.rev !== null) g.addEdge(v, u, cost.rev, rise < 0 ? -rise : 0, main, pathy);
         }
     }
 

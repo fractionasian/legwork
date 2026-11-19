@@ -482,6 +482,7 @@ function PackedGraph() {
     this.eCost = new Float64Array(this.edgeCap);
     this.eUp = new Float64Array(this.edgeCap);
     this.eMain = new Uint8Array(this.edgeCap);          // 1 = on a main road (MAIN_ROADS)
+    this.ePath = new Uint8Array(this.edgeCap);          // 1 = on a path (PATHLIKE_HIGHWAYS)
     this.eBear = null;
     this.table = pgTable(2048); this.mask = 2047;     // node index by coordinate, load <= 0.5
     this.grid = new Map();                              // spatial cell -> node indices
@@ -514,6 +515,7 @@ PackedGraph.prototype.growEdges = function () {
     this.eCost = pgGrow(this.eCost, Float64Array, this.edgeCap);
     this.eUp = pgGrow(this.eUp, Float64Array, this.edgeCap);
     this.eMain = pgGrow(this.eMain, Uint8Array, this.edgeCap);
+    this.ePath = pgGrow(this.ePath, Uint8Array, this.edgeCap);
     if (this.eBear) this.eBear = pgGrow(this.eBear, Float32Array, this.edgeCap);
     this.gE = null;
 };
@@ -553,11 +555,13 @@ PackedGraph.prototype.connected = function (u, v) {
     return false;
 };
 // main: 1 if the edge is on a main road (MAIN_ROADS), for the loop crossing check only.
-// It never changes the cost: the router weighs roads by cost alone.
-PackedGraph.prototype.addEdge = function (u, v, cost, up, main) {
+// path: 1 if it is on a path-class way (PATHLIKE_HIGHWAYS), for ranking out-and-backs only.
+// Neither changes the cost: the router weighs roads by cost alone.
+PackedGraph.prototype.addEdge = function (u, v, cost, up, main, path) {
     if (this.nEdges === this.edgeCap) this.growEdges();
     var e = this.nEdges++;
     this.eFrom[e] = u; this.eTo[e] = v; this.eCost[e] = cost; this.eUp[e] = up; this.eMain[e] = main ? 1 : 0;
+    this.ePath[e] = path ? 1 : 0;
     this.eNext[e] = this.first[u]; this.first[u] = e;
     if (this.eBear) this.eBear[e] = this.bearing(u, v);
     return e;
@@ -567,6 +571,17 @@ PackedGraph.prototype.markMain = function (u, v) {
     var e;
     for (e = this.first[u]; e >= 0; e = this.eNext[e]) if (this.eTo[e] === v) this.eMain[e] = 1;
     for (e = this.first[v]; e >= 0; e = this.eNext[e]) if (this.eTo[e] === u) this.eMain[e] = 1;
+};
+// The same for a path-class way sharing a segment already loaded from another way.
+PackedGraph.prototype.markPath = function (u, v) {
+    var e;
+    for (e = this.first[u]; e >= 0; e = this.eNext[e]) if (this.eTo[e] === v) this.ePath[e] = 1;
+    for (e = this.first[v]; e >= 0; e = this.eNext[e]) if (this.eTo[e] === u) this.ePath[e] = 1;
+};
+// Edge index from u to v, or -1.
+PackedGraph.prototype.edgeBetween = function (u, v) {
+    for (var e = this.first[u]; e >= 0; e = this.eNext[e]) if (this.eTo[e] === v) return e;
+    return -1;
 };
 PackedGraph.prototype.bearing = function (u, v) {
     return bearingDeg(this.latQ[u] / 1e6, this.lonQ[u] / 1e6, this.latQ[v] / 1e6, this.lonQ[v] / 1e6);
@@ -707,6 +722,46 @@ PackedGraph.prototype.costFrom = function (key, maxCost) {
         }
     }
     return dist;
+};
+
+// The cheapest-route tree from `key`, with what lies along each node's branch: ground
+// metres (len), climb up plus climb down in metres (climb), metres on paths (path), and
+// the edge it was reached by (prevE, -1 at the start and for unreached nodes; done = 1
+// once reached). One search with the router's own edge cost (weighted length + climb)
+// and no turn cost. Nodes past maxLen of ground are reached but not expanded from, so
+// the search stays near the start. The out-and-back generator places its turnarounds
+// with it; each one is then routed by dijkstra(), so it only chooses where pins go.
+// Climb down along u → v is the reverse edge's eUp (0 where a bike one-way closes it).
+PackedGraph.prototype.lengthTree = function (key, maxLen) {
+    var s = this.indexOf(key);
+    if (s < 0) return null;
+    var N = this.nNodes, dist = new Float64Array(N).fill(Infinity), done = new Uint8Array(N);
+    var len = new Float32Array(N), climb = new Float32Array(N), path = new Float32Array(N), prevE = new Int32Array(N).fill(-1);
+    var first = this.first, eTo = this.eTo, eFrom = this.eFrom, eNext = this.eNext, eCost = this.eCost, eUp = this.eUp, ePath = this.ePath;
+    var latQ = this.latQ, lonQ = this.lonQ, cw = CLIMB_WEIGHT;
+    this.hn = 0; dist[s] = 0; this.hpush(0, s);
+    while (this.hn > 0) {
+        var u = this.hpop();
+        if (done[u]) continue;
+        done[u] = 1;
+        var pe = prevE[u];
+        if (pe >= 0) {
+            var p = eFrom[pe], d = haversine(latQ[p] / 1e6, lonQ[p] / 1e6, latQ[u] / 1e6, lonQ[u] / 1e6);
+            var back = this.edgeBetween(u, p);
+            len[u] = len[p] + d;
+            climb[u] = climb[p] + eUp[pe] + (back >= 0 ? eUp[back] : 0);
+            path[u] = path[p] + (ePath[pe] ? d : 0);
+        }
+        if (len[u] > maxLen) continue;
+        var du = dist[u];
+        for (var e = first[u]; e >= 0; e = eNext[e]) {
+            var v = eTo[e];
+            if (v >= N || done[v]) continue;
+            var nd = du + eCost[e] + cw * eUp[e];
+            if (nd < dist[v]) { dist[v] = nd; prevE[v] = e; this.hpush(nd, v); }
+        }
+    }
+    return { cost: dist, len: len, climb: climb, path: path, prevE: prevE, done: done };
 };
 
 // ── binary heap on two typed arrays ──
@@ -931,7 +986,7 @@ function pathMidpointKey(path) {
 }
 
 // Route the legs between consecutive keys (the last key closes the loop). Returns
-// { paths, length, keys, vias }, or null if a leg has no path.
+// { paths, length, cost (the router's, summed), keys, vias }, or null if a leg has no path.
 //
 // A leg the app would gap-fill (legNeedsGapFill: more than 3x its straight line) would
 // be re-fetched by the pipeline and could be drawn differently from what's measured
@@ -940,7 +995,7 @@ function pathMidpointKey(path) {
 // measured. If a half still trips the rule, or LOOP_SPLIT is off, there's no loop and r
 // shrinks. keys comes back with the extra pins in place, minus the closing key.
 function routeLegs(graph, keys) {
-    var paths = [], length = 0, out = [keys[0]], vias = 0;
+    var paths = [], length = 0, cost = 0, out = [keys[0]], vias = 0;
     function leg(from, to) {
         var res = dijkstra(graph, from, to);
         if (!res) return null;
@@ -956,15 +1011,17 @@ function routeLegs(graph, keys) {
             if (!h1 || !h2 || h1.tripped || h2.tripped) return null;
             paths.push(h1.path, h2.path);
             length += pathGeomLength(h1.path) + pathGeomLength(h2.path);
+            cost += h1.dist + h2.dist;
             out.push(via);
             vias++;
         } else {
             paths.push(res.path);
             length += pathGeomLength(res.path);
+            cost += res.dist;
         }
         if (i < keys.length - 1) out.push(to);
     }
-    return { paths: paths, length: length, keys: out, vias: vias };
+    return { paths: paths, length: length, cost: cost, keys: out, vias: vias };
 }
 
 // Corner points for one loop at scale r, as [lat, lon]. Triangle (LOOP_CORNERS 2): A
@@ -1450,6 +1507,260 @@ async function generateLoops(graph, startKey, targetM, opts) {
     return out;
 }
 
+// ── Out-and-back of N km (decision 7, PR 3) ─────────────
+// Two pins, the start and a turnaround (plus a halfway pin where routeLegs splits a leg
+// the app would gap-fill). Out-and-back mode routes start → turnaround and runs the
+// same streets back, so the length is twice the one leg, and each main-road crossing is
+// crossed both ways. One search from the start (lengthTree) gives every node's ground
+// distance along the cheapest route, so the turnaround is placed at N/2 directly, with
+// no radius to guess. Each turnaround is then routed by dijkstra() like any hand-drawn
+// leg, so what's drawn is what was measured.
+//
+// Ranked flattest first (Peter, 2026-11-19: "fairly flat, with a priority for scenic"):
+// least climb per km, then most of the length on paths (the stand-in for scenic: Legwork
+// has no scenery data), then the router's own cost per metre. No setting for any of it.
+var OAB_SECTORS = 6;          // directions round the start, 60° each; each puts up its best
+var OAB_TRIES = 4;            // routed turnarounds per direction, at most
+var OAB_SPAN = 0.12;          // turnarounds considered: tree length within ±12% of the aim
+var OAB_BAND = 0.03;          // ...and for each pick, within ±3% of the one-way length wanted
+var OAB_SCAN = 400;           // tree branches looked at for a main-road crossing per pick, at most
+var OAB_CLIMB_STEP = 2.5;     // m/km: climb per km is ranked in steps this wide, so a trivial
+                              //   difference falls through to path share
+var OAB_PATH_STEP = 0.1;      // path share is ranked in 10% steps, then cost per metre decides
+var OAB_EXTRA = 1;            // too few clean: a second round of directions, half a sector round
+var OAB_JUNCTION = 3;         // turnarounds at a junction (3+ edges out) before a dead end
+
+// The rank keys of a candidate, measured or read off the tree, lowest first.
+function outAndBackKeys(a) {
+    return [Math.floor(a.climbPerKm / OAB_CLIMB_STEP + 1e-9), -Math.floor(a.pathShare / OAB_PATH_STEP + 1e-9), a.costPerM];
+}
+function compareOutAndBackKeys(a, b) {
+    var ka = outAndBackKeys(a), kb = outAndBackKeys(b);
+    for (var i = 0; i < ka.length; i++) if (ka[i] !== kb[i]) return ka[i] - kb[i];
+    return 0;
+}
+
+// Order of two out-and-backs, best first (<0 = a first): clean beats one with an
+// unprotected main-road crossing; inside the accept window beats a near miss; two near
+// misses: the closer to the aim; two inside: flatter (climb per km in OAB_CLIMB_STEP
+// steps; all 0 with no heights, so this key drops out), then more on paths, then cheaper
+// per metre to the router.
+function compareOutAndBacks(a, b) {
+    var aX = loopCrosses(a), bX = loopCrosses(b);
+    if (aX !== bX) return aX ? 1 : -1;
+    if (a.ok !== b.ok) return a.ok ? -1 : 1;
+    if (!a.ok) return a.error - b.error;
+    return compareOutAndBackKeys(a, b) || a.error - b.error;
+}
+
+// The paths of a one-way leg followed by the same streets back, as a closed loop for
+// loopUnprotectedCrossings: a crossing on the way out is crossed again coming back.
+function outAndBackPaths(paths) {
+    var back = paths.slice().reverse().map(function (p) { return p.slice().reverse(); });
+    return paths.concat(back);
+}
+
+// Node keys from the start to n along the lengthTree.
+function treeBranch(graph, tree, n) {
+    var keys = [];
+    for (var c = n; ;) {
+        keys.push(graph.keyOf(c));
+        var e = tree.prevE[c];
+        if (e < 0) break;
+        c = graph.eFrom[e];
+    }
+    return keys.reverse();
+}
+
+// Measure a routed out-and-back (routeLegs of [start, turnaround]): the length, climb and
+// path share of the leg there and back, and its crossings.
+function measureOutAndBack(graph, legs, turnKey, targetM) {
+    var half = legs.length, climb = 0, onPath = 0;
+    for (var i = 0; i < legs.paths.length; i++) {
+        var p = legs.paths[i];
+        for (var j = 1; j < p.length; j++) {
+            var u = graph.indexOf(p[j - 1]), v = graph.indexOf(p[j]);
+            var e = graph.edgeBetween(u, v), back = graph.edgeBetween(v, u);
+            climb += (e >= 0 ? graph.eUp[e] : 0) + (back >= 0 ? graph.eUp[back] : 0);
+            if (e >= 0 && graph.ePath[e]) onPath += keyDistance(p[j - 1], p[j]);
+        }
+    }
+    var o = {
+        waypoints: legs.keys.concat([turnKey]), paths: legs.paths, length: 2 * half, vias: legs.vias,
+        climb: climb, climbPerKm: half > 0 ? climb / (2 * half / 1000) : 0,
+        pathShare: half > 0 ? onPath / half : 0, costPerM: half > 0 ? legs.cost / half : 0,
+        overlap: 1,   // retracing is the point of an out-and-back: the overlap rule doesn't apply
+    };
+    loopFit(o, targetM);
+    o.crossings = loopUnprotectedCrossings(graph, outAndBackPaths(legs.paths));
+    return o;
+}
+
+// The best k of a pool whose directions (nominal headings) are at least LOOP_MIN_SEP
+// apart, scored on how many are in the accept window, then on their places in
+// compareOutAndBacks order. With no such set, the best k by that order.
+function pickOutAndBacks(pool, k) {
+    var ranked = pool.slice().sort(compareOutAndBacks);
+    if (ranked.length <= k) return ranked;
+    var best = null, bestScore = null;
+    (function walk(from, set, places) {
+        if (set.length === k) {
+            var ok = set.filter(function (o) { return o.ok; }).length, sc = [ok, -places];
+            if (!best || sc[0] > bestScore[0] || (sc[0] === bestScore[0] && sc[1] > bestScore[1])) { best = set.slice(); bestScore = sc; }
+            return;
+        }
+        for (var i = from; i < ranked.length; i++) {
+            var far = true;
+            for (var j = 0; j < set.length; j++) if (headingGap(ranked[i].heading, set[j].heading) < LOOP_MIN_SEP) far = false;
+            if (far) { set.push(ranked[i]); walk(i + 1, set, places + i); set.pop(); }
+        }
+    })(0, [], 0);
+    return best || ranked.slice(0, k);
+}
+
+// Up to k out-and-backs of about targetM metres from startKey, best first
+// (compareOutAndBacks). Each is { waypoints: [S, (halfway pin,) turnaround], paths (the
+// one-way leg), length (there and back), deviation, error, ok, onAim, climb, climbPerKm,
+// pathShare, costPerM, crossings, heading (the direction's middle), bearing (start →
+// turnaround), tries, vias }. Same
+// contract as generateLoops: resolves to null if opts.isStale() turned true at a pause,
+// [] if nothing was found, and only clean options unless none is clean, when the best
+// one alone comes back with its crossings listed.
+//
+// Per direction (OAB_SECTORS round the start, from opts.theta0): the turnaround is the
+// best-ranked junction whose tree length is within OAB_BAND of the one-way aim and whose
+// tree branch crosses no main road unprotected; it is routed, and if the routed length
+// misses the accept window the wanted tree length is rescaled by how far it missed,
+// up to OAB_TRIES times.
+async function generateOutAndBacks(graph, startKey, targetM, opts) {
+    opts = opts || {};
+    var k = opts.k || 3;
+    var theta0 = typeof opts.theta0 === "number" ? opts.theta0 : Math.random() * 360;
+    var isStale = opts.isStale || function () { return false; };
+    var pause = opts.pause || function () { return new Promise(function (res) { setTimeout(res, 0); }); };
+    if (!(graph instanceof PackedGraph) || !startKey || !(targetM > 0)) return [];
+    var s = graph.indexOf(startKey);
+    if (s < 0) return [];
+    var aimHalf = targetM * (1 + (LOOP_AIM_LO + LOOP_AIM_HI) / 2) / 2;
+    var tree = graph.lengthTree(startKey, aimHalf * (1 + OAB_SPAN));
+    var sLat = graph.latQ[s] / 1e6, sLon = graph.lonQ[s] / 1e6;
+    var cands = [], far = -1, n;
+    for (n = 0; n < tree.done.length; n++) {
+        if (!tree.done[n] || n === s) continue;
+        var len = tree.len[n];
+        if (far < 0 || len > tree.len[far]) far = n;
+        if (len < aimHalf * (1 - OAB_SPAN) || len > aimHalf * (1 + OAB_SPAN)) continue;
+        var b = (bearingDeg(sLat, sLon, graph.latQ[n] / 1e6, graph.lonQ[n] / 1e6) + 360) % 360;
+        cands.push({ n: n, len: len, heading: b, junction: graph.degree(n) >= OAB_JUNCTION,
+            climbPerKm: tree.climb[n] / (2 * len) * 1000, pathShare: tree.path[n] / len, costPerM: tree.cost[n] / len });
+    }
+    // Nothing near the aim anywhere (an island, a short spit of path): the furthest node
+    // reachable, shown as a near miss with its true length (decision 5).
+    if (far >= 0 && !cands.length) {
+        var fb = (bearingDeg(sLat, sLon, graph.latQ[far] / 1e6, graph.lonQ[far] / 1e6) + 360) % 360;
+        cands.push({ n: far, len: tree.len[far], heading: fb, junction: true, climbPerKm: 0, pathShare: 0, costPerM: 0 });
+    }
+    // Nodes where a branch or route already checked crosses a main road unprotected. A
+    // branch through one is passed over without a full check (cheap: a walk back up the
+    // tree). Only a pre-filter on where turnarounds go: every option offered is checked
+    // on its own route.
+    var blocked = new Uint8Array(tree.done.length);
+    function block(keys) { for (var q = 0; q < keys.length; q++) { var m = graph.indexOf(keys[q]); if (m >= 0 && m < blocked.length) blocked[m] = 1; } }
+    function throughBlocked(m) {
+        for (var c = m; c >= 0; c = tree.prevE[c] >= 0 ? graph.eFrom[tree.prevE[c]] : -1) if (blocked[c]) return true;
+        return false;
+    }
+    function byRank(a, b) {
+        if (a.junction !== b.junction) return a.junction ? -1 : 1;
+        return compareOutAndBackKeys(a, b);
+    }
+    // The best untried turnaround in a direction for a one-way length of `want`: in the
+    // band, best-ranked, and with a tree branch that crosses no main road unprotected if
+    // one of the first OAB_SCAN does. With nothing in the band, the nearest to `want`.
+    function pick(list, want, tried) {
+        var band = list.filter(function (c) { return !tried.has(c.n) && Math.abs(c.len - want) <= OAB_BAND * want; });
+        if (!band.length) {
+            var near = null;
+            for (var q = 0; q < list.length; q++) {
+                if (!tried.has(list[q].n) && (!near || Math.abs(list[q].len - want) < Math.abs(near.len - want))) near = list[q];
+            }
+            return near;
+        }
+        band.sort(byRank);
+        if (!LOOP_CROSSING_CHECK) return band[0];
+        for (var c = 0; c < band.length && c < OAB_SCAN; c++) {
+            var cand = band[c];
+            if (cand.crosses === undefined) {
+                if (throughBlocked(cand.n)) cand.crosses = true;
+                else {
+                    var x = loopUnprotectedCrossings(graph, outAndBackPaths([treeBranch(graph, tree, cand.n)]));
+                    block(x);
+                    cand.crosses = x.length > 0;
+                }
+            }
+            if (!cand.crosses) return cand;
+        }
+        return band[0];
+    }
+    var pool = [], routed = 0, seen = new Set();
+    // One round: OAB_SECTORS directions starting at `from` degrees, each putting up its best.
+    async function round(from) {
+        var sectors = [], si;
+        for (si = 0; si < OAB_SECTORS; si++) sectors.push([]);
+        for (var q = 0; q < cands.length; q++) {
+            sectors[Math.floor((((cands[q].heading - from) % 360) + 360) % 360 / (360 / OAB_SECTORS)) % OAB_SECTORS].push(cands[q]);
+        }
+        for (si = 0; si < OAB_SECTORS; si++) {
+            var list = sectors[si];
+            if (!list.length) continue;
+            var tried = new Set(), best = null, want = aimHalf;
+            for (var t = 0; t < OAB_TRIES; t++) {
+                if (isStale()) return LOOP_STALE;
+                var c = pick(list, want, tried);
+                if (!c) break;
+                tried.add(c.n);
+                if (seen.has(c.n)) continue;   // routed already, in the other round
+                seen.add(c.n);
+                var turnKey = graph.keyOf(c.n);
+                var legs = routeLegs(graph, [startKey, turnKey]);
+                routed++;
+                await pause();
+                if (isStale()) return LOOP_STALE;
+                if (!legs || !(legs.length > 0)) continue;
+                var o = measureOutAndBack(graph, legs, turnKey, targetM);
+                if (LOOP_CROSSING_CHECK) block(o.crossings);
+                // Directions are kept apart by the sector's nominal heading, as loops are: a
+                // sector's best turnaround can sit anywhere in its 60°, and holding them to the
+                // middle would throw away the flattest ones. Two options a sector apart are
+                // still at least 60° apart on the ground.
+                o.heading = from + (si + 0.5) * 360 / OAB_SECTORS;
+                o.bearing = c.heading;
+                o.tries = t + 1;
+                if (!best || compareOutAndBacks(o, best) < 0) best = o;
+                if (o.ok && !loopCrosses(o)) break;
+                // A length miss: ask the tree for a turnaround as much nearer or further as
+                // the route missed by. A crossing in the window: the next one in the band.
+                if (!o.ok) want = c.len * aimHalf / legs.length;
+            }
+            if (best) pool.push(best);
+        }
+        return null;
+    }
+    if (await round(theta0) === LOOP_STALE) return null;
+    var clean = pool.filter(function (o) { return !loopCrosses(o); });
+    // Too few clean ones (a main road on some sides, or water): one more round with the
+    // directions turned half a sector, as loops do (LOOP_CROSSING_EXTRA). A sector's
+    // edge can split the one clean pocket of streets between two directions.
+    if (LOOP_CROSSING_CHECK && OAB_EXTRA && clean.length < k && clean.length < pool.length) {
+        if (await round(theta0 + 180 / OAB_SECTORS) === LOOP_STALE) return null;
+        clean = pool.filter(function (o) { return !loopCrosses(o); });
+    }
+    var out = clean.length || !pool.length ? pickOutAndBacks(clean, k) : pickOutAndBacks(pool, 1);
+    out.sort(compareOutAndBacks);
+    out.routed = routed;   // for the harness
+    return out;
+}
+
 // ── OSM / tile format converters ──────────────────────
 // ── Loop chip helpers (app.js "Loop ▸", PR 2) ──────────────────────────────
 // Pure so they can be unit-tested; the chip, presets and flipper live in app.js.
@@ -1919,6 +2230,12 @@ if (typeof module !== "undefined" && module.exports) {
         scaleLoop: scaleLoop,
         loopCandidate: loopCandidate,
         generateLoops: generateLoops,
+        generateOutAndBacks: generateOutAndBacks,
+        compareOutAndBacks: compareOutAndBacks,
+        pickOutAndBacks: pickOutAndBacks,
+        outAndBackPaths: outAndBackPaths,
+        PATHLIKE_HIGHWAYS: PATHLIKE_HIGHWAYS,
+        OAB_CLIMB_STEP: OAB_CLIMB_STEP,
         pickLoops: pickLoops,
         headingGap: headingGap,
         loopCornerPoints: loopCornerPoints,
