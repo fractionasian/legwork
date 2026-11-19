@@ -1,6 +1,6 @@
 ---
 status: approved — Peter accepted all five Layer-1 defaults and the Assumed list, 2026-11-18
-next: PR 1 merged (#57). PR 2 (UI) open on branch claude/loop-chip-ui, not merged; then PR 3 (out-and-back)
+next: PR 1 (#57) and PR 2 (#58) merged and live. PR 3 (out-and-back, decision 7) open on branch claude/out-and-back-273d19, not merged
 created: 2026-11-18
 trigger: Three Routes (iOS) OzBargain freebie, ozbargain.com.au/node/983771, 2026-11-17
 ---
@@ -184,9 +184,8 @@ pressing Undo mid-generation drops the stale results.
   "1 of 3 ›" control swaps the waypoint set. "Keep" leaves the pins in place
   and dismisses the control. Undo after Keep removes the generated pins but
   must respect "Undo cannot remove the last pin" (the start stays).
-- Mode is forced to `loop` on generation. If the user then cycles mode, the
-  pins stay and the router redraws as out-and-back / one-way. That's
-  acceptable and needs no special handling.
+- ~~Mode is forced to `loop` on generation.~~ *Superseded by decision 7 (PR 3): the
+  mode is never forced; the chip makes what the mode is.*
 
 ### Telemetry
 
@@ -339,7 +338,7 @@ location at the existing 0.005° grid only.
   loop here is 32 km.") rather than a banner the tile loader overwrote.
 - **Generated pins skip `addWaypointAt`:** no `pin-drop` event, one redraw for all.
   Up to 6 pins.
-- **Mode is forced to loop** on generation.
+- **Mode is forced to loop** on generation. *(Removed in PR 3: decision 7.)*
 - **More ground before long loops:** in a baked city, tiles out to `loopGroundKm`
   (≥ 5 km; 9.1 km at 21 km, 14.7 km at 42 km); elsewhere one live fetch of
   `loopLiveRadiusM` (≥ 2 km, since a zoom-16 first pin loads only 1 km). A failed
@@ -355,6 +354,75 @@ location at the existing 0.005° grid only.
   matches it (38–41 s at 42 km). **Other is capped at 32 km** (Peter, 2026-11-19): 32 km
   covers a marathon block's longest run, and 42 km gave a 40 s wait for one loop
   crossing ~15 main roads. The Web Worker question from PR 1 stays open.
+
+### As built in PR 3 (out-and-back, decision 7)
+
+- **The chip follows the mode.** Loop mode → loops (unchanged), out-and-back mode →
+  out-and-backs, one-way → no chip. Never forced; a mode change mid-search cancels
+  ("Out & back search stopped: the mode changed."). Copy per kind: "Out & Back ▸",
+  "Out & back, total km" (ux: some runners plan "8 out, 8 back"), "5.2 km out & back",
+  "Finding routes ✕", "Out & back kept.", "No out & back found from here — …".
+- **Pins:** `[S, (halfway pin,) T]`. Out-and-back mode routes S → T and mirrors it, so the
+  length is 2 × the routed leg; `routeLegs` applies the same gap-fill split as loops.
+  Unit test: the pins re-route to exactly the measured length.
+- **One search places the turnaround** (`PackedGraph.lengthTree`): the router's edge cost
+  (no turn cost), with ground length, climb up + down and metres on paths summed along each
+  branch. Candidates are nodes within ±12% of the one-way aim (L × 1.025 / 2); each pick is
+  within ±3% of the length wanted, rescaled by the routed miss, up to 4 routed tries per
+  direction. *If an edge-cost rule changes, mirror it in `lengthTree`*, or turnarounds land
+  off target (more tries, never a wrong length shown).
+- **Ranking** (`compareOutAndBacks`): clean, then in window, then climb per km in 2.5 m/km
+  steps (all 0 with no heights, so it drops out), then path share in 10% steps, then
+  router cost per metre. Path share counts `PATHLIKE_HIGHWAYS`, which adds `bridleway` and
+  `byway` to the list in decision 7; named trails are named ways of those classes. A new
+  `ePath` byte per edge, set in `applyPaths` like `eMain`, read by nothing but the
+  generators; no tile rebuild.
+- **Turnarounds:** junctions (3+ edges out) before dead ends, within each direction, ahead
+  of flatness. *No park preference*: there are no park outlines (decision 7's "later").
+- **Directions:** 6 sectors of 60° from a random θ0, each putting up its best; 3 kept a
+  sector apart on nominal heading (as loops). **Not the same route twice** (arch review):
+  no two options sharing more than 60% of their ground, or turning round within 15% of the
+  one-way length of each other. Fewer is shown rather than a look-alike.
+- **Second round** (not in the brief; carried over from loops' extra round): when fewer than
+  3 distinct clean options, 6 more sectors turned 30°.
+- **Crossings:** `loopUnprotectedCrossings` on the leg there and back (`outAndBackPaths`).
+  Tree branches are pre-checked, and a branch through a node already flagged is skipped
+  cheaply, so a direction scans past a crossing pocket. Only clean options; none clean →
+  the best alone with its warning and rings.
+- **No near miss under 25% of the target** (a pin on a 40 m fragment gets "No out & back
+  found", as loops do). Otherwise the furthest reachable node is a decision-5 near miss.
+- **Telemetry:** `loop-generated` gains `mode` (`loop` | `outback`), additive (old Worker
+  drops it, old client never sends it). Menu text updated in the same commit.
+- **Open for Peter:** bike out-and-backs rank and measure the outbound leg only; the app
+  mirrors the line, so a bike option can come back against a one-way or the wrong way round
+  a roundabout (hand-drawn out-and-backs already do). Rank on out + back cost and filter a
+  closed reverse edge? ~10 lines. Also: decision 7's Done-when says "three"; with the
+  never-pad rule some starts give two, as for loops (gate is 2+ clean).
+
+**Harness** (tiles b6173198, seed 1, same 80 starts × 5/10 km, run; `--kind outback`; Mac,
+run alone; the loop row was run alongside another harness, so its times are inflated):
+
+| | Loops (shipped) | Out-and-back |
+|---|---|---|
+| gate rows (2+ clean within ±10%, 18/20) | 6/8 | **7/8** (Perth 10 km 17/20) |
+| within ±5% / ±10% | 67% / 86% | 78% / 99% |
+| starts with fewer than 3 / 2 | 10 / 9 of 160 | 13 / 7 of 160 |
+| climb, m per km (mean) | 13.1 | **11.2** |
+| on paths (mean) | 67% | 80% |
+| ms p50 / p90 / max | 1,649 / 4,571 / 8,832 | 507 / 1,510 / 6,216 |
+
+| Out-and-back gate | 5 km | 10 km |
+|---|---|---|
+| Perth | 19/20 | **17/20 ✗** |
+| Melbourne | 20/20 | 20/20 |
+| Sydney | 19/20 | 18/20 |
+| Brisbane | 20/20 | 20/20 |
+
+Before the not-the-same-route rule the gate read 8/8, but it was counting look-alike
+options. Misses: Perth #4 and #14 (every direction crosses an unsignalled main road),
+#6 and Sydney #2 (one distinct clean route), Sydney #6 (a 2-node path fragment: "none found"
+is right). Climb per km is 15% lower than loops' on the same starts; the gap is modest
+because flat ground is flat whichever shape runs on it.
 
 ### Main-road crossings (PR 2, Peter 2026-11-19)
 
@@ -675,3 +743,18 @@ manifest.json tiles/perth tiles/melbourne tiles/sydney tiles/brisbane | tar -x -
 <dir>`, then `node scripts/loop-harness.mjs --tiles <dir>`. `--set "NAME=value"` and
 `--tile-km` are for tuning runs, and the report header says when either is in use.
 Unknown flags are rejected.
+
+### Handover (PR 3, 2026-11-19)
+
+PR 3 is on branch `claude/out-and-back-273d19` (Worker prop d98486e, generator cb8e7b1,
+chip efb603d, review fixes 9bd51a3 and 503a63f, harness 750f7c8), not merged. The
+`verifier-legwork` drive passed at 390 px (Perth, East Perth start): out-and-back mode, one
+pin → "Out & Back ▸" → 5 km gave 3 options (5.24, 4.99, 5.33 km, 438 ms), drawn = measured,
+flip three → Keep (toast) → drag the turnaround (5.2 → 4.8 km) → Cmd+Z after Keep left the
+start; a mode change mid-search cancelled; telemetry `{bucket:"5", result:"ok",
+mode:"outback"}`, no `pin-drop`. `/review-pass`: sec clean; ux, scope and arch nothing
+blocking, fixes in 9bd51a3 and 503a63f. Gate 7 of 8 rows (Perth 10 km 17/20; see "As built
+in PR 3"). Deploy order: Worker first, then merge. `/first-users` not run (paused; offer it).
+For Peter: the bike return-leg question; whether 17/20 in Perth 10 km is enough; parks
+wait for park outlines in the tiles. Next: nothing queued in this spec.
+
