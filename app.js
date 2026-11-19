@@ -2364,8 +2364,9 @@ document.getElementById("dm-shorten").addEventListener("click", function (e) {
 // The chip makes whatever the mode is (decision 7): loops in loop mode, out-and-backs
 // (generateOutAndBacks) in out-and-back mode, and isn't offered in one-way mode.
 var LOOP_KINDS = {
-    loop:    { noun: "loop", chip: "Loop", busy: "Finding loops", aria: "Loop", gen: function () { return generateLoops; } },
-    outback: { noun: "out & back", chip: "Out & back", busy: "Finding routes", aria: "Out and back", gen: function () { return generateOutAndBacks; } },
+    loop:    { noun: "loop", chip: "Loop", title: "Loop distance, km", busy: "Finding loops", aria: "Loop", group: "Generated loops", gen: function () { return generateLoops; } },
+    // "total km": some runners plan an out-and-back as "8 out, 8 back" (ux review).
+    outback: { noun: "out & back", chip: "Out & Back", title: "Out & back, total km", busy: "Finding routes", aria: "Out and back", group: "Generated out and backs", gen: function () { return generateOutAndBacks; } },
 };
 // What the chip would make now: "loop", "outback", or null in one-way mode.
 function loopKindNow() {
@@ -2436,7 +2437,7 @@ function renderLoopUi() {
 
     loopPresets.classList.toggle("hidden", loopUi.phase !== "presets");
     if (loopUi.phase === "presets") {
-        document.getElementById("loop-presets-title").textContent = words.chip + " distance, km";
+        document.getElementById("loop-presets-title").textContent = words.title;
         loopOtherInput.setAttribute("aria-label", words.aria + " distance in km");
         var max = loopMaxKm();
         var btns = loopPresets.querySelectorAll("[data-km]");
@@ -2447,7 +2448,7 @@ function renderLoopUi() {
     }
 
     loopFlipper.classList.toggle("hidden", loopUi.phase !== "choosing");
-    if (loopUi.phase === "choosing") renderLoopFlipper();
+    if (loopUi.phase === "choosing") { loopFlipper.setAttribute("aria-label", words.group); renderLoopFlipper(); }
 
     syncLoopUiHeight();
 }

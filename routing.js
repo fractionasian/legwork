@@ -1527,7 +1527,12 @@ var OAB_SCAN = 400;           // tree branches looked at for a main-road crossin
 var OAB_CLIMB_STEP = 2.5;     // m/km: climb per km is ranked in steps this wide, so a trivial
                               //   difference falls through to path share
 var OAB_PATH_STEP = 0.1;      // path share is ranked in 10% steps, then cost per metre decides
+var OAB_MAX_SHARED = 0.6;     // two options sharing more of their length than this are one,
+var OAB_NEAR_TURN = 0.15;     //   and so are two whose turnarounds are closer than this × the one-way length
+var OAB_FALLBACK_MIN = 0.25;  // a near miss shorter than this share of the target isn't offered
 var OAB_EXTRA = 1;            // too few clean: a second round of directions, half a sector round
+// Junction, not "junction or park" as decision 7 says: Legwork has no park outlines
+// (they'd need a tile-build change, left for later with the rest of real scenery).
 var OAB_JUNCTION = 3;         // turnarounds at a junction (3+ edges out) before a dead end
 
 // The rank keys of a candidate, measured or read off the tree, lowest first.
@@ -1596,26 +1601,56 @@ function measureOutAndBack(graph, legs, turnKey, targetM) {
     return o;
 }
 
+// Share of the shorter one-way leg's length that runs on ground the other also covers.
+// Every out-and-back from one start shares its first stretch; past OAB_MAX_SHARED it is
+// the same route with a different turnaround.
+function sharedShare(a, b) {
+    function segs(o) {
+        var m = new Map();
+        for (var i = 0; i < o.paths.length; i++) for (var j = 1; j < o.paths[i].length; j++) {
+            var x = o.paths[i][j - 1], y = o.paths[i][j];
+            m.set(x < y ? x + "|" + y : y + "|" + x, keyDistance(x, y));
+        }
+        return m;
+    }
+    var sa = segs(a), sb = segs(b), both = 0;
+    sa.forEach(function (d, key) { if (sb.has(key)) both += d; });
+    return both / Math.min(a.length / 2, b.length / 2);
+}
+
 // The best k of a pool whose directions (nominal headings) are at least LOOP_MIN_SEP
-// apart, scored on how many are in the accept window, then on their places in
-// compareOutAndBacks order. With no such set, the best k by that order.
+// apart and no two of which share more than OAB_MAX_SHARED of their length or turn round
+// within OAB_NEAR_TURN of each other (parallel streets to the same spot), scored on
+// how many are in the accept window, then on their places in compareOutAndBacks order.
+// With no such set of k (a small pool: a peninsula, a river bank), the best in that
+// order that don't share that much, so "2 of 2" is never the same path with its
+// turnaround 200 m further on (arch review): fewer is honest.
 function pickOutAndBacks(pool, k) {
     var ranked = pool.slice().sort(compareOutAndBacks);
-    if (ranked.length <= k) return ranked;
+    function apart(o, set, nominal) {
+        for (var j = 0; j < set.length; j++) {
+            if (sharedShare(o, set[j]) > OAB_MAX_SHARED) return false;
+            var ta = o.waypoints[o.waypoints.length - 1], tb = set[j].waypoints[set[j].waypoints.length - 1];
+            if (keyDistance(ta, tb) < OAB_NEAR_TURN * Math.min(o.length, set[j].length) / 2) return false;
+            if (nominal && headingGap(o.heading, set[j].heading) < LOOP_MIN_SEP) return false;
+        }
+        return true;
+    }
     var best = null, bestScore = null;
-    (function walk(from, set, places) {
+    if (ranked.length > k) (function walk(from, set, places) {
         if (set.length === k) {
             var ok = set.filter(function (o) { return o.ok; }).length, sc = [ok, -places];
             if (!best || sc[0] > bestScore[0] || (sc[0] === bestScore[0] && sc[1] > bestScore[1])) { best = set.slice(); bestScore = sc; }
             return;
         }
         for (var i = from; i < ranked.length; i++) {
-            var far = true;
-            for (var j = 0; j < set.length; j++) if (headingGap(ranked[i].heading, set[j].heading) < LOOP_MIN_SEP) far = false;
-            if (far) { set.push(ranked[i]); walk(i + 1, set, places + i); set.pop(); }
+            if (apart(ranked[i], set, true)) { set.push(ranked[i]); walk(i + 1, set, places + i); set.pop(); }
         }
     })(0, [], 0);
-    return best || ranked.slice(0, k);
+    if (best) return best;
+    var out = [];
+    for (var i = 0; i < ranked.length && out.length < k; i++) if (apart(ranked[i], out, false)) out.push(ranked[i]);
+    return out;
 }
 
 // Up to k out-and-backs of about targetM metres from startKey, best first
@@ -1655,8 +1690,10 @@ async function generateOutAndBacks(graph, startKey, targetM, opts) {
             climbPerKm: tree.climb[n] / (2 * len) * 1000, pathShare: tree.path[n] / len, costPerM: tree.cost[n] / len });
     }
     // Nothing near the aim anywhere (an island, a short spit of path): the furthest node
-    // reachable, shown as a near miss with its true length (decision 5).
-    if (far >= 0 && !cands.length) {
+    // reachable, shown as a near miss with its true length (decision 5), unless that is
+    // under OAB_FALLBACK_MIN of what was asked (a pin on a 40 m path fragment): then
+    // nothing, and the app says none was found, as it does for loops.
+    if (far >= 0 && !cands.length && 2 * tree.len[far] >= OAB_FALLBACK_MIN * targetM) {
         var fb = (bearingDeg(sLat, sLon, graph.latQ[far] / 1e6, graph.lonQ[far] / 1e6) + 360) % 360;
         cands.push({ n: far, len: tree.len[far], heading: fb, junction: true, climbPerKm: 0, pathShare: 0, costPerM: 0 });
     }
@@ -1729,10 +1766,10 @@ async function generateOutAndBacks(graph, startKey, targetM, opts) {
                 if (!legs || !(legs.length > 0)) continue;
                 var o = measureOutAndBack(graph, legs, turnKey, targetM);
                 if (LOOP_CROSSING_CHECK) block(o.crossings);
-                // Directions are kept apart by the sector's nominal heading, as loops are: a
+                // Directions are kept apart by the sector's nominal heading, as loops are (a
                 // sector's best turnaround can sit anywhere in its 60°, and holding them to the
-                // middle would throw away the flattest ones. Two options a sector apart are
-                // still at least 60° apart on the ground.
+                // middle would throw away the flattest ones), and by how much ground they share
+                // (OAB_MAX_SHARED), since the second round's sectors overlap the first's.
                 o.heading = from + (si + 0.5) * 360 / OAB_SECTORS;
                 o.bearing = c.heading;
                 o.tries = t + 1;
@@ -2233,6 +2270,7 @@ if (typeof module !== "undefined" && module.exports) {
         generateOutAndBacks: generateOutAndBacks,
         compareOutAndBacks: compareOutAndBacks,
         pickOutAndBacks: pickOutAndBacks,
+        sharedShare: sharedShare,
         outAndBackPaths: outAndBackPaths,
         PATHLIKE_HIGHWAYS: PATHLIKE_HIGHWAYS,
         OAB_CLIMB_STEP: OAB_CLIMB_STEP,

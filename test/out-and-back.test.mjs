@@ -137,10 +137,34 @@ test("a crossing on the way out counts on the way back too", () => {
 
 test("no ground to reach N/2: the furthest it can go, as a near miss", async () => {
   const { g, centre } = grid(11); // 1 km square: an out-and-back of at most ~2 km
-  const out = await R.generateOutAndBacks(g, centre, 8000, { theta0: 0, pause: noPause });
+  const out = await R.generateOutAndBacks(g, centre, 6000, { theta0: 0, pause: noPause });
   assert.equal(out.length, 1);
   assert.equal(out[0].ok, false);
-  assert.ok(out[0].length > 1500 && out[0].length < 8000 * 0.97);
+  assert.ok(out[0].length > 1500 && out[0].length < 6000 * 0.97);
+});
+
+test("a pin on a scrap of path gives nothing, not a 40 m near miss", async () => {
+  const { g, centre } = grid(2); // four nodes, 100 m apart
+  assert.equal((await R.generateOutAndBacks(g, centre, 5000, { theta0: 0, pause: noPause })).length, 0);
+});
+
+test("a peninsula never gets two options down the same path", async () => {
+  // Only the north-east quarter exists, with a flat path along its diagonal and hills
+  // either side (arch review: it used to offer turnarounds 6° and 200 m apart).
+  const inQ = (p) => p[0] >= 0 && p[1] >= 0, diag = (p) => Math.abs(p[0] - p[1]) <= 1;
+  const { g, centre } = grid(81, {
+    skip: (a, b) => !inQ(a) || !inQ(b), path: (a, b) => diag(a) && diag(b),
+    elev: (di, dj) => (Math.abs(di - dj) <= 1 ? 0 : 5 * ((di + dj) % 2)),
+  });
+  for (const theta0 of [-15, 0, 15, 30]) {
+    const out = await R.generateOutAndBacks(g, centre, 5000, { theta0, pause: noPause });
+    assert.ok(out.length >= 1);
+    for (let a = 0; a < out.length; a++) for (let b = a + 1; b < out.length; b++) {
+      assert.ok(R.sharedShare(out[a], out[b]) <= 0.6, `theta0 ${theta0}: ${R.sharedShare(out[a], out[b]).toFixed(2)}`);
+      const d = R.haversine(...turnaround(out[a]).split(",").map(Number), ...turnaround(out[b]).split(",").map(Number));
+      assert.ok(d >= 0.15 * 2500, `theta0 ${theta0}: turnarounds ${Math.round(d)} m apart`);
+    }
+  }
 });
 
 test("stale: a pin moved mid-search drops the result", async () => {
