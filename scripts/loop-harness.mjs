@@ -15,10 +15,12 @@
 // <dir> holds a legwork-tiles checkout's manifest.json and tiles/<city>/*.json, e.g.
 //   git -C ~/legwork-tiles archive origin/master manifest.json tiles/perth | tar -x -C /tmp/t
 //
-// Gate (spec, success metrics, changed by Peter 2026-11-18): at least 18 of 20 starts per
-// city and target give 3 loops, at least 2 of them acceptable (the third may be a
-// labelled near miss). Acceptable = the generator's accept window: −3% to +10%
-// (decision 6), or ±10% with --set "LOOP_UNDER=0.10;LOOP_AIM_LO=-0.05".
+// Gate (spec, success metrics, changed by Peter 2026-11-19): at least 18 of 20 starts per
+// city and target give at least 2 clean loops within ±10% of the target. Clean = no
+// unprotected main-road crossing. Re-gated for the strict no-lights rule, which can leave
+// fewer than 3 loops by design. The 2026-11-18 gate (3 loops, 2+ in the −3%/+10% accept
+// window) is still shown as "old gate" for comparison.
+const goodLoop = (l) => l.crossings === 0 && Math.abs(l.deviation) <= 0.10;
 import fs from "node:fs";
 import path from "node:path";
 import vm from "node:vm";
@@ -126,7 +128,8 @@ for (const cityId of CITIES) for (const target of TARGETS) {
   const rs = results.filter((r) => r.city === cityId && r.target === target);
   const loops = rs.flatMap((r) => r.loops);
   const n = loops.length || 1;
-  const gate = rs.filter((r) => r.loops.length === 3 && r.loops.filter((l) => l.ok).length >= 2).length;
+  const gate = rs.filter((r) => r.loops.filter(goodLoop).length >= 2).length;
+  const oldGate = rs.filter((r) => r.loops.length === 3 && r.loops.filter((l) => l.ok).length >= 2).length;
   const threeOk = rs.filter((r) => r.loops.length === 3 && r.loops.every((l) => l.ok)).length;
   const onAim = loops.filter((l) => l.onAim).length, ok = loops.filter((l) => l.ok).length;
   const short = loops.filter((l) => l.deviation < 0).length;
@@ -138,12 +141,14 @@ for (const cityId of CITIES) for (const target of TARGETS) {
   if (!pass) gatePass = false;
   rows.push({
     city: cityId, km: target / 1000,
-    "gate: 3, 2+ ok": `${gate}/${rs.length}${pass ? "" : " ✗"}`,
+    "gate: 2+ clean ±10%": `${gate}/${rs.length}${pass ? "" : " ✗"}`,
+    "old gate": `${oldGate}/${rs.length}`,
     "3 ok": `${threeOk}/${rs.length}`,
     "on aim": pct(onAim / n), ok: pct(ok / n), "short of L": pct(short / n),
     "±5%": pct(loops.filter((l) => Math.abs(l.deviation) <= 0.05).length / n),
     "±10%": pct(loops.filter((l) => Math.abs(l.deviation) <= 0.10).length / n),
     "<3 loops": `${rs.filter((r) => r.loops.length < 3).length}/${rs.length}`,
+    "<2 loops": `${rs.filter((r) => r.loops.length < 2).length}/${rs.length}`,
     // Unprotected main-road crossings (routing.js loopUnprotectedCrossings): loops offered
     // that have one. 0 with the check on, unless every loop at a start had one.
     "x-ing": loops.filter((l) => l.crossings > 0).length,
@@ -167,16 +172,17 @@ console.log(`all: ${all.filter((l) => l.onAim).length}/${all.length} loops on ai
   `within ±5% ${pct(all.filter((l) => Math.abs(l.deviation) <= 0.05).length / all.length)}, ` +
   `±10% ${pct(all.filter((l) => Math.abs(l.deviation) <= 0.10).length / all.length)}, ` +
   `starts with fewer than 3 loops ${results.filter((r) => r.loops.length < 3).length}/${results.length}, ` +
+  `fewer than 2 ${results.filter((r) => r.loops.length < 2).length}/${results.length}, ` +
   `loops with an unprotected main-road crossing ${all.filter((l) => l.crossings > 0).length}, ` +
   `jitter retries ${all.filter((l) => l.jittered).length}, ` +
   `ms p50 ${Math.round(at(allMs, 0.5))} p90 ${Math.round(at(allMs, 0.9))} max ${Math.round(allMs[allMs.length - 1])}, ` +
   `wall ${wall.toFixed(1)} s (includes tile loading)`);
-const misses = results.filter((r) => r.loops.length < 3 || r.loops.filter((l) => l.ok).length < 2);
+const misses = results.filter((r) => r.loops.filter(goodLoop).length < 2);
 if (misses.length) {
-  console.log("\nstarts that miss the gate (fewer than 3 loops, or fewer than 2 acceptable):");
+  console.log("\nstarts that miss the gate (fewer than 2 clean loops within ±10%):");
   for (const r of misses) console.log(`  ${r.city} #${r.start} (${r.lat.toFixed(4)}, ${r.lon.toFixed(4)}) ${r.target / 1000} km: ` +
-    r.loops.map((l) => `${(l.length / 1000).toFixed(2)} km ov ${pct(l.overlap)}`).join(" | ") + (r.loops.length < 3 ? ` (${r.loops.length} found)` : ""));
+    r.loops.map((l) => `${(l.length / 1000).toFixed(2)} km ov ${pct(l.overlap)}${l.crossings ? " x" + l.crossings : ""}`).join(" | ") + (r.loops.length < 3 ? ` (${r.loops.length} found)` : ""));
 }
 if (args.json) fs.writeFileSync(args.json, JSON.stringify(results, null, 1));
-console.log(`\ngate (≥${GATE_MIN}/${STARTS} starts per city and target give 3 loops, 2+ acceptable): ${gatePass ? "PASS" : "MISS"}`);
+console.log(`\ngate (≥${GATE_MIN}/${STARTS} starts per city and target give 2+ clean loops within ±10%): ${gatePass ? "PASS" : "MISS"}`);
 process.exit(gatePass ? 0 : 1);

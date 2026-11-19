@@ -1052,7 +1052,10 @@ var MAIN_ROADS = { primary: 1, primary_link: 1, trunk: 1, trunk_link: 1 };
 // loop (the other carriageway of a dual road, reached over a median path). Lights on a
 // side street near the crossing never count. seq/at: the loop's nodes and n's place.
 function crossingProtected(graph, n, seq, at) {
-    function safe(m) { var a = graph.attrsOf(m); return !!(a && (a.trafficSignal || a.crossingMarked)); }
+    // Lights, or a marked crossing that isn't crossing=uncontrolled (no lights: Peter,
+    // 2026-11-19). Baked tiles built before crossingUncontrolled existed fold
+    // uncontrolled into crossingMarked, so there it still counts until the next build.
+    function safe(m) { var a = graph.attrsOf(m); return !!(a && (a.trafficSignal || (a.crossingMarked && !a.crossingUncontrolled))); }
     var lat = graph.latQ[n] / 1e6, lon = graph.lonQ[n] / 1e6;
     function onRoad(m) { for (var x = graph.first[m]; x >= 0; x = graph.eNext[x]) if (graph.eMain[x]) return true; return false; }
     function near(m) { return haversine(lat, lon, graph.latQ[m] / 1e6, graph.lonQ[m] / 1e6) <= LOOP_CROSSING_NEAR; }
@@ -1575,6 +1578,9 @@ function nodeAttrsFromTags(tags) {
         var c = tags.crossing || "";
         if (c === "traffic_signals" || c === "marked" || c === "zebra" || c === "uncontrolled") {
             attrs.crossingMarked = true; any = true;
+            // No lights and (unless tagged a zebra) maybe no paint: still a marked crossing
+            // for the routing nudge, but it never protects a loop's main-road crossing.
+            if (c === "uncontrolled" && tags.crossing_ref !== "zebra" && tags["crossing:markings"] !== "zebra") attrs.crossingUncontrolled = true;
         } else {
             attrs.crossingUnmarked = true; any = true;
         }

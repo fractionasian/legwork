@@ -77,6 +77,9 @@ function nodeAttrsFromTags(tags) {
         const c = tags.crossing || "";
         if (c === "traffic_signals" || c === "marked" || c === "zebra" || c === "uncontrolled") {
             attrs.crossingMarked = true; any = true;
+            // No lights and (unless tagged a zebra) maybe no paint: still a marked crossing
+            // for the routing nudge, but it never protects a loop's main-road crossing.
+            if (c === "uncontrolled" && tags.crossing_ref !== "zebra" && tags["crossing:markings"] !== "zebra") attrs.crossingUncontrolled = true;
         } else {
             attrs.crossingUnmarked = true; any = true;
         }

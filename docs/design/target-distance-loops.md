@@ -30,9 +30,13 @@ loop will sometimes be a dud.
 - A new routing engine. The loops come from the same router as hand-drawn ones.
 
 **Success metrics:** on 20 test starts in each of 4 cities, at each distance, at
-least 18 give three loops, at least two of them inside the accept window (−3% to
-+10% of target, decision 6). The third may be a near miss shown with its true length
-(decision 5). No loop should run the same street out and back for more than a short
+least 18 give at least two clean loops within ±10% of the target. Clean = no
+unprotected main-road crossing (see "Main-road crossings"). *(Changed 2026-11-19 by
+Peter: the strict no-lights rule drops crossing loops and never pads with them, so
+fewer than three is by design. The previous gate, still shown by the harness as
+"old gate", was: at least 18 give three loops, at least two of them inside the
+accept window, −3% to +10% of target, decision 6.)* A near miss is shown with its
+true length (decision 5). No loop should run the same street out and back for more than a short
 stretch. You try it from home and would actually run one. *(Changed 2026-11-18 from
 "three loops within 10%", after two tuning rounds showed the third heading is the one
 that misses: Peter, "Yes, change metric". The 15% overlap measure is unchanged.)*
@@ -372,8 +376,13 @@ road (or its `_link`) except at traffic lights or a marked crossing.
 - **Known misses** (the CLAUDE.md invariant points here): only out-edges are read, so a bike-closed roundabout direction
   can hide a heading. A crossing tagged only on a `footway=crossing` way, not on a
   node, reads as unprotected. `crossing=uncontrolled` counts as marked
-  (`nodeAttrsFromTags`), though some mappers use it for refuges with no markings:
-  Peter to confirm. A crossing is judged on the loop the generator measured; tiles
+  for the routing nudge, but **never protects** a loop's crossing (Peter, 2026-11-19:
+  no lights), unless tagged a zebra (`crossing_ref` or `crossing:markings`). It is
+  flagged `crossingUncontrolled` in `nodeAttrsFromTags` (routing.js and
+  scripts/build-tiles.js). Baked tiles built before that flag fold uncontrolled into
+  `crossingMarked`, so in the pre-baked cities it still protects until the first
+  weekly tile build after merge (live Overpass areas have it at once). The harness
+  below runs on those older tiles, so it does not yet show this change. A crossing is judged on the loop the generator measured; tiles
   that stream in before the redraw could change the drawn route (as for length).
   Baked tiles carry node attrs (Perth: 3,172 signals and
   10,332 marked crossings in 92 tiles), so this is not a cold-cache problem.
@@ -387,22 +396,31 @@ road (or its `_link`) except at traffic lights or a marked crossing.
   crossings nearby; the nearest lights or marked crossing was 83 m or more away.
 
 **Harness** (tiles b6173198, seed 1, 20 starts × 4 cities × 5 and 10 km, run;
-final detector):
+final detector, 2026-11-19):
 
-| | check off | on, no extra round* | on (shipped) |
-|---|---|---|---|
-| loops offered with an unprotected crossing | 202/474 (43%) | 4 | 2 |
-| loops within ±5% | 74% | 67% | 67% |
-| loops within ±10% | 93% | 86% | 86% |
-| starts with fewer than 3 loops | 2/160 | 26/160 | 10/160 |
-| gate (18/20 per city and target) | 8/8 | 4/8 | 5/8 (misses Perth 5 and 10 km, Melbourne 10 km) |
-| ms p50 / p90 (Mac) | 1111 / 2749 | 1301 / 3011 | 1458 / 4107 |
+| | check off | on (shipped) |
+|---|---|---|
+| loops offered with an unprotected crossing | 202/474 (43%) | 2 (starts where every loop crossed) |
+| loops within ±5% | 74% | 67% |
+| loops within ±10% | 93% | 86% |
+| starts with fewer than 3 loops | 2/160 | 10/160 |
+| starts with fewer than 2 loops | — | 9/160 |
+| old gate (3 loops, 2+ in −3%/+10%) | 8/8 | 4/8 |
+| ms p50 / p90 / max (Mac) | 1111 / 2749 / 8131 | 1494 / 4176 / 10044 |
 
-\* measured with the first detector (pass-through and plain along-and-off only).
+Without the extra round (first detector), 26 of 160 starts gave fewer than 3 loops.
 
-Perth 10 km is the worst case: gate 10/20, 5 starts with fewer than 3 loops, max
-8.5 s on a Mac (phones slower, not measured).
-Whether to relax the gate for this rule, or loosen the rule, is Peter's call.
+**New gate (2+ clean loops within ±10%, 18/20): 6 of 8 pass.**
+
+| | 5 km | 10 km |
+|---|---|---|
+| Perth | 18/20 | **11/20 ✗** |
+| Melbourne | 19/20 | **17/20 ✗** |
+| Sydney | 18/20 | 18/20 |
+| Brisbane | 20/20 | 18/20 |
+
+Perth 10 km is the worst case: 5 starts give a single loop, two of them crossing.
+Phones are slower than these Mac times and have not been measured.
 
 ### Harness results
 

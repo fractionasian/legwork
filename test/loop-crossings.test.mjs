@@ -196,3 +196,17 @@ test("a segment shared by a footway and a main road is marked main whichever loa
   t.g.markMain(t.at.A, t.at.B);
   for (let e = 0; e < t.g.nEdges; e++) assert.equal(t.g.eMain[e], 1);
 });
+
+test("crossing=uncontrolled has no lights and does not protect; a zebra tagged that way does", () => {
+  const unc = R.nodeAttrsFromTags({ highway: "crossing", crossing: "uncontrolled" });
+  assert.equal(unc.crossingMarked, true, "routing nudge unchanged");
+  assert.equal(unc.crossingUncontrolled, true);
+  const t = crossroads();
+  t.g.setAttrs(t.key("X"), unc);
+  assert.deepEqual(R.loopUnprotectedCrossings(t.g, loopThrough(t, ["N", "X", "S"])), [t.key("X")]);
+  const zebra = R.nodeAttrsFromTags({ highway: "crossing", crossing: "uncontrolled", crossing_ref: "zebra" });
+  assert.equal(zebra.crossingUncontrolled, undefined);
+  const z = crossroads();
+  z.g.setAttrs(z.key("X"), zebra);
+  assert.deepEqual(R.loopUnprotectedCrossings(z.g, loopThrough(z, ["N", "X", "S"])), []);
+});
