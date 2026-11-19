@@ -39,8 +39,9 @@ test("EVENT_NAMES is the closed allowlist", () => {
     [...EVENT_NAMES].sort(),
     // city-resolved / city-unknown joined when those two moved off Umami Cloud.
     // route-reverse measures whether the toolbar's reverse button is used.
-    ["city-resolved", "city-unknown", "pin-drop", "route-built", "route-export",
-     "route-reverse", "route-save", "route-share"],
+    // loop-generated counts the "Loop ▸" chip's results.
+    ["city-resolved", "city-unknown", "loop-generated", "pin-drop", "route-built",
+     "route-export", "route-reverse", "route-save", "route-share"],
   );
 });
 
@@ -199,6 +200,23 @@ test("route-reverse is a known event and carries no props", () => {
   const r = validateEvent({ name: "route-reverse", props: { anything: "x" } });
   assert.equal(r.ok, true);
   assert.deepEqual(r.props, {});
+});
+
+test("loop-generated takes a preset bucket and a result, both enums", () => {
+  for (const bucket of ["3", "5", "8", "10", "15", "21", "other"]) {
+    for (const result of ["ok", "near_miss", "failed"]) {
+      const r = validateEvent({ name: "loop-generated", props: { bucket, result } });
+      assert.equal(r.ok, true, bucket + "/" + result);
+      assert.deepEqual(r.props, { bucket, result });
+    }
+  }
+  // A raw distance must never get in: not as the bucket, and not as an extra prop.
+  for (const bucket of ["12.5", "7", 5, "5km"]) {
+    assert.equal(validateEvent({ name: "loop-generated", props: { bucket, result: "ok" } }).ok, false, String(bucket));
+  }
+  assert.equal(validateEvent({ name: "loop-generated", props: { bucket: "5", result: "great" } }).ok, false);
+  const extra = validateEvent({ name: "loop-generated", props: { bucket: "5", result: "ok", metres: 5120, lat: -31.9 } });
+  assert.deepEqual(extra.props, { bucket: "5", result: "ok" });
 });
 
 test("route-built basemap is an enum and soft", () => {

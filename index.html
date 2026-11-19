@@ -68,6 +68,39 @@
                      title tooltip — tooltips are invisible on touch. -->
                 <button id="dm-shorten" role="menuitem" title="Stores this route on the server so the link can be short">Short link (saves to server)</button>
             </div>
+            <!-- "Loop ▸": a loop of a chosen length from a single pin
+                 (docs/design/target-distance-loops.md). Hangs under the distance
+                 pill, never a floating button; shown only with exactly one pin. -->
+            <div class="loop-ui" id="loop-ui">
+                <button class="loop-chip hidden" id="loop-chip" type="button"
+                        aria-expanded="false" aria-controls="loop-presets">Loop &#9656;</button>
+                <div class="loop-panel hidden" id="loop-presets" role="group" aria-labelledby="loop-presets-title">
+                    <div class="loop-panel-title" id="loop-presets-title">Loop distance, km</div>
+                    <div class="loop-presets-grid">
+                        <button type="button" data-km="3">3</button>
+                        <button type="button" data-km="5">5</button>
+                        <button type="button" data-km="8">8</button>
+                        <button type="button" data-km="10">10</button>
+                        <button type="button" data-km="15">15</button>
+                        <button type="button" data-km="21">21</button>
+                        <button type="button" id="loop-other-btn" aria-expanded="false" aria-controls="loop-other-form">Other</button>
+                    </div>
+                    <form class="loop-other hidden" id="loop-other-form" novalidate>
+                        <input id="loop-other" type="text" inputmode="decimal" autocomplete="off"
+                               placeholder="e.g. 12.5" aria-label="Loop distance in km" aria-describedby="loop-note" />
+                        <button type="submit">Go</button>
+                    </form>
+                    <p class="loop-note" id="loop-note" aria-live="polite"></p>
+                </div>
+                <div class="loop-panel hidden" id="loop-flipper" role="group" aria-label="Generated loops">
+                    <p class="loop-label" id="loop-label" aria-live="polite"></p>
+                    <div class="loop-actions">
+                        <button type="button" id="loop-next" aria-label="Show the next loop"></button>
+                        <button type="button" id="loop-keep" class="loop-keep">Keep</button>
+                        <button type="button" id="loop-discard">Discard</button>
+                    </div>
+                </div>
+            </div>
         </div>
     </nav>
 
@@ -120,7 +153,7 @@
             <div class="menu-divider"></div>
             <details class="menu-privacy">
                 <summary class="menu-item">What Legwork counts</summary>
-                <p>Legwork counts how often routes are built, exported, saved, shared and reversed. For each route it notes the rough length (0–5, 5–10, 10–20 or 20+ km), the mode, run or bike, the map layer, and the city or suburb it starts in. Pins are counted in squares about 500 m wide.</p>
+                <p>Legwork counts how often routes are built, exported, saved, shared and reversed, and how often a loop is made from one pin. For each route it notes the rough length (0–5, 5–10, 10–20 or 20+ km), the mode, run or bike, the map layer, and the city or suburb it starts in. For a loop made from one pin it notes which distance button you pressed (or "other" for a typed one, never the number) and whether a loop was found. Pins are counted in squares about 500 m wide.</p>
                 <p>It does not use an account, cookies or a device ID. Nothing it stores includes your IP address, your route's shape or an exact location. The only place detail kept from your connection is your country.</p>
             </details>
             <div class="menu-divider"></div>
@@ -160,12 +193,14 @@
     <div class="modal-overlay" id="welcome-modal">
         <div class="modal">
             <h2><svg class="mark" viewBox="64 40 380 420" aria-hidden="true"><path d="M168 110 L168 352 Q168 394 210 394 L384 394" fill="none" stroke="#3ddc97" stroke-width="56" stroke-linecap="round" stroke-linejoin="round"/><circle cx="168" cy="110" r="46" fill="#4aa3ff"/><circle cx="384" cy="394" r="46" fill="#3ddc97"/></svg> Welcome to Legwork</h2>
-            <!-- Only the two things you can't discover by poking the map.
+            <!-- Only the things you can't discover by poking the map (the loop
+                 chip appears only once a pin is down, so first users missed it).
                  Everything else (mode cycling, undo, gradient colours) is
                  visible in the UI or under Tips & shortcuts in the menu. -->
             <ul>
                 <li><strong>Tap the map</strong> to add waypoints — routes follow footpaths automatically</li>
                 <li><strong>Drag the green circles</strong> between waypoints to insert a new one</li>
+                <li><strong>Drop one pin, then tap Loop &#9656;</strong> for a loop of a set distance</li>
             </ul>
             <button id="welcome-dismiss">Start planning</button>
         </div>

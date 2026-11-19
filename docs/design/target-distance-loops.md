@@ -1,6 +1,6 @@
 ---
 status: approved — Peter accepted all five Layer-1 defaults and the Assumed list, 2026-11-18
-next: PR 1 open as fractionasian/legwork#57, gate passing 8/8 after the review fix (round 6); then PR 2 (UI)
+next: PR 1 merged (#57). PR 2 (UI) open on branch claude/loop-chip-ui, not merged; then PR 3 (out-and-back)
 created: 2026-11-18
 trigger: Three Routes (iOS) OzBargain freebie, ozbargain.com.au/node/983771, 2026-11-17
 ---
@@ -30,9 +30,13 @@ loop will sometimes be a dud.
 - A new routing engine. The loops come from the same router as hand-drawn ones.
 
 **Success metrics:** on 20 test starts in each of 4 cities, at each distance, at
-least 18 give three loops, at least two of them inside the accept window (−3% to
-+10% of target, decision 6). The third may be a near miss shown with its true length
-(decision 5). No loop should run the same street out and back for more than a short
+least 18 give at least two clean loops within ±10% of the target. Clean = no
+unprotected main-road crossing (see "Main-road crossings"). *(Changed 2026-11-19 by
+Peter: the strict no-lights rule drops crossing loops and never pads with them, so
+fewer than three is by design. The previous gate, still shown by the harness as
+"old gate", was: at least 18 give three loops, at least two of them inside the
+accept window, −3% to +10% of target, decision 6.)* A near miss is shown with its
+true length (decision 5). No loop should run the same street out and back for more than a short
 stretch. You try it from home and would actually run one. *(Changed 2026-11-18 from
 "three loops within 10%", after two tuning rounds showed the third heading is the one
 that misses: Peter, "Yes, change metric". The 15% overlap measure is unchanged.)*
@@ -93,12 +97,25 @@ not settled.*
    One-way isn't offered. An out-and-back is two ordinary pins, the start and a
    turnaround. One search from the start gives the true route distance to every
    node, so the turnaround sits at N/2 exactly, with no radius guessing. "Nice"
-   needs no new data: rank turnarounds by the router's own cost per metre (paths
-   and parks over roads, fewer lights, gentler climbs), prefer a junction or park
-   to a dead end, and keep three heading in different directions. The overlap
-   rule doesn't apply, since retracing is the point.
+   needs no new data. *(Ranking updated by Peter, 2026-11-19: "fairly flat, with a
+   priority for scenic".)* Rank the options, flattest first:
+   1. **Least climb per km.** An out-and-back ends where it starts, so the climb
+      equals the descent and the total climb is the one number to rank on. Heights
+      are already in every pre-baked city; with no heights, skip to the next key.
+   2. **Then most of its length on paths** (footway, path, cycleway, pedestrian,
+      track, and named trails): the stand-in for scenic. Legwork has no scenery data.
+      Real scenery (water, parks, coast) would need park and water outlines in the
+      tiles, a tile-build change left for later.
+   3. **Then the router's own cost per metre**, as before.
+
+   Prefer a junction or park to a dead end, and keep three heading in different
+   directions. Same rules as loops: no unprotected main-road crossing (an
+   out-and-back crosses each one twice), shown only clean ones, and no slider or
+   setting for flat or scenic (preferences stay hidden). The overlap rule doesn't
+   apply, since retracing is the point.
    Done when: in out-and-back mode, one pin plus 5 km gives three options whose
-   true length is within the decision-6 window, and each drags like any other pin.
+   true length is within the decision-6 window, sorted as above, and each drags like
+   any other pin.
 
 **Assumed (say if wrong):**
 - Run or bike follows whatever mode is already selected, and so do scenic,
@@ -162,7 +179,7 @@ pressing Undo mid-generation drops the stale results.
 - Chip renders only when `liveWaypoints().length === 1`. It hides on 0 or ≥ 2
   pins and while generating, when it turns into a spinner.
 - Preset row: plain `<button>`s, no `<select>`. "Other" opens a numeric
-  `<input inputmode="decimal">`, clamped 1–42 km (10 km outside tiled cities).
+  `<input inputmode="decimal">`, clamped 1–32 km (10 km outside tiled cities; 42 km until 2026-11-19).
 - Candidate view: the selected candidate is drawn via the normal pipeline. The
   "1 of 3 ›" control swaps the waypoint set. "Keep" leaves the pins in place
   and dismisses the control. Undo after Keep removes the generated pins but
@@ -173,7 +190,7 @@ pressing Undo mid-generation drops the stale results.
 
 ### Telemetry
 
-One `/v1/event` enum: `loop_generated` with `bucket ∈ {3,5,8,10,15,21,other}`
+One `/v1/event` enum: `loop-generated` (hyphen, like every other event; first written here as `loop_generated`) with `bucket ∈ {3,5,8,10,15,21,other}`
 and `result ∈ {ok, near_miss, failed}`. No raw distance (privacy invariant),
 location at the existing 0.005° grid only.
 
@@ -280,6 +297,147 @@ location at the existing 0.005° grid only.
   to candidates `{ waypoints: [S, corners…], length, deviation, error, ok, onAim,
   overlap, heading, tries, … }` sorted by error (with `.headingsTried`), or `null`
   if `isStale()` turned true at any pause.
+
+### As built in PR 2 (differences from the UI above)
+
+- **Under the pill, not beside it.** The bar is already full at 375 px, so the chip
+  hangs under the distance pill like its dropdown. While it or a panel shows, the
+  layer switcher and the info banner slide down by its height (`--loop-ui-h`, kept
+  current by a ResizeObserver). Decision 1's Done-when still holds: no menu to open.
+  *Needs Peter's nod: Layer 1 says "beside".*
+- **Shown only when the lone pin is the only pin**, not on `liveWaypoints().length
+  === 1`: with a failed pin also there, the loop would be numbered around it.
+  Disabled while that pin is still snapping.
+- **Presets in km whatever the unit setting**, and the flipper shows km too, so a
+  miles user never reads "3.2 mi — … 8 km loop". *Open: mile presets for miles users.*
+- **Outside the pre-baked cities 15 and 21 are disabled**, with the note "Up to 10 km
+  outside the cities Legwork has pre-loaded." A typed distance over the cap is clamped
+  and generated, with a banner saying so.
+- **Flipper:** "5.1 km loop", "1 of 3 ›", Keep, and **Discard** (not in the spec:
+  without it a phone user's only way out was Keep, then delete pins). "1 of 1" hides
+  the next button. The map fits every option once (and zooms in if they'd be a
+  speck), so flipping doesn't move it.
+- **Near-miss copy:** decision 5's sentence ("7.2 km — couldn't find a closer 8 km
+  loop here") only when *no* option is in the accept window. A near miss among good
+  ones reads "4.9 km loop (you asked for 5.3 km)", because the sentence would be false
+  a tap after showing a good one. Judged on the length the pipeline drew.
+- **Failure** keeps the presets open with "No loop found from here — try moving the
+  pin onto a path." in them, so a shorter distance is one tap away. (ux suggested
+  different copy, since the pin is already on a path by then; kept Peter's.)
+- **Cancelling:** tapping the busy chip ("Finding loops ✕", shown only after 300 ms so
+  fast loops don't flash a spinner), Esc, or Cmd/Ctrl+Z. The stale guard
+  (`loopSnapshotStale`) also drops results on a new or rebuilt graph, a profile or
+  mode change, a pin added, the start replaced (Clear → Undo) or moved.
+- **Undo:** Cmd/Ctrl+Z discards while choosing, and right after Keep takes the whole
+  loop off in one step. The start pin always stays. Any other edit while choosing
+  (drag, tap-delete, a map tap, mode cycle) settles the loop as kept, but not for
+  that one-step Undo.
+- **After `/first-users`:** Keep shows a toast ("Loop kept. Drag any pin to change
+  it."), the welcome card gained "Drop one pin, then tap Loop ▸ for a loop of a set
+  distance", a search dropped by a map tap says "Loop search stopped: the pins
+  changed.", and a clamped typed distance is named in the flipper label ("The longest
+  loop here is 32 km.") rather than a banner the tile loader overwrote.
+- **Generated pins skip `addWaypointAt`:** no `pin-drop` event, one redraw for all.
+  Up to 6 pins.
+- **Mode is forced to loop** on generation.
+- **More ground before long loops:** in a baked city, tiles out to `loopGroundKm`
+  (≥ 5 km; 9.1 km at 21 km, 14.7 km at 42 km); elsewhere one live fetch of
+  `loopLiveRadiusM` (≥ 2 km, since a zoom-16 first pin loads only 1 km). A failed
+  extra download isn't fatal: it generates on what loaded.
+- **Telemetry:** one `loop-generated` per finished generation (including a thrown
+  one, as `failed`), never on cancel. A typed distance is `other` even if it equals
+  a preset.
+- **Measured on a Mac only** (Chrome, Perth start near Kings Park): 5 km in 88 ms,
+  21 km in 1.1 s including the extra tiles, JS heap 64 → 163 MB with that ground
+  loaded.
+- **Phone (Peter's iPhone, Safari, 2026-11-19, stopwatch):** 10 km about 6 s, 21 km "a
+  little longer, honestly not bad", 42 km about 40 s. Chrome with the CPU slowed 6×
+  matches it (38–41 s at 42 km). **Other is capped at 32 km** (Peter, 2026-11-19): 32 km
+  covers a marathon block's longest run, and 42 km gave a 40 s wait for one loop
+  crossing ~15 main roads. The Web Worker question from PR 1 stays open.
+
+### Main-road crossings (PR 2, Peter 2026-11-19)
+
+**Decision (Peter, "No lights"):** a generated loop never crosses a primary or trunk
+road (or its `_link`) except at traffic lights or a marked crossing.
+
+- **Filter, not a weight.** `loopUnprotectedCrossings` (routing.js) checks each
+  candidate. The router and its costs are unchanged, so drawn = measured still holds.
+  A loop with a crossing ranks behind every clean one, and is dropped while any
+  clean loop is left, even if fewer than 3 remain. If none is clean, the best one
+  alone is shown with "It crosses a main road with no lights or marked crossing".
+- **Road class is real, not inferred.** Each edge carries `eMain` (1 byte),
+  set from the way's `highway` in `applyPaths`. That needs no tile format change and
+  no tile rebuild, because tiles already carry `highway`. It is never read by the
+  router.
+- **What counts as a crossing:**
+  - Straight over: the loop passes through a node with two or more main-road edges,
+    arriving and leaving off the road, on different sides.
+  - Along and off: the loop joins the road on one side, follows it, and leaves on
+    the other. The brief said "passes through" only. This second shape closes the
+    gap where a loop steps onto a centre-line road and off the far side. The side is
+    carried along the run: a U-turn swaps left and right without crossing, and a
+    turn of 35°+ at a junction of main roads toward the far side crosses the road it
+    was on. Each is marked where it crosses, not where the loop joined. Lights
+    anywhere on the run protect it.
+- **What counts as protected:** `trafficSignal` or `crossingMarked` (zebra, marked,
+  signals, uncontrolled) on the node, within 30 m along the main road, or on a
+  main-road node within 30 m along the loop (the other half of a dual carriageway).
+  Lights on a nearby side street, or an unmarked crossing tag, do not protect.
+- **On screen** (only when every loop found crosses): an amber line under the length,
+  "Crosses a main road without lights. Shown on the map.", and a ring at each
+  crossing (non-interactive, cleared on Keep, Discard and flip). The km number stays
+  amber for length only.
+- **A shared segment** (a footway and a trunk on the same two nodes) is marked main
+  whichever way loaded first (`markMain`).
+- **Known misses** (the CLAUDE.md invariant points here): only out-edges are read, so a bike-closed roundabout direction
+  can hide a heading. A crossing tagged only on a `footway=crossing` way, not on a
+  node, reads as unprotected. `crossing=uncontrolled` counts as marked
+  for the routing nudge, but **never protects** a loop's crossing (Peter, 2026-11-19:
+  no lights), unless tagged a zebra (`crossing_ref` or `crossing:markings`). It is
+  flagged `crossingUncontrolled` in `nodeAttrsFromTags` (routing.js and
+  scripts/build-tiles.js). Baked tiles built before that flag fold uncontrolled into
+  `crossingMarked`, so in the pre-baked cities it still protects until the first
+  weekly tile build after merge (live Overpass areas have it at once). The harness
+  below runs on those older tiles, so it does not yet show this change. A crossing is judged on the loop the generator measured; tiles
+  that stream in before the redraw could change the drawn route (as for length).
+  Baked tiles carry node attrs (Perth: 3,172 signals and
+  10,332 marked crossings in 92 tiles), so this is not a cold-cache problem.
+- **Extra round** (`LOOP_CROSSING_EXTRA`): if crossings dropped a loop and the clean
+  ones can't fill 3, or give fewer than 2 in the accept window, 6 more headings are
+  tried halfway between the first 6. A crossing loop also triggers the ±20° jitter
+  retry that overlap and length already did. Neither was in the brief.
+- **Real case:** at Nedlands (start -31.98438, 115.80272, 5 km, run), the Stirling
+  Highway node -31.98083, 115.79371 is flagged with the check off and never offered
+  with it on. All 5 nodes flagged there were checked by hand. Each had only unmarked
+  crossings nearby; the nearest lights or marked crossing was 83 m or more away.
+
+**Harness** (tiles b6173198, seed 1, 20 starts × 4 cities × 5 and 10 km, run;
+final detector, 2026-11-19):
+
+| | check off | on (shipped) |
+|---|---|---|
+| loops offered with an unprotected crossing | 202/474 (43%) | 2 (starts where every loop crossed) |
+| loops within ±5% | 74% | 67% |
+| loops within ±10% | 93% | 86% |
+| starts with fewer than 3 loops | 2/160 | 10/160 |
+| starts with fewer than 2 loops | — | 9/160 |
+| old gate (3 loops, 2+ in −3%/+10%) | 8/8 | 4/8 |
+| ms p50 / p90 / max (Mac) | 1111 / 2749 / 8131 | 1494 / 4176 / 10044 |
+
+Without the extra round (first detector), 26 of 160 starts gave fewer than 3 loops.
+
+**New gate (2+ clean loops within ±10%, 18/20): 6 of 8 pass.**
+
+| | 5 km | 10 km |
+|---|---|---|
+| Perth | 18/20 | **11/20 ✗** |
+| Melbourne | 19/20 | **17/20 ✗** |
+| Sydney | 18/20 | 18/20 |
+| Brisbane | 20/20 | 18/20 |
+
+Perth 10 km is the worst case: 5 starts give a single loop, two of them crossing.
+Phones are slower than these Mac times and have not been measured.
 
 ### Harness results
 
@@ -493,6 +651,24 @@ phone slowdown. Next: merge #57, then PR 2 (UI). PR 2 must:
 - load more than a first pin's ~3 tiles before offering 15 and 21 km;
 - feed pins without counting each one as a `pin-drop`, and expect up to 6 pins;
 - take the shown length from the pipeline once a candidate is drawn.
+
+### Handover (PR 2, 2026-11-18)
+
+PR 2 is on branch `claude/loop-chip-ui` (worker enum 879a42e, client bfa4830,
+review fixes a732788, first-users fixes after it), not merged. The `verifier-legwork` drive passed at 390 and
+375 px: one pin → chip → 5 km → flip three → Keep → drag a pin (rerouted 5.2 →
+5.6 km) → export GPX (217 track points), plus cancel, stale, Undo, near-miss and
+failure paths; generated pins sent no `pin-drop`. `/review-pass`: sec clean; arch,
+ux and scope found nothing blocking, fixes in a732788. `/first-users`: all five
+personas reached the goal with no blockers; four in-PR frictions fixed, the rest
+listed as later candidates in `docs/first-users/2026-11-18-loop-chip.md`. Deploy order: Worker first (the event
+is additive; an old Worker 400s the beacon, which the client ignores), then merge.
+For Peter: the chip sits under the pill rather than beside it; Discard was added;
+"Loop ▸" next to the "↻ Loop" mode button may confuse (ux), but it's your label;
+4 of 5 first users read "1 of 3 ›" as a pager rather than "next loop" (decision 3);
+mile presets;
+overlap gating is still open (see Success metrics). Next: PR 3, out-and-back
+(decision 7).
 
 To reproduce: export the tiles with `git -C ~/legwork-tiles archive origin/master
 manifest.json tiles/perth tiles/melbourne tiles/sydney tiles/brisbane | tar -x -C

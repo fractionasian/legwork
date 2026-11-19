@@ -154,14 +154,16 @@ async function loadTilesFromList(cityId, manifestVersion, tiles, opts) {
     return { fetched: loaded, cached: cachedCount };
 }
 
-async function loadTilesForLocation(lat, lon) {
+// radiusKm (optional, default 5): the loop chip asks for more ground before a long
+// loop (loopGroundKm in routing.js). Tiles already in the graph cost nothing.
+async function loadTilesForLocation(lat, lon, radiusKm) {
     var manifest = await fetchManifest();
     if (!manifest) return false;
 
     var match = findCityForLocation(manifest, lat, lon);
     if (!match) return false;
 
-    var tiles = tilesInRadius(match.city, lat, lon, 5);
+    var tiles = tilesInRadius(match.city, lat, lon, radiusKm || 5);
     if (tiles.length === 0) return false;
 
     var result = await loadTilesFromList(match.id, manifest.version, tiles, { progress: true });
@@ -422,9 +424,11 @@ async function loadGraphFromWorker(lat, lon, radius) {
 // the gap-fill passes one that trips when a newer route supersedes it. A stale
 // load stops retrying and leaves the banner to whoever owns it now; otherwise
 // its "retry N/3" lands on top of the newer, already-drawn route.
+// opts.radius (optional, metres): overrides the zoom-based radius; the loop chip
+// passes loopLiveRadiusM so a generated loop has the ground it needs.
 async function loadPaths(lat, lon, opts) {
     var isStale = (opts && opts.isStale) || function () { return false; };
-    var radius = radiusFromZoom();
+    var radius = (opts && opts.radius) || radiusFromZoom();
     // paths: → paths2: added node tags; paths2: → paths3: added
     // track/bridleway/byway to the query; paths3: → paths4: rounded
     // coordinates to the tiles' 5 dp so live and pre-baked graphs join.
@@ -618,13 +622,19 @@ function applyPaths(geojson, opts) {
         var hw = props.highway || "";
         // Combine base road weight + way-level preferences (P1 named trails, P5 soft surfaces).
         var baseWeight = (profile.roadWeight[hw] || profile.defaultWeight) * profile.wayPref(hw, props.surface || "", props.name || "");
+        var main = MAIN_ROADS[hw] ? 1 : 0; // for the loop crossing check; never weighs the route
         var elev = props.elev; // metres per vertex — only on tiles baked with elevation
         for (var c = 1; c < coords.length; c++) {
             var lat1 = coords[c-1][1], lon1 = coords[c-1][0];
             var lat2 = coords[c][1], lon2 = coords[c][0];
             var u = g.node(quantise6(lat1), quantise6(lon1)), v = g.node(quantise6(lat2), quantise6(lon2));
             if (u === v) continue; // two coords rounding to the same node = zero-length self-edge
-            if (g.connected(u, v)) continue; // this segment is already in the graph (either direction)
+            if (g.connected(u, v)) {
+                // Already in the graph (either direction). If this way is a main road, the
+                // segment is one whichever way loaded first: mark it, cost unchanged.
+                if (main) g.markMain(u, v);
+                continue;
+            }
             // Node-level preferences (P2 traffic signals, P3 marked crossings, P4 barriers)
             // apply to both endpoints; the worst penalty / best bonus dominates via product.
             var nodeMult = profile.nodePref(g.attrsOf(u)) * profile.nodePref(g.attrsOf(v));
@@ -636,8 +646,8 @@ function applyPaths(geojson, opts) {
             // ends of a vertex get the same height from every way and tile, so a
             // junction never disagrees with itself.
             var rise = elev ? elev[c] - elev[c-1] : 0;
-            g.addEdge(u, v, cost.fwd, rise > 0 ? rise : 0);
-            if (cost.rev !== null) g.addEdge(v, u, cost.rev, rise < 0 ? -rise : 0);
+            g.addEdge(u, v, cost.fwd, rise > 0 ? rise : 0, main);
+            if (cost.rev !== null) g.addEdge(v, u, cost.rev, rise < 0 ? -rise : 0, main);
         }
     }
 

@@ -481,6 +481,7 @@ function PackedGraph() {
     this.eNext = new Int32Array(this.edgeCap);
     this.eCost = new Float64Array(this.edgeCap);
     this.eUp = new Float64Array(this.edgeCap);
+    this.eMain = new Uint8Array(this.edgeCap);          // 1 = on a main road (MAIN_ROADS)
     this.eBear = null;
     this.table = pgTable(2048); this.mask = 2047;     // node index by coordinate, load <= 0.5
     this.grid = new Map();                              // spatial cell -> node indices
@@ -512,6 +513,7 @@ PackedGraph.prototype.growEdges = function () {
     this.eNext = pgGrow(this.eNext, Int32Array, this.edgeCap);
     this.eCost = pgGrow(this.eCost, Float64Array, this.edgeCap);
     this.eUp = pgGrow(this.eUp, Float64Array, this.edgeCap);
+    this.eMain = pgGrow(this.eMain, Uint8Array, this.edgeCap);
     if (this.eBear) this.eBear = pgGrow(this.eBear, Float32Array, this.edgeCap);
     this.gE = null;
 };
@@ -550,13 +552,21 @@ PackedGraph.prototype.connected = function (u, v) {
     for (e = this.first[v]; e >= 0; e = this.eNext[e]) if (this.eTo[e] === u) return true;
     return false;
 };
-PackedGraph.prototype.addEdge = function (u, v, cost, up) {
+// main: 1 if the edge is on a main road (MAIN_ROADS), for the loop crossing check only.
+// It never changes the cost: the router weighs roads by cost alone.
+PackedGraph.prototype.addEdge = function (u, v, cost, up, main) {
     if (this.nEdges === this.edgeCap) this.growEdges();
     var e = this.nEdges++;
-    this.eFrom[e] = u; this.eTo[e] = v; this.eCost[e] = cost; this.eUp[e] = up;
+    this.eFrom[e] = u; this.eTo[e] = v; this.eCost[e] = cost; this.eUp[e] = up; this.eMain[e] = main ? 1 : 0;
     this.eNext[e] = this.first[u]; this.first[u] = e;
     if (this.eBear) this.eBear[e] = this.bearing(u, v);
     return e;
+};
+// Mark the edges between u and v (either direction) as on a main road. Cost unchanged.
+PackedGraph.prototype.markMain = function (u, v) {
+    var e;
+    for (e = this.first[u]; e >= 0; e = this.eNext[e]) if (this.eTo[e] === v) this.eMain[e] = 1;
+    for (e = this.first[v]; e >= 0; e = this.eNext[e]) if (this.eTo[e] === u) this.eMain[e] = 1;
 };
 PackedGraph.prototype.bearing = function (u, v) {
     return bearingDeg(this.latQ[u] / 1e6, this.lonQ[u] / 1e6, this.latQ[v] / 1e6, this.lonQ[v] / 1e6);
@@ -868,6 +878,9 @@ var LOOP_CORNER_DEGREE = 3;    // corners snap to junctions only (see closestNod
 var LOOP_CORNERS = 4;          // corners besides the start: 2 = triangle, 3–4 = polygon on a circle
 var LOOP_HEADINGS = 6;         // headings tried; the best k that are LOOP_MIN_SEP apart are kept
 var LOOP_MIN_SEP = 90;         // degrees between the headings of the loops returned
+var LOOP_CROSSING_CHECK = 1;   // drop loops that cross a main road with no lights or marked crossing
+var LOOP_CROSSING_NEAR = 30;   // metres: lights or a marked crossing this close along the road count
+var LOOP_CROSSING_EXTRA = 1;   // too few clean loops: try LOOP_HEADINGS more, halfway between
 
 // Point `metres` from (lat, lon) heading `bearing` degrees (0 = north). Flat-earth
 // offset: well under 1% error at loop radii, and r is corrected by measurement anyway.
@@ -1026,6 +1039,143 @@ function loopTurns(paths) {
     return turns;
 }
 
+// ── Main-road crossings (Peter, 2026-11-19) ──
+// A generated loop never crosses a primary or trunk road except at traffic lights or a
+// marked crossing. Travelling along one is not crossing it. This is a filter on the
+// loops offered, not a routing weight: the router and its costs are the same as for
+// hand-drawn routes, so the drawn length still equals the measured one.
+var MAIN_ROADS = { primary: 1, primary_link: 1, trunk: 1, trunk_link: 1 };
+
+// Lights or a marked crossing at node n, or within LOOP_CROSSING_NEAR metres of it along
+// the main road (signals are often tagged on the junction node a few metres from where
+// the footpath meets the road), or on a main-road node within that distance along the
+// loop (the other carriageway of a dual road, reached over a median path). Lights on a
+// side street near the crossing never count. seq/at: the loop's nodes and n's place.
+function crossingProtected(graph, n, seq, at) {
+    // Lights, or a marked crossing that isn't crossing=uncontrolled (no lights: Peter,
+    // 2026-11-19). Baked tiles built before crossingUncontrolled existed fold
+    // uncontrolled into crossingMarked, so there it still counts until the next build.
+    function safe(m) { var a = graph.attrsOf(m); return !!(a && (a.trafficSignal || (a.crossingMarked && !a.crossingUncontrolled))); }
+    var lat = graph.latQ[n] / 1e6, lon = graph.lonQ[n] / 1e6;
+    function onRoad(m) { for (var x = graph.first[m]; x >= 0; x = graph.eNext[x]) if (graph.eMain[x]) return true; return false; }
+    function near(m) { return haversine(lat, lon, graph.latQ[m] / 1e6, graph.lonQ[m] / 1e6) <= LOOP_CROSSING_NEAR; }
+    var seen = new Set([n]), todo = [n];
+    while (todo.length) {
+        var m = todo.pop();
+        if (safe(m)) return true;
+        for (var e = graph.first[m]; e >= 0; e = graph.eNext[e]) {
+            var w = graph.eTo[e];
+            if (graph.eMain[e] && !seen.has(w) && near(w)) { seen.add(w); todo.push(w); }
+        }
+    }
+    for (var dir = -1; dir <= 1; dir += 2) {
+        for (var i = 1; i < seq.length; i++) {
+            var q = seq[(at + dir * i + seq.length) % seq.length];
+            if (!near(q)) break;
+            if (safe(q) && onRoad(q)) return true;   // lights on a side street don't count
+        }
+    }
+    return false;
+}
+
+// Which side of the road a heading falls on: the index of the sector between the main
+// road's headings (sorted) that holds it.
+function roadSector(sorted, b) {
+    for (var i = 0; i < sorted.length; i++) if (b < sorted[i]) return i;
+    return 0;   // past the last heading: the sector that wraps round to the first
+}
+
+// Node keys where a loop crosses a main road with no lights or marked crossing near.
+// Two shapes count:
+//   straight over: the loop passes through a node where at least two main-road edges
+//     meet, arriving and leaving off the road, on different sides of it;
+//   along and off: the loop joins the main road from one side, runs along it, and
+//     leaves to the other side. Only "along and back off the same side" is not a
+//     crossing (a footpath beside a road mapped as one centre line).
+// A crossing of the second shape is protected if any node on the run is.
+// Only out-edges are looked at, so a main road one-way to this profile (a bike-closed
+// roundabout direction) can show one heading and not count: a known miss, rare on main
+// roads. Plain-object graphs (old tests): [].
+function loopUnprotectedCrossings(graph, paths) {
+    if (!(graph instanceof PackedGraph) || !paths || !paths.length) return [];
+    var seq = [], i, j, e;
+    for (i = 0; i < paths.length; i++) {
+        for (j = i ? 1 : 0; j < paths[i].length; j++) seq.push(graph.indexOf(paths[i][j]));
+    }
+    // A loop is closed (it ends on its start, which is then kept once and the ends join);
+    // an open path is read end to end, with nothing judged at its two ends.
+    var closed = seq.length > 1 && seq[seq.length - 1] === seq[0];
+    if (closed) seq.pop();
+    var L = seq.length;
+    if (L < 3 || seq.indexOf(-1) >= 0) return [];
+    function at(k) { return closed ? seq[((k % L) + L) % L] : (k >= 0 && k < L ? seq[k] : -1); }
+    function onMain(a, b) {
+        for (var x = graph.first[a]; x >= 0; x = graph.eNext[x]) if (graph.eTo[x] === b) return graph.eMain[x] === 1;
+        for (x = graph.first[b]; x >= 0; x = graph.eNext[x]) if (graph.eTo[x] === a) return graph.eMain[x] === 1;
+        return false;
+    }
+    // main[k]: the step seq[k] -> seq[k+1] is on a main road.
+    var main = new Uint8Array(L), any = false;
+    for (i = 0; i < L; i++) if (at(i + 1) >= 0 && (main[i] = onMain(at(i), at(i + 1)) ? 1 : 0)) any = true;
+    var out = [], hit = new Set();
+    function flag(n) { if (!hit.has(n)) { hit.add(n); out.push(graph.keyOf(n)); } }
+    function rel(b, ref) { return ((b - ref) % 360 + 540) % 360 - 180; }   // -180..180, <0 = left
+    for (i = 0; i < L; i++) {
+        var n = at(i), prev = at(i - 1), next = at(i + 1), inMain = main[(i - 1 + L) % L];
+        if (prev < 0 || next < 0) continue;   // the ends of an open path
+        if (!inMain && !main[i]) {
+            // Straight over?
+            if (prev === next) continue;
+            var road = [];
+            for (e = graph.first[n]; e >= 0; e = graph.eNext[e]) if (graph.eMain[e]) road.push(graph.bearing(n, graph.eTo[e]));
+            if (road.length < 2) continue;
+            road.sort(function (x, y) { return x - y; });
+            if (roadSector(road, graph.bearing(n, prev)) === roadSector(road, graph.bearing(n, next))) continue;
+            if (!crossingProtected(graph, n, seq, i)) flag(n);
+        } else if (!inMain && main[i] && any) {
+            // Joins the road here: follow the run to where it leaves.
+            for (j = i; j < i + L && main[j % L]; j++);
+            if (j >= i + L || at(j + 1) < 0) continue;      // all on the road, or it ends on it
+            var n2 = at(j);
+            var sideIn = rel(graph.bearing(n, prev), graph.bearing(n, next));
+            var sideOut = rel(graph.bearing(n2, at(j + 1)), graph.bearing(at(j - 1), n2));
+            // Straight on, in or out (within 15 degrees of the road's line): no side to judge.
+            if (Math.abs(sideIn) < 15 || Math.abs(sideIn) > 165 || Math.abs(sideOut) < 15 || Math.abs(sideOut) > 165) continue;
+            // Carry the side (-1 left, +1 right of the way of travel) along the run. A
+            // U-turn swaps left and right without crossing. A turn of TURN_ANGLE+ at a
+            // junction of main roads onto the far side's road crosses the one it was on
+            // (east on A's north side, right onto B southward: over A; then on B's
+            // right). Lights anywhere on the run count: a runner along a main road
+            // crosses where the lights are.
+            var side = sideIn < 0 ? -1 : 1, where = [];
+            for (var k = i + 1; k < j; k++) {
+                var m = at(k), t = rel(graph.bearing(m, at(k + 1)), graph.bearing(at(k - 1), m));
+                if (Math.abs(t) > 165) { side = -side; continue; }
+                if (Math.abs(t) < TURN_ANGLE) continue;
+                var heads = 0;
+                for (e = graph.first[m]; e >= 0; e = graph.eNext[e]) if (graph.eMain[e]) heads++;
+                if (heads < 3) continue;                    // a bend in one road, not a junction
+                var turned = t < 0 ? -1 : 1;
+                if (turned !== side) where.push(m);
+                side = turned;
+            }
+            if ((sideOut < 0 ? -1 : 1) !== side) where.push(n2);   // off the far side
+            if (!where.length) continue;
+            var safe = false;
+            for (k = i; k <= j && !safe; k++) safe = crossingProtected(graph, at(k), seq, k % L);
+            // Marked where it crosses, not where it joined: that's where a ring goes.
+            if (!safe) for (k = 0; k < where.length; k++) flag(where[k]);
+        }
+    }
+    return out;
+}
+
+// Does this loop cross a main road unprotected, with the check on? (LOOP_CROSSING_CHECK = 0
+// is for the harness: it still measures crossings, it just stops acting on them.)
+function loopCrosses(loop) {
+    return !!(LOOP_CROSSING_CHECK && loop.crossings && loop.crossings.length);
+}
+
 // Mark how a measured loop sits against target L: deviation is signed (+ = long);
 // error is the distance from the middle of the aim window, which is what ranks loops;
 // ok = inside the accept window; onAim = inside the aim window.
@@ -1049,6 +1199,10 @@ function loopFit(loop, targetM) {
 // beats off aim, and fewer turns per km wins when the difference is more than
 // LOOP_TURN_MARGIN. Then closer to the aim.
 function compareLoops(a, b) {
+    // Above everything: a loop with an unprotected main-road crossing is never offered
+    // while a clean one is (see generateLoops), so it never wins on one bearing either.
+    var aX = loopCrosses(a), bX = loopCrosses(b);
+    if (aX !== bX) return aX ? 1 : -1;
     var aIn = a.ok, bIn = b.ok;
     if (aIn !== bIn) return aIn ? -1 : 1;
     if (aIn) {
@@ -1093,6 +1247,7 @@ async function scaleLoop(graph, startKey, targetM, bearing, ctl) {
         if (loop.degenerate) { r *= 1.5; continue; } // reach past the start to other paths
         loopFit(loop, targetM);
         loop.overlap = loopOverlap(loop.paths);
+        loop.crossings = loopUnprotectedCrossings(graph, loop.paths);   // always measured; acted on per LOOP_CROSSING_CHECK
         loop.bearing = bearing;
         loop.iterations = it;
         best = betterLoop(best, loop);
@@ -1122,7 +1277,7 @@ async function scaleLoop(graph, startKey, targetM, bearing, ctl) {
 async function loopCandidate(graph, startKey, targetM, bearing, jitterSign, ctl) {
     var best = await scaleLoop(graph, startKey, targetM, bearing, ctl);
     if (best === LOOP_STALE) return best;
-    if (!best || best.overlap > LOOP_OVERLAP_MAX || !best.ok) {
+    if (!best || best.overlap > LOOP_OVERLAP_MAX || !best.ok || loopCrosses(best)) {
         if (ctl) { await ctl.pause(); if (ctl.isStale()) return LOOP_STALE; }
         var retry = await scaleLoop(graph, startKey, targetM, bearing + (jitterSign < 0 ? -1 : 1) * LOOP_JITTER, ctl);
         if (retry === LOOP_STALE) return retry;
@@ -1257,16 +1412,113 @@ async function generateLoops(graph, startKey, targetM, opts) {
         if (ctl.isStale()) return null;
         if (LOOP_EARLY_STOP && n + 1 === firstSpread && firstSpread >= k && firstSpread < order.length) {
             var good = pickLoops(pool, k);
-            if (good.length === k && good.every(function (l) { return l.ok && l.overlap <= LOOP_OVERLAP_MAX; })) break;
+            if (good.length === k && good.every(function (l) { return l.ok && l.overlap <= LOOP_OVERLAP_MAX && !loopCrosses(l); })) break;
         }
     }
-    var out = pickLoops(pool, k);
+    var tried = Math.min(n + 1, order.length);
+    // Loops with an unprotected main-road crossing are dropped while any clean loop is
+    // left, even if that leaves fewer than k. Before settling for fewer, or for fewer than
+    // two in the accept window, one more round of headings halfway between the first
+    // (a main road on one side of the start often blocks only some directions).
+    var clean = pool.filter(function (l) { return !loopCrosses(l); });
+    function enough() {
+        var got = pickLoops(clean, k);
+        return got.length >= k && got.filter(function (l) { return l.ok; }).length >= Math.min(2, k);
+    }
+    // Only when crossings dropped something: on sparse ground with no main road the
+    // shortfall isn't theirs, and another round there is pure cost.
+    if (LOOP_CROSSING_CHECK && LOOP_CROSSING_EXTRA && clean.length < pool.length && !enough()) {
+        for (var x = 0; x < headings; x++) {
+            var hx = theta0 + (x + 0.5) * 360 / headings;
+            var cx = await loopCandidate(graph, startKey, targetM, hx, x % 2 ? -1 : 1, ctl);
+            if (cx === LOOP_STALE) return null;
+            tried++;
+            if (cx && !pool.some(function (p) { return sameCorners(p, cx); })) {
+                pool.push(cx);
+                if (!loopCrosses(cx)) clean.push(cx);
+            }
+            await ctl.pause();
+            if (ctl.isStale()) return null;
+            if (enough()) break;
+        }
+    }
+    // If none is clean, the best one alone is offered, its crossings listed for the app
+    // to say so.
+    var out = clean.length || !pool.length ? pickLoops(clean, k) : pickLoops(pool, 1);
     out.sort(function (a, b) { return a.error - b.error; });
-    out.headingsTried = Math.min(n + 1, order.length);   // for the harness: how often early stop fires
+    out.headingsTried = tried;   // for the harness: how often early stop (or the extra round) fires
     return out;
 }
 
 // ── OSM / tile format converters ──────────────────────
+// ── Loop chip helpers (app.js "Loop ▸", PR 2) ──────────────────────────────
+// Pure so they can be unit-tested; the chip, presets and flipper live in app.js.
+var LOOP_PRESETS_KM = [3, 5, 8, 10, 15, 21];
+var LOOP_MIN_KM = 1;
+// In a pre-baked city. 32 km covers a marathon block's longest run; 42 km took ~40 s on
+// Peter's iPhone and came back as one loop crossing ~15 main roads (2026-11-19).
+var LOOP_MAX_KM = 32;
+var LOOP_MAX_KM_LIVE = 10;     // outside one: live path downloads are slow, so stay small
+
+// A typed distance ("12.5", "12,5", "12.5 km") → { km, clamped } inside
+// LOOP_MIN_KM..maxKm, to 0.1 km; null when it isn't a number at all.
+function parseLoopKm(text, maxKm) {
+    var s = String(text == null ? "" : text).trim().replace(",", ".").replace(/\s*km$/i, "");
+    if (!/^(\d+(\.\d*)?|\.\d+)$/.test(s)) return null;
+    var v = parseFloat(s);
+    if (!(v > 0)) return null;
+    var km = Math.min(Math.max(v, LOOP_MIN_KM), maxKm || LOOP_MAX_KM);
+    return { km: Math.round(km * 10) / 10, clamped: km !== v };
+}
+
+// Telemetry bucket: the preset tapped, or "other" for a typed distance. Never the
+// distance itself (privacy invariant, CLAUDE.md).
+function loopBucket(km, typed) {
+    return !typed && LOOP_PRESETS_KM.indexOf(km) !== -1 ? String(km) : "other";
+}
+
+// loop-generated's result: ok if any loop is in the accept window, near_miss if
+// there are only near misses, failed if nothing came back.
+function loopResult(candidates) {
+    if (!candidates || !candidates.length) return "failed";
+    return candidates.some(function (c) { return c.ok; }) ? "ok" : "near_miss";
+}
+
+// The same −3%/+10% accept window generateLoops uses, applied to the length the
+// pipeline actually drew (which can differ slightly once more tiles stream in).
+// Same arithmetic as loopFit, so the two agree at the edges.
+function loopInWindow(lengthM, targetM) {
+    var dev = (lengthM - targetM) / targetM;
+    return dev >= -LOOP_UNDER && dev <= LOOP_OVER;
+}
+
+// Tile radius to load around the start before generating, in km. The 5-point
+// polygon's corners sit on a circle through the start whose diameter is about
+// L / 3.8 (perimeter 5.88 R × the 1.3 detour), and tilesInRadius selects tiles by
+// their centres, so add a tile's half-diagonal (0.05° ≈ 5.5 × 4.7 km → 3.6 km).
+// Never less than the 5 km a first pin already loads.
+function loopGroundKm(km) {
+    return Math.max(5, km / 3.8 + 3.6);
+}
+
+// Live (Overpass/Worker) fetch radius in metres for an untiled start: the loop's
+// diameter × 1.5, in whole km as the Worker's cache key expects, and never under
+// 2 km. Always fetched: a first pin dropped at zoom 16 loads only 1 km.
+function loopLiveRadiusM(km) {
+    return Math.max(2000, Math.ceil(km * 1000 / 3.8 * 1.5 / 1000) * 1000);
+}
+
+// Stale guard for a generation in flight: a and b are snapshots of what it started
+// from and of now (app.js loopSnapshotNow). Anything that would make the measured
+// loops differ from what the pipeline draws, or make them land on the wrong pin,
+// drops the result: a cancel (run), a new or rebuilt graph (city change, run/bike
+// toggle), the profile, the mode, a pin added or removed, the start pin replaced
+// (Clear → Undo) or moved.
+function loopSnapshotStale(a, b) {
+    return a.run !== b.run || a.graph !== b.graph || a.profile !== b.profile ||
+        a.mode !== b.mode || a.count !== b.count || a.start !== b.start || a.key !== b.key;
+}
+
 function osmToGeoJSON(data) {
     // Overpass returns nodes before ways (out body; >; out body qt;), so one
     // pass is enough. When the query emits `out body qt` for nodes (vs skel),
@@ -1328,6 +1580,9 @@ function nodeAttrsFromTags(tags) {
         var c = tags.crossing || "";
         if (c === "traffic_signals" || c === "marked" || c === "zebra" || c === "uncontrolled") {
             attrs.crossingMarked = true; any = true;
+            // No lights and (unless tagged a zebra) maybe no paint: still a marked crossing
+            // for the routing nudge, but it never protects a loop's main-road crossing.
+            if (c === "uncontrolled" && tags.crossing_ref !== "zebra" && tags["crossing:markings"] !== "zebra") attrs.crossingUncontrolled = true;
         } else {
             attrs.crossingUnmarked = true; any = true;
         }
@@ -1659,6 +1914,8 @@ if (typeof module !== "undefined" && module.exports) {
         osmToGeoJSON: osmToGeoJSON,
         offsetPoint: offsetPoint,
         loopOverlap: loopOverlap,
+        loopUnprotectedCrossings: loopUnprotectedCrossings,
+        MAIN_ROADS: MAIN_ROADS,
         scaleLoop: scaleLoop,
         loopCandidate: loopCandidate,
         generateLoops: generateLoops,
@@ -1675,5 +1932,15 @@ if (typeof module !== "undefined" && module.exports) {
         LOOP_OVER: LOOP_OVER,
         LOOP_STALE: LOOP_STALE,
         LOOP_OVERLAP_MAX: LOOP_OVERLAP_MAX,
+        LOOP_PRESETS_KM: LOOP_PRESETS_KM,
+        LOOP_MAX_KM: LOOP_MAX_KM,
+        LOOP_MAX_KM_LIVE: LOOP_MAX_KM_LIVE,
+        parseLoopKm: parseLoopKm,
+        loopBucket: loopBucket,
+        loopResult: loopResult,
+        loopInWindow: loopInWindow,
+        loopGroundKm: loopGroundKm,
+        loopLiveRadiusM: loopLiveRadiusM,
+        loopSnapshotStale: loopSnapshotStale,
     };
 }

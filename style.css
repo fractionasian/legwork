@@ -1277,7 +1277,9 @@ button.menu-item:disabled {
    Leaflet's panes/controls (≤1000). */
 .info-banner {
     position: absolute;
-    top: 0;
+    /* Below the loop chip or panel while one shows (--loop-ui-h, set by
+       renderLoopUi in app.js), so the two never stack on each other. */
+    top: var(--loop-ui-h, 0px);
     /* Inset past Leaflet's corner controls (zoom top-left, layer switcher
        top-right: up to 48px wide + 10px margin each). Full-width, it sat above them
        (z-index 1100 > their 1000) and covered both for as long as it showed. */
@@ -1620,3 +1622,129 @@ kbd {
     background: #2a2030;
     border-color: #c4b5fd;
 }
+
+/* ── Loop chip ("Loop ▸") ────────────────────────────
+   Hangs under the distance pill like its dropdown (same z-index, see
+   .distance-menu), so it is beside the pill without widening a bar that is
+   already full at 375 px. --loop-ui-h moves the layer switcher and the info
+   banner down by its height while it shows. */
+.loop-ui {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    margin-top: 6px;
+    z-index: 1150;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+}
+/* Eased, so the switcher's drop on a first pin reads as a slide, not a jump. */
+.map-area .leaflet-top.leaflet-right { top: var(--loop-ui-h, 0px); transition: top 150ms ease-out; }
+.info-banner { transition: top 150ms ease-out; }
+@media (prefers-reduced-motion: reduce) {
+    .map-area .leaflet-top.leaflet-right, .info-banner { transition: none; }
+}
+
+.controls .loop-ui button {
+    font-size: 15px;
+    min-height: 44px;
+    padding: 10px 14px;
+    min-width: 44px;
+}
+.controls .loop-ui .loop-chip {
+    background: #1e2030;
+    border-color: #6ee7b7;
+    color: #6ee7b7;
+    font-weight: 700;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+}
+.controls .loop-ui .loop-chip[aria-expanded="true"] { background: #2d3142; }
+.loop-chip.busy::before {
+    content: "";
+    display: inline-block;
+    width: 13px;
+    height: 13px;
+    margin-right: 8px;
+    vertical-align: -2px;
+    border: 2px solid rgba(110, 231, 183, 0.3);
+    border-top-color: #6ee7b7;
+    border-radius: 50%;
+    animation: wp-spin 0.9s linear infinite;
+}
+
+.loop-panel {
+    margin-top: 6px;
+    background: #1e2030;
+    border: 1px solid #3a3d4a;
+    border-radius: 8px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+    padding: 10px;
+    width: 264px;
+    box-sizing: border-box;
+}
+.loop-chip.hidden, .loop-panel.hidden, .loop-other.hidden { display: none; }
+.loop-panel-title {
+    font-size: 13px;
+    color: #9aa0b0;
+    margin: 0 0 8px 2px;
+}
+.loop-presets-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 6px;
+}
+.controls .loop-presets-grid button {
+    padding: 10px 0;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+}
+.controls .loop-presets-grid #loop-other-btn { grid-column: span 2; }
+.loop-other {
+    display: flex;
+    gap: 6px;
+    margin-top: 8px;
+}
+.loop-other input {
+    flex: 1;
+    min-width: 0;
+    /* 16 px or iOS zooms the page on focus. */
+    font-size: 16px;
+    padding: 8px 10px;
+    border: 1px solid #3a3d4a;
+    border-radius: 6px;
+    background: #252836;
+    color: #f0f0f0;
+}
+.loop-other input:focus { outline: 2px solid #6ee7b7; outline-offset: 1px; }
+.loop-note {
+    margin: 8px 2px 0;
+    font-size: 13px;
+    line-height: 1.35;
+    color: #c8ccd8;
+}
+.loop-note:empty { display: none; }
+
+.loop-label {
+    margin: 0 2px 8px;
+    font-size: 15px;
+    line-height: 1.35;
+    color: #f0f0f0;
+}
+.loop-label strong { color: #6ee7b7; font-variant-numeric: tabular-nums; }
+.loop-label.near-miss strong { color: #f7c948; }
+/* A main-road crossing without lights: its own line, amber, under the length. */
+.loop-warn { display: block; margin-top: 4px; font-size: 13px; line-height: 1.35; color: #f7c948; }
+.loop-actions {
+    display: flex;
+    gap: 6px;
+}
+.controls .loop-actions #loop-next { flex: 1; font-variant-numeric: tabular-nums; }
+.controls .loop-actions #loop-next[hidden] { display: none; }
+.controls .loop-actions #loop-next[hidden] ~ .loop-keep { flex: 1; }
+.controls .loop-actions .loop-keep {
+    background: #6ee7b7;
+    border-color: #6ee7b7;
+    color: #10231b;
+    font-weight: 700;
+}
+.controls .loop-actions .loop-keep:active { background: #5cd4a4; }
