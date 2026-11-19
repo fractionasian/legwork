@@ -393,11 +393,17 @@ location at the existing 0.005° grid only.
   found", as loops do). Otherwise the furthest reachable node is a decision-5 near miss.
 - **Telemetry:** `loop-generated` gains `mode` (`loop` | `outback`), additive (old Worker
   drops it, old client never sends it). Menu text updated in the same commit.
-- **Open for Peter:** bike out-and-backs rank and measure the outbound leg only; the app
-  mirrors the line, so a bike option can come back against a one-way or the wrong way round
-  a roundabout (hand-drawn out-and-backs already do). Rank on out + back cost and filter a
-  closed reverse edge? ~10 lines. Also: decision 7's Done-when says "three"; with the
-  never-pad rule some starts give two, as for loops (gate is 2+ clean).
+- **Bike: the way back counts** (Peter, 2026-11-19, "Yes, add it"). The app draws the way
+  back as the way out reversed, never routed, so cost per metre is over both ways (the
+  reverse edges' cost, so a return pushed against a one-way at 4× ranks behind), and an
+  option with any step that has no reverse edge (a roundabout closed the wrong way for
+  bikes) is never offered; `lengthTree` carries the same back cost, so turnarounds are
+  placed off such branches. Bike check, 30 Perth and Melbourne starts at 8 km: options
+  with a closed step back 27 of 65 → 0 of 51; with any pushed return 49 → 31; share of
+  length pushed 5.5% → 3.9%. Fewer options, honestly. The run profile is unchanged (gate
+  rows identical). Hand-drawn out-and-backs still mirror whatever is drawn.
+- **Open:** decision 7's Done-when says "three"; with the never-pad rule some starts give
+  two, as for loops (gate is 2+ clean).
 
 **Harness** (tiles b6173198, seed 1, same 80 starts × 5/10 km, run; `--kind outback`; Mac,
 run alone; the loop row was run alongside another harness, so its times are inflated):
@@ -747,7 +753,7 @@ Unknown flags are rejected.
 ### Handover (PR 3, 2026-11-19)
 
 PR 3 is on branch `claude/out-and-back-273d19` (Worker prop d98486e, generator cb8e7b1,
-chip efb603d, review fixes 9bd51a3 and 503a63f, harness 750f7c8), not merged. The
+chip efb603d, review fixes 9bd51a3 and 503a63f, harness 750f7c8, bike returns after it), not merged. The
 `verifier-legwork` drive passed at 390 px (Perth, East Perth start): out-and-back mode, one
 pin → "Out & Back ▸" → 5 km gave 3 options (5.24, 4.99, 5.33 km, 438 ms), drawn = measured,
 flip three → Keep (toast) → drag the turnaround (5.2 → 4.8 km) → Cmd+Z after Keep left the
@@ -755,6 +761,6 @@ start; a mode change mid-search cancelled; telemetry `{bucket:"5", result:"ok",
 mode:"outback"}`, no `pin-drop`. `/review-pass`: sec clean; ux, scope and arch nothing
 blocking, fixes in 9bd51a3 and 503a63f. Gate 7 of 8 rows (Perth 10 km 17/20; see "As built
 in PR 3"). Deploy order: Worker first, then merge. `/first-users` not run (paused; offer it).
-For Peter: the bike return-leg question; whether 17/20 in Perth 10 km is enough; parks
+Bike returns now count (see As built). For Peter: whether 17/20 in Perth 10 km is enough; parks
 wait for park outlines in the tiles. Next: nothing queued in this spec.
 

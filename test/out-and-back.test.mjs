@@ -17,8 +17,11 @@ const noPause = () => Promise.resolve();
 //   elev(di, dj): height in metres at a node (default flat: no heights at all);
 //   path(a, b): the edge is on a path-class way;
 //   main(a, b): the edge is on a main road (no lights anywhere unless lit(di, dj));
-//   skip(a, b): leave the edge out.
-function grid(n, { elev, path, main, lit, skip } = {}) {
+//   skip(a, b): leave the edge out;
+//   back(a, b): the cost multiplier going b → a (a bike one-way pushed: 4), or null for
+//     no edge that way (a roundabout closed the wrong way round). Edges run a → b north
+//     or east.
+function grid(n, { elev, path, main, lit, skip, back } = {}) {
   const g = new R.PackedGraph(), id = [];
   const h = Math.floor(n / 2);
   for (let i = 0; i < n; i++) {
@@ -32,7 +35,8 @@ function grid(n, { elev, path, main, lit, skip } = {}) {
     const rise = elev ? elev(...b) - elev(...a) : 0;
     const m = main ? main(a, b) : false, p = path ? path(a, b) : false;
     g.addEdge(u, v, d, rise > 0 ? rise : 0, m, p);
-    g.addEdge(v, u, d, rise < 0 ? -rise : 0, m, p);
+    const bm = back ? back(a, b) : 1;
+    if (bm !== null) g.addEdge(v, u, d * bm, rise < 0 ? -rise : 0, m, p);
   };
   for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) {
     if (i + 1 < n) link(i, j, i + 1, j);
@@ -165,6 +169,44 @@ test("a peninsula never gets two options down the same path", async () => {
       assert.ok(d >= 0.15 * 2500, `theta0 ${theta0}: turnarounds ${Math.round(d)} m apart`);
     }
   }
+});
+
+test("bike: an option that can't be ridden back the way it was drawn is never offered", async () => {
+  // East of the start, every east–west street is one-way eastward, closed westward (as a
+  // roundabout is for bikes): out is fine, back is not.
+  const east = (a, b) => a[0] === b[0] && a[1] >= 1;
+  const { g, centre, at } = grid(81, { back: (a, b) => (east(a, b) ? null : 1) });
+  const out = await R.generateOutAndBacks(g, centre, 5000, { theta0: 0, k: 6, pause: noPause });
+  assert.ok(out.length >= 2);
+  for (const o of out) {
+    assert.equal(o.closedBack, false);
+    // Every step back exists: the reverse of the leg routes along real edges.
+    for (const p of o.paths) for (let j = 1; j < p.length; j++) {
+      assert.ok(g.edgeBetween(g.indexOf(p[j]), g.indexOf(p[j - 1])) >= 0, `no way back at ${at(p[j])}`);
+    }
+  }
+});
+
+test("bike: a return pushed against one-ways ranks behind one that isn't", async () => {
+  // Flat, no paths, so only cost per metre is left to decide. East of the start the
+  // east–west streets are one-way eastward with a 4× push back (onewayEdgeCosts).
+  const east = (a, b) => a[0] === b[0] && a[1] >= 1;
+  const { g, centre } = grid(81, { back: (a, b) => (east(a, b) ? 4 : 1) });
+  // Due east and back, hand-placed: the way back is pushed, and it costs for it.
+  const pushed = R.dijkstra(g, centre, R.nodeKey(LAT0, LON0 + 25 * dLon));
+  let back = 0;
+  for (let j = 1; j < pushed.path.length; j++) {
+    const e = g.edgeBetween(g.indexOf(pushed.path[j]), g.indexOf(pushed.path[j - 1]));
+    back += g.eCost[e];
+  }
+  assert.ok(back > 3 * R.pathGeomLength(pushed.path));
+  // The generator steers every direction's turnaround off pushed returns.
+  const out = await R.generateOutAndBacks(g, centre, 5000, { theta0: 0, k: 6, pause: noPause });
+  assert.ok(out.length >= 3);
+  for (const o of out) assert.ok(o.costPerM < 1.1, `cost per metre ${out.map((x) => x.costPerM.toFixed(2))}`);
+  // And between two measured options, the pushed one loses on cost per metre.
+  const flat = { ok: true, climbPerKm: 0, pathShare: 0, costPerM: 1, error: 0, crossings: [] };
+  assert.ok(R.compareOutAndBacks(flat, { ...flat, costPerM: 2.5 }) < 0);
 });
 
 test("stale: a pin moved mid-search drops the result", async () => {

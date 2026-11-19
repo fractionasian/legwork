@@ -727,7 +727,8 @@ PackedGraph.prototype.costFrom = function (key, maxCost) {
 // The cheapest-route tree from `key`, with what lies along each node's branch: ground
 // metres (len), climb up plus climb down in metres (climb), metres on paths (path), and
 // the edge it was reached by (prevE, -1 at the start and for unreached nodes; done = 1
-// once reached). One search with the router's own edge cost (weighted length + climb)
+// once reached), and the cost of riding the branch back (back: the reverse edges' cost,
+// Infinity past a step with no reverse edge, a roundabout closed the wrong way). One search with the router's own edge cost (weighted length + climb)
 // and no turn cost. Nodes past maxLen of ground are reached but not expanded from, so
 // the search stays near the start. The out-and-back generator places its turnarounds
 // with it; each one is then routed by dijkstra(), so it only chooses where pins go.
@@ -736,7 +737,7 @@ PackedGraph.prototype.lengthTree = function (key, maxLen) {
     var s = this.indexOf(key);
     if (s < 0) return null;
     var N = this.nNodes, dist = new Float64Array(N).fill(Infinity), done = new Uint8Array(N);
-    var len = new Float32Array(N), climb = new Float32Array(N), path = new Float32Array(N), prevE = new Int32Array(N).fill(-1);
+    var len = new Float32Array(N), climb = new Float32Array(N), path = new Float32Array(N), backC = new Float32Array(N), prevE = new Int32Array(N).fill(-1);
     var first = this.first, eTo = this.eTo, eFrom = this.eFrom, eNext = this.eNext, eCost = this.eCost, eUp = this.eUp, ePath = this.ePath;
     var latQ = this.latQ, lonQ = this.lonQ, cw = CLIMB_WEIGHT;
     this.hn = 0; dist[s] = 0; this.hpush(0, s);
@@ -751,6 +752,7 @@ PackedGraph.prototype.lengthTree = function (key, maxLen) {
             len[u] = len[p] + d;
             climb[u] = climb[p] + eUp[pe] + (back >= 0 ? eUp[back] : 0);
             path[u] = path[p] + (ePath[pe] ? d : 0);
+            backC[u] = back >= 0 ? backC[p] + eCost[back] + cw * eUp[back] : Infinity;
         }
         if (len[u] > maxLen) continue;
         var du = dist[u];
@@ -761,7 +763,7 @@ PackedGraph.prototype.lengthTree = function (key, maxLen) {
             if (nd < dist[v]) { dist[v] = nd; prevE[v] = e; this.hpush(nd, v); }
         }
     }
-    return { cost: dist, len: len, climb: climb, path: path, prevE: prevE, done: done };
+    return { cost: dist, len: len, climb: climb, path: path, back: backC, prevE: prevE, done: done };
 };
 
 // ── binary heap on two typed arrays ──
@@ -1578,22 +1580,30 @@ function treeBranch(graph, tree, n) {
 }
 
 // Measure a routed out-and-back (routeLegs of [start, turnaround]): the length, climb and
-// path share of the leg there and back, and its crossings.
+// path share of the leg there and back, and its crossings. The app draws the way back as
+// the way out reversed, never routed, so its cost is read off the reverse edges here:
+// cost per metre is over both ways, so a bike return pushed against a one-way (4×,
+// onewayEdgeCosts) ranks behind one that isn't (Peter, 2026-11-19). A step with no reverse
+// edge (a roundabout, closed the wrong way round for bikes) sets closedBack, and such an
+// option is never offered.
 function measureOutAndBack(graph, legs, turnKey, targetM) {
-    var half = legs.length, climb = 0, onPath = 0;
+    var half = legs.length, climb = 0, onPath = 0, backCost = 0, closedBack = false;
     for (var i = 0; i < legs.paths.length; i++) {
         var p = legs.paths[i];
         for (var j = 1; j < p.length; j++) {
             var u = graph.indexOf(p[j - 1]), v = graph.indexOf(p[j]);
             var e = graph.edgeBetween(u, v), back = graph.edgeBetween(v, u);
             climb += (e >= 0 ? graph.eUp[e] : 0) + (back >= 0 ? graph.eUp[back] : 0);
+            if (back >= 0) backCost += graph.eCost[back] + CLIMB_WEIGHT * graph.eUp[back];
+            else closedBack = true;
             if (e >= 0 && graph.ePath[e]) onPath += keyDistance(p[j - 1], p[j]);
         }
     }
     var o = {
         waypoints: legs.keys.concat([turnKey]), paths: legs.paths, length: 2 * half, vias: legs.vias,
         climb: climb, climbPerKm: half > 0 ? climb / (2 * half / 1000) : 0,
-        pathShare: half > 0 ? onPath / half : 0, costPerM: half > 0 ? legs.cost / half : 0,
+        pathShare: half > 0 ? onPath / half : 0, costPerM: half > 0 ? (legs.cost + backCost) / (2 * half) : 0,
+        closedBack: closedBack,
         overlap: 1,   // retracing is the point of an out-and-back: the overlap rule doesn't apply
     };
     loopFit(o, targetM);
@@ -1687,7 +1697,7 @@ async function generateOutAndBacks(graph, startKey, targetM, opts) {
         if (len < aimHalf * (1 - OAB_SPAN) || len > aimHalf * (1 + OAB_SPAN)) continue;
         var b = (bearingDeg(sLat, sLon, graph.latQ[n] / 1e6, graph.lonQ[n] / 1e6) + 360) % 360;
         cands.push({ n: n, len: len, heading: b, junction: graph.degree(n) >= OAB_JUNCTION,
-            climbPerKm: tree.climb[n] / (2 * len) * 1000, pathShare: tree.path[n] / len, costPerM: tree.cost[n] / len });
+            climbPerKm: tree.climb[n] / (2 * len) * 1000, pathShare: tree.path[n] / len, costPerM: (tree.cost[n] + tree.back[n]) / (2 * len) });
     }
     // Nothing near the aim anywhere (an island, a short spit of path): the furthest node
     // reachable, shown as a near miss with its true length (decision 5), unless that is
@@ -1715,6 +1725,8 @@ async function generateOutAndBacks(graph, startKey, targetM, opts) {
     // band, best-ranked, and with a tree branch that crosses no main road unprotected if
     // one of the first OAB_SCAN does. With nothing in the band, the nearest to `want`.
     function pick(list, want, tried) {
+        // Not a branch that can't be ridden back (costPerM Infinity: see lengthTree's back).
+        list = list.filter(function (c) { return c.costPerM < Infinity; });
         var band = list.filter(function (c) { return !tried.has(c.n) && Math.abs(c.len - want) <= OAB_BAND * want; });
         if (!band.length) {
             var near = null;
@@ -1765,6 +1777,7 @@ async function generateOutAndBacks(graph, startKey, targetM, opts) {
                 if (isStale()) return LOOP_STALE;
                 if (!legs || !(legs.length > 0)) continue;
                 var o = measureOutAndBack(graph, legs, turnKey, targetM);
+                if (o.closedBack) continue;   // can't be ridden back the way it was drawn
                 if (LOOP_CROSSING_CHECK) block(o.crossings);
                 // Directions are kept apart by the sector's nominal heading, as loops are (a
                 // sector's best turnaround can sit anywhere in its 60°, and holding them to the
