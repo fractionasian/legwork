@@ -1455,7 +1455,9 @@ async function generateLoops(graph, startKey, targetM, opts) {
 // Pure so they can be unit-tested; the chip, presets and flipper live in app.js.
 var LOOP_PRESETS_KM = [3, 5, 8, 10, 15, 21];
 var LOOP_MIN_KM = 1;
-var LOOP_MAX_KM = 42;          // in a pre-baked city
+// In a pre-baked city. 32 km covers a marathon block's longest run; 42 km took ~40 s on
+// Peter's iPhone and came back as one loop crossing ~15 main roads (2026-11-19).
+var LOOP_MAX_KM = 32;
 var LOOP_MAX_KM_LIVE = 10;     // outside one: live path downloads are slow, so stay small
 
 // A typed distance ("12.5", "12,5", "12.5 km") → { km, clamped } inside

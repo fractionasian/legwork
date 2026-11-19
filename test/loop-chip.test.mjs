@@ -14,8 +14,9 @@ test("parseLoopKm — reads a typed distance, comma or point, with or without km
   assert.deepEqual(R.parseLoopKm("6.66", 42), { km: 6.7, clamped: false });
 });
 
-test("parseLoopKm — clamps to 1–42 km, or 10 km outside a pre-baked city", () => {
-  assert.deepEqual(R.parseLoopKm("50", R.LOOP_MAX_KM), { km: 42, clamped: true });
+test("parseLoopKm — clamps to 1–32 km, or 10 km outside a pre-baked city", () => {
+  assert.equal(R.LOOP_MAX_KM, 32);
+  assert.deepEqual(R.parseLoopKm("42", R.LOOP_MAX_KM), { km: 32, clamped: true });
   assert.deepEqual(R.parseLoopKm("0.4", R.LOOP_MAX_KM), { km: 1, clamped: true });
   assert.deepEqual(R.parseLoopKm("15", R.LOOP_MAX_KM_LIVE), { km: 10, clamped: true });
   assert.deepEqual(R.parseLoopKm("10", R.LOOP_MAX_KM_LIVE), { km: 10, clamped: false });

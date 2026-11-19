@@ -73,7 +73,7 @@ are cached. (inferred from the app and `docs/show-hn-draft.md`)
 - **Reversing a loop keeps the start where it is.** [commit d5aa130]
 - **A generated loop uses the same router as hand-drawn routes, and the length
   shown is the drawn one.** No generator-only weights. Its pins never count as a
-  `pin-drop`; Undo of a kept loop never removes the start pin. Loops cap at 42 km,
+  `pin-drop`; Undo of a kept loop never removes the start pin. Loops cap at 32 km,
   10 km outside the pre-baked cities. [doc, target-distance-loops]
 - **The generator drops loops that cross a primary or trunk road except at lights
   or a marked crossing** (within 30 m). It is a filter on the loops offered, never a

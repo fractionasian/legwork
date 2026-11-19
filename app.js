@@ -2366,7 +2366,7 @@ var loopUi = {
     run: 0,             // bumped to cancel a generation in flight (loopSnapshotStale)
     snap: null,         // loopSnapshotNow() when the generation in flight started
     busyShown: false,   // the spinner shows only once a generation has run 300 ms
-    clampNote: null,    // "The longest loop here is 42 km." when a typed distance was clamped
+    clampNote: null,    // "The longest loop here is 32 km." when a typed distance was clamped
     targetKm: 0,
     candidates: null,   // generateLoops' result while choosing; dropped on Keep/discard
     index: 0,
@@ -2390,7 +2390,7 @@ function loopSnapshotNow() {
         count: w.length, start: w[0] || null, key: w[0] ? w[0].nodeKey : null };
 }
 
-// Pre-baked cities take loops to 42 km; anywhere else is a live path download, so 10.
+// Pre-baked cities take loops to 32 km; anywhere else is a live path download, so 10.
 // Reads the already-fetched manifest; a pin that has snapped has fetched it.
 function loopMaxKm() {
     var w = state.waypoints[0];

@@ -166,7 +166,7 @@ pressing Undo mid-generation drops the stale results.
 - Chip renders only when `liveWaypoints().length === 1`. It hides on 0 or ≥ 2
   pins and while generating, when it turns into a spinner.
 - Preset row: plain `<button>`s, no `<select>`. "Other" opens a numeric
-  `<input inputmode="decimal">`, clamped 1–42 km (10 km outside tiled cities).
+  `<input inputmode="decimal">`, clamped 1–32 km (10 km outside tiled cities; 42 km until 2026-11-19).
 - Candidate view: the selected candidate is drawn via the normal pipeline. The
   "1 of 3 ›" control swaps the waypoint set. "Keep" leaves the pins in place
   and dismisses the control. Undo after Keep removes the generated pins but
@@ -323,7 +323,7 @@ location at the existing 0.005° grid only.
   it."), the welcome card gained "Drop one pin, then tap Loop ▸ for a loop of a set
   distance", a search dropped by a map tap says "Loop search stopped: the pins
   changed.", and a clamped typed distance is named in the flipper label ("The longest
-  loop here is 42 km.") rather than a banner the tile loader overwrote.
+  loop here is 32 km.") rather than a banner the tile loader overwrote.
 - **Generated pins skip `addWaypointAt`:** no `pin-drop` event, one redraw for all.
   Up to 6 pins.
 - **Mode is forced to loop** on generation.
@@ -336,8 +336,12 @@ location at the existing 0.005° grid only.
   a preset.
 - **Measured on a Mac only** (Chrome, Perth start near Kings Park): 5 km in 88 ms,
   21 km in 1.1 s including the extra tiles, JS heap 64 → 163 MB with that ground
-  loaded. **Not measured on a phone**; 42 km (~26 tiles, likely 300 MB+) is the
-  worry. The Web Worker question from PR 1 stays open until a phone says it stutters.
+  loaded.
+- **Phone (Peter's iPhone, Safari, 2026-11-19, stopwatch):** 10 km about 6 s, 21 km "a
+  little longer, honestly not bad", 42 km about 40 s. Chrome with the CPU slowed 6×
+  matches it (38–41 s at 42 km). **Other is capped at 32 km** (Peter, 2026-11-19): 32 km
+  covers a marathon block's longest run, and 42 km gave a 40 s wait for one loop
+  crossing ~15 main roads. The Web Worker question from PR 1 stays open.
 
 ### Main-road crossings (PR 2, Peter 2026-11-19)
 
@@ -649,7 +653,7 @@ is additive; an old Worker 400s the beacon, which the client ignores), then merg
 For Peter: the chip sits under the pill rather than beside it; Discard was added;
 "Loop ▸" next to the "↻ Loop" mode button may confuse (ux), but it's your label;
 4 of 5 first users read "1 of 3 ›" as a pager rather than "next loop" (decision 3);
-mile presets; whether to cap Other below 42 km after a phone test at 21 and 42 km;
+mile presets;
 overlap gating is still open (see Success metrics). Next: PR 3, out-and-back
 (decision 7).
 
